@@ -1,0 +1,114 @@
+{
+  "title": "conectores",
+  "visible_title": "🧩CONECTORES⛓️‍💥",
+  "category": "lex",
+  "level": "B1",
+  "vocab": [
+    {
+      "title": "А теперь поставь каждый коннектор в свою категорию🧩",
+      "link": "https://wordwall.net/ru/embed/1e066384fe5942e7831cf0e9b73ca91c?themeId=50&templateId=2&fontStackId=21"
+    },
+    {
+      "type": "text",
+      "text": "🔗 Коннекторы🧩 - Это слова‑связки, которые организуют мысли, делают тексты чёткими и понятными\n\n\n➕ Добавление\n\nademás / también — кроме того, также ❗️\nincluso / incluyendo — даже, включая \naparte de — помимо этого ❗️\nencima — вдобавок \nno solo..., sino también — не только..., но и 😊\n\n\n 🔢 Порядок / Последовательность⏱️\n\nprimero / en primer lugar — сначала, во‑первых ❗️\nluego / después — потом, затем ❗️\nantes que nada — прежде всего \npor un lado / por otro lado — с одной / с другой стороны \nal mismo tiempo — в то же время \nfinalmente / por último — наконец, в заключение ❗️\npara terminar — чтобы закончить ❗️\n\n\n📝 Объяснение / Перефразирование\n\nes decir / o sea — то есть (другими словами) ✨❗️\nen otras palabras❗️ — другими словами ✨\ndicho de otro modo/manera — иначе говоря ✨\n\n\n 🔄 Противопоставление / Контраст\n\npero — но ❗️\nsin embargo / no obstante — однако, тем не менее ❗️\nen cambio / al contrario — наоборот ❗️\npor el contrario — напротив \na pesar de eso — несмотря на это ❗️\nde todas formas / de cualquier modo — в любом случае \nen realidad — на самом-то деле \naunque — хотя ❗️\n\n\n🔎 Причина\n\nporque — потому что \nya que — так как ❗️\npuesto que / dado que — поскольку \ndebido a — из-за \na causa de — по причине \ngracias a que — благодаря тому что \n\n\n ➡️ Следствие / Результат🏁\n\npor eso / así que — поэтому, так что ❗️\npor lo tanto - поэтому ❗️\nen consecuencia — в результате \nde manera que — таким образом \nentonces — значит ❗️\n\n\n ✅ Итог / Заключение\n\nen resumen / en conclusión — в итоге, в заключение ❗️\nen definitiva — в конечном счёте \nen pocas palabras / brevemente — вкратце ❗️\npara resumir / resumiendo — подытожим \nen fin — в общем ❗️"
+    },
+    {
+      "type": "quiz",
+      "question": "Как переводиться \"ADEMÁS\"",
+      "options": [
+        "кроме этого",
+        "хотя",
+        "несмотря на"
+      ],
+      "correct_answer": "кроме этого",
+      "explanation_correct": "SUPER!👍🏻",
+      "explanation_wrong": "😄",
+      "text": "А теперь внимательно❗️"
+    },
+    {
+      "type": "quiz",
+      "question": "\"так что\" как переводиться, а?🤨",
+      "options": [
+        "однако",
+        "así que",
+        "то есть"
+      ],
+      "correct_answer": "así que",
+      "explanation_correct": "🚀👍🏻⭐️",
+      "explanation_wrong": "así que 🙈"
+    },
+    {
+      "title": "Аря, давай по новой. Ещё раз повторим🔄",
+      "link": "https://wordwall.net/ru/embed/524e32b5c6ab4562872e4d70398e5f4b?themeId=43&templateId=2&fontStackId=0"
+    },
+    {
+      "type": "quiz",
+      "question": "В какой группе \"POR LO TANTO\"❓",
+      "options": [
+        "Выразить последствия",
+        "Подводить итоги",
+        "Противоречить"
+      ],
+      "correct_answer": "Подводить итоги",
+      "explanation_correct": "GOOD!⭐️",
+      "explanation_wrong": "Подводить итоги",
+      "text": "."
+    },
+    {
+      "type": "textquiz",
+      "question": "\"ТО ЕСТЬ\" переводиться \"o s...\"  ✏️",
+      "correct_answer": "o sea"
+    },
+    {
+      "type": "textquiz",
+      "question": "\"ЗНАЧИТ\" переводиться как \"ento…..\"  ✏️",
+      "correct_answer": "entonces"
+    },
+    {
+      "type": "textquiz",
+      "question": "\"в итоге, в заключение\" переводиться как \"en res......\"  ✏️",
+      "correct_answer": "en resumen"
+    },
+    {
+      "type": "photo",
+      "media_type": "photo",
+      "photo": "vocab_images/conectores/vocab_1753719152_ADNgQ.jpg",
+      "text": "На! Сохрани себе 📌"
+    },
+    {
+      "type": "quiz",
+      "question": "en fin",
+      "options": [
+        "так что",
+        "в общем",
+        "значит"
+      ],
+      "correct_answer": "в общем",
+      "explanation_correct": "🍪🥇👌",
+      "explanation_wrong": "в общем😓",
+      "text": "Ну и на последок…"
+    }
+  ],
+  "exercises": [
+    {
+      "title": "НАЗВАНИЕ1",
+      "instruction": "f",
+      "link": "https://wordwall.net/ru/resource/95185813/los-conectores"
+    }
+  ],
+  "videos": [
+    {
+      "title": "sdf",
+      "link": "https://wordwall.net/ru/resource/95185813/los-conectores"
+    }
+  ],
+  "dialogs": [
+    {
+      "title": "rghft",
+      "description": "gyj",
+      "photo": "dialogo/images/dialog_1753719380_ADNgQ.jpg",
+      "exercises": []
+    }
+  ],
+  "required_channel": "@test_es_bot_chanal"
+}
