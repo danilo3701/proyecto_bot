@@ -1,0 +1,63 @@
+{
+  "title": "topic_update",
+  "visible_title": "topic_update",
+  "category": "lex",
+  "vocab": [
+    {
+      "title": "ЗАГОЛОВОК словаря",
+      "link": "https://wordwall.net/embed/36ec2de0234b4608b22acf70ce34680a?themeId=50&templateId=22&fontStackId=0"
+    },
+    {
+      "type": "textquiz",
+      "question": "Quien es?",
+      "correct_answer": "sigma"
+    },
+    {
+      "type": "photo",
+      "media_type": "photo",
+      "photo": "vocab_images/topic_update/vocab_1753362866_ADNgQ.jpg",
+      "text": "🖼 ¨ЭТО фото"
+    },
+    {
+      "type": "textquiz",
+      "question": "Cual es capital de España?",
+      "correct_answer": "madrid"
+    }
+  ],
+  "exercises": [],
+  "videos": [],
+  "dialogs": [],
+  "extra_quiz": [
+    {
+      "question": "Вопрос1",
+      "options": [
+        "Правильный",
+        "Неправильный1",
+        "Неправильный2"
+      ],
+      "correct_answer": "Правильный",
+      "explanation_correct": "Пояснение"
+    },
+    {
+      "question": "Вопрос2",
+      "options": [
+        "Правильный",
+        "Неправильный1",
+        "Неправильный2"
+      ],
+      "correct_answer": "Правильный",
+      "explanation_correct": "Пояснение"
+    },
+    {
+      "question": "Вопрос",
+      "options": [
+        "Правильный",
+        "Неправильный1",
+        "Неправильный2"
+      ],
+      "correct_answer": "Правильный",
+      "explanation_correct": "Пояснение"
+    }
+  ],
+  "required_channel": "@test_es_bot_chanal"
+}

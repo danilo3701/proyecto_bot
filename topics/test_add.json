@@ -1,0 +1,112 @@
+{
+  "title": "test_add",
+  "visible_title": "TEST_ADD",
+  "category": "lex",
+  "vocab": [
+    {
+      "title": "ЗАГОЛОВОК1",
+      "link": "https://wordwall.net/embed/cb5759e1dd6a471ba18f6114fc53fbe4?themeId=65&templateId=5&fontStackId=21"
+    },
+    {
+      "type": "quiz",
+      "question": "Вопрос🤔",
+      "options": [
+        "Неправ2🤷‍♂️",
+        "Неправ1🤷‍♂️",
+        "Правильный❤️"
+      ],
+      "correct_answer": "Правильный❤️",
+      "explanation_correct": "ОбъяснениеПравильного❤️",
+      "explanation_wrong": "ОбъяснениеНеправильного"
+    },
+    {
+      "title": "ЗАГОЛОВОК2",
+      "link": "https://wordwall.net/embed/cb5759e1dd6a471ba18f6114fc53fbe4?themeId=65&templateId=5&fontStackId=21"
+    },
+    {
+      "type": "quiz",
+      "question": "Вопрос⤵️",
+      "options": [
+        "Неправ1❌",
+        "Неправ2❌",
+        "Правильный⭐️"
+      ],
+      "correct_answer": "Правильный⭐️",
+      "explanation_correct": "ОбъяснениеПравильного",
+      "explanation_wrong": "ОбъяснениеНеправильного"
+    },
+    {
+      "type": "text",
+      "text": "💡 Два прошедших времени, но работают по-разному! Если не понимать разницу, можно случайно сказать \"Вчера я всегда ел пиццу\". 🤡\n\n🔥 Запомни быстро:\n\n✅ Indefinido → БАХ! 💥 Событие, точка, конец. (📸 Фото)\n\n✅ Imperfecto → Ла-ла-ла… 🎶 Процесс, фон, привычка. (🎬 Видео)"
+    },
+    {
+      "type": "text",
+      "text": "Что изучаем сегодня:\n\n– Желания (quiero que… ❤️)\n\n– Просьбы (te pido que… 🙋‍♂️)\n\n– Советы (te sugiero que… 💬)\n\n– Приказы (te mando que… 📢)"
+    },
+    {
+      "type": "quiz",
+      "question": "Что означает \"me enfada que\" ?",
+      "options": [
+        "сожалею, что",
+        "меня бесит, что",
+        "меня трогает, что"
+      ],
+      "correct_answer": "меня бесит, что",
+      "explanation_correct": "ОбъяснениеПравильного",
+      "explanation_wrong": "ОбъяснениеНеправильного",
+      "text": "Так, так, давай ещё раз..."
+    },
+    {
+      "type": "text",
+      "text": "### 📊 Разница: Indicativo vs Subjuntivo в относительных предложениях\n\nКогда мы описываем конкретный, уже известный объект, используем Indicativo (Presente).\n\nКогда говорим о чём-то неопределённом, ищем или просто представляем, — Subjuntivo!"
+    },
+    {
+      "type": "quiz",
+      "question": "Когда говорим о чём-то неопределённом, используем...",
+      "options": [
+        "Subjuntivo",
+        "NO LO SË",
+        "Indicativo"
+      ],
+      "correct_answer": "Subjuntivo",
+      "explanation_correct": "ОбъяснениеПравильного",
+      "explanation_wrong": "ОбъяснениеНеправильного"
+    }
+  ],
+  "exercises": [],
+  "videos": [],
+  "dialogs": [],
+  "required_channel": "@test_es_bot_chanal",
+  "extra_quiz": [
+    {
+      "question": "Вопрос_extra1",
+      "options": [
+        "Правильный",
+        "Неправильный1",
+        "Неправильный2"
+      ],
+      "correct_answer": "Правильный",
+      "explanation_correct": "Пояснение"
+    },
+    {
+      "question": "Вопрос_extra2",
+      "options": [
+        "Правильный",
+        "Неправильный1",
+        "Неправильный2"
+      ],
+      "correct_answer": "Правильный",
+      "explanation_correct": "Пояснение"
+    },
+    {
+      "question": "Вопрос_extra3",
+      "options": [
+        "Правильный",
+        "Неправильный1",
+        "Неправильный2"
+      ],
+      "correct_answer": "Правильный",
+      "explanation_correct": "Пояснение"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "930240763": {
+    "name": "Dani",
+    "tg_username": "@Drancherrro",
+    "first_join": 1753567477,
+    "last_active": 1753624687,
+    "total_xp": 71,
+    "by_topic": {
+      "big_test1": 71
+    },
+    "stats": {
+      "words_learned": 0,
+      "exercises_done": 0
+    },
+    "words_learned_week": 4,
+    "words_week_number": 30,
+    "words_learned_month": 4,
+    "words_month_number": 7,
+    "words_learned_today": 4,
+    "words_today_date": "2025-07-27",
+    "words_daily_limit": 12
+  },
+  "7267599701": {
+    "name": "ESPAÑOLingo",
+    "tg_username": "@espanoljuega_bot",
+    "first_join": 1753567485,
+    "last_active": 1753567485,
+    "total_xp": 0,
+    "by_topic": {},
+    "stats": {
+      "words_learned": 0,
+      "exercises_done": 0
+    },
+    "words_learned_week": 0,
+    "words_week_number": 30,
+    "words_learned_month": 0,
+    "words_month_number": 7
+  }
+}
