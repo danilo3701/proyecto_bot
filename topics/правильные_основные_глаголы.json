@@ -1,0 +1,83 @@
+{
+  "title": "правильные_основные_глаголы",
+  "visible_title": "ПРАВИЛЬНЫЕ ОСНОВНЫЕ ГЛАГОЛЫ",
+  "category": "lex",
+  "level": "A0",
+  "vocab": [
+    {
+      "phase_id": 1,
+      "phase_name": "Глаголы действия с объектом",
+      "vocab": [
+        {
+          "type": "text",
+          "text": "🧴 USAR — использовать\n🗑 TIRAR — выбрасывать, бросать\n📁 GUARDAR — сохранить, держать у себя\n🧥 COLGAR — повесить\n🎁 REGALAR — подарить\n🧂 PONER — положить\n✋ QUITAR — убрать, забрать\n🧷 COLOCAR — поставить, разместить\n📦 METER — положить внутрь\n📤 SACAR — достать"
+        },
+        {
+          "title": "Глаголы действия с объектом🍻 (10)",
+          "link": "https://wordwall.net/ru/embed/34880ff795234518836396b6934e19ea?themeId=43&templateId=76&fontStackId=21"
+        },
+        {
+          "title": "ПОСТАВЬ 🖼 СО  СВОИМ ГЛАГОЛОМ",
+          "link": "https://wordwall.net/ru/embed/13c6d7cccb754e9eadd2ea24ff57204a?themeId=44&templateId=3&fontStackId=21"
+        },
+        {
+          "type": "quiz",
+          "question": "КАК ПЕРЕВОДИТЬСЯ \"доставать, вытаскивать\"",
+          "options": [
+            "METER",
+            "TIRAR",
+            "SACAR"
+          ],
+          "correct_answer": "SACAR",
+          "explanation_correct": "✅",
+          "explanation_wrong": "sacar"
+        },
+        {
+          "type": "quiz",
+          "question": "А КАК ПЕРЕВОДИТЬСЯ \"ПОДАРИТЬ\" ? 🙄",
+          "options": [
+            "COLGAR",
+            "REGALAR",
+            "QUITAR"
+          ],
+          "correct_answer": "REGALAR",
+          "explanation_correct": "MUY BIEN!",
+          "explanation_wrong": "REGALAR🙄"
+        },
+        {
+          "title": "✏️ НАПИШИ ГЛАГОЛ. КРОССВОРД",
+          "link": "https://wordwall.net/ru/embed/13f4705201544b52b86f121da543bf8f?themeId=65&templateId=11&fontStackId=21"
+        },
+        {
+          "title": "ЗАКИНЬ ГЛАГОЛ В СВОЙ ВАГОН🛤",
+          "link": "https://wordwall.net/ru/embed/3799ed9ecf124a0d8151873f5264b36e?themeId=22&templateId=71&fontStackId=0"
+        },
+        {
+          "type": "quiz",
+          "question": "🗑 TIRAR",
+          "options": [
+            "положить",
+            "сохранить",
+            "выбрасывать"
+          ],
+          "correct_answer": "выбрасывать",
+          "explanation_correct": "выбрасывать",
+          "explanation_wrong": "muy mal!"
+        },
+        {
+          "type": "textquiz",
+          "question": "КАК ПРЕРВОДИТЬСЯ  \"повесить\" ?",
+          "correct_answer": "colgar"
+        },
+        {
+          "type": "textquiz",
+          "question": "КАК ПРЕРВОДИТЬСЯ  \"достать\" ? 🧐",
+          "correct_answer": "sacar"
+        }
+      ]
+    }
+  ],
+  "exercises": [],
+  "videos": [],
+  "dialogs": []
+}
