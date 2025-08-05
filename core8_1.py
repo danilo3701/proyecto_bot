@@ -8,6 +8,11 @@
 # ——— Standard library ——————————————————————————————————————————————
 import os                           # Работа с файлами и папками
 import json                         # Чтение/запись JSON-топиков
+# ⛔ Проверка отключения бота через переменну
+if os.getenv("DISABLED") == "true":
+    print("🚫 Бот временно отключён.")
+    exit()
+
 import random                       # Рандомизация (CTA-фразы, сценарии, стикеры)
 import asyncio                      # Асинхронные паузы (smart_reply)
 import logging                      # Логирование для отладки
@@ -3777,4 +3782,5 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
