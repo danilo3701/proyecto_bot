@@ -1658,10 +1658,14 @@ def strike(text: str) -> str:
 async def show_phase_menu(message: Message, state: FSMContext):
     data      = await state.get_data()
 
-    # 💬 Ротация рекламы: показываем каждый 3-й вход в «Учить слова»
     count = data.get("phase_entry_count", 0) + 1
     await state.update_data(phase_entry_count=count)
-    if count % 3 == 0:
+
+    # 💬 Если мы только что вернулись из рекламы — не показываем её снова
+    if data.get("just_returned_from_ad"):
+        await state.update_data(just_returned_from_ad=False)  # 💬 сбрасываем флаг и показываем меню дальше
+    else:
+        # 💬 показываем рекламу при каждом входе (раньше — каждый 3-й)
         await state.update_data(pending_phase=True)
         return await send_ad_block(message, state)  # показываем рекламу и ждём инлайн-ответ
 
@@ -2230,9 +2234,9 @@ async def ad_reaction_handler(callback: CallbackQuery, state: FSMContext):
             except:
                 pass
 
-    # 3) Если это был блок перед «Учить слова» — снова в меню фаз
     if data.get("pending_phase"):
-        await state.update_data(pending_phase=False)
+        # 💬 отменяем флаг pending_phase и ставим маркер, что мы только что вернулись из рекламы
+        await state.update_data(pending_phase=False, just_returned_from_ad=True)
         return await show_phase_menu(callback.message, state)
 
     # 4) Иначе — продолжаем словарь
@@ -3780,6 +3784,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
