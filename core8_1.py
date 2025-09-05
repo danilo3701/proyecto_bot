@@ -1717,7 +1717,7 @@ async def start_vocab(message: Message, state: FSMContext):
     # 1) Регистрируем пользователя (имя, время и т.п.)
     await register_or_update_user(message)
     # 2) Дайс-анимация
-    dice_msg = await message.answer_dice('🎲', reply_markup=ReplyKeyboardRemove())
+    dice_msg = await message.answer_dice(reply_markup=ReplyKeyboardRemove())
     await asyncio.sleep(1)
     try: await dice_msg.delete()
     except: pass
@@ -3773,4 +3773,5 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
