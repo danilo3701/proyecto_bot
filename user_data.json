@@ -1,0 +1,53 @@
+{
+  "930240763": {
+    "last_subscription_channel_index": 0,
+    "name": "Dani",
+    "tg_username": "@Drancherrro",
+    "unlocked_topics": [
+      "test37",
+      "_привычки__рутина_"
+    ],
+    "channels": {
+      "@test_es_bot_chanal": [
+        {
+          "subscribed_at": 1754431902,
+          "unsubscribed_at": 1754434078
+        },
+        {
+          "subscribed_at": 1754434084,
+          "unsubscribed_at": 1757079842
+        },
+        {
+          "subscribed_at": 1757079860,
+          "unsubscribed_at": null
+        }
+      ],
+      "@add_espanolingo": [
+        {
+          "subscribed_at": 1754432390,
+          "unsubscribed_at": null
+        }
+      ]
+    },
+    "first_join": 1754431847,
+    "last_active": 1757079835
+  },
+  "7267599701": {
+    "name": "ESPAÑOLingo",
+    "tg_username": "@espanoljuega_bot",
+    "unlocked_topics": [],
+    "channels": {},
+    "last_subscription_channel_index": -1,
+    "first_join": 1754439787,
+    "last_active": 1754874560
+  },
+  "1389017819": {
+    "name": "Alto Contraste",
+    "tg_username": "@altocontraste",
+    "unlocked_topics": [],
+    "channels": {},
+    "last_subscription_channel_index": -1,
+    "first_join": 1754837338,
+    "last_active": 1754837338
+  }
+}
