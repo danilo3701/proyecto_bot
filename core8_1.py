@@ -2076,6 +2076,7 @@ async def send_one_vocab(message: Message, state: FSMContext):
     # 💬 Показываем случайную текстовую подсказку и удаляем через 3 сек (НЕ ждём)
     asyncio.create_task(send_and_auto_delete_random_text(bot, chat_id, LINK_HINT_TEXTS, delay=3))
 
+    await asyncio.sleep(3)  # 💬 даём 1 cек задержки перед появлением ссылки
 
     cta   = random.choice(link_cta_phrases)
     link_kb = InlineKeyboardMarkup(
@@ -2095,6 +2096,9 @@ async def send_one_vocab(message: Message, state: FSMContext):
     chat_id = message.chat.id if hasattr(message, 'chat') else message.id
     blank = await bot.send_message(chat_id, '\u00AD', reply_markup=ReplyKeyboardRemove())
     await blank.delete()
+
+
+    await asyncio.sleep(2)  # 💬 ещё 2 cек задержки перед кнопками Confirm Done
 
     '''
 
@@ -2122,19 +2126,22 @@ async def send_one_vocab(message: Message, state: FSMContext):
     '''
    
 
-    # 💬 Inline Confirm Done
-    scene = random.choice(scenarios["confirm_done"])
+    # 💬 Inline Confirm Done (появится через 2 сек после ссылки)
+    scene = random.choice(scenarios["confirm_done"])     # 💬 что показать
     await state.update_data(current_stage="confirm_done", current_scene=scene)
     await state.set_state(LessonStates.showing_vocab)
+
     # 💬 Inline-кнопки “Подтвердить выполнение” в одну строку
     inline_kb = InlineKeyboardMarkup(
-        inline_keyboard=[[
+        inline_keyboard=[[  # 💬 две кнопки бок о бок
             InlineKeyboardButton(text=btn, callback_data=f"confirm_done:{btn}")
             for btn in scene["buttons"]
         ]]
     )
+
     chat_id = message.chat.id if hasattr(message, 'chat') else (await state.get_data())["last_chat_id"]
-    return await bot.send_message(chat_id, scene["text"], reply_markup=inline_kb)
+    return await bot.send_message(chat_id, scene["text"], reply_markup=inline_kb)  # 💬 отправляем кнопки
+
 
 
 @track_handler
@@ -3773,5 +3780,6 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
