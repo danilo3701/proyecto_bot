@@ -3007,15 +3007,17 @@ async def handle_vocab_photo_continue_cb(cb: CallbackQuery, state: FSMContext):
         await cb.message.answer(reaction)
         await asyncio.sleep(1.5)  # ⏳ Задержка, чтобы пользователь увидел реакцию
 
-   # 2. Переход к следующему слову (с проверкой на опциональный квиз)
+   # 2. Переход к следующему слову (с корректным управлением индексом)
     if reply_cfg.get("next") == "next_item":
-       # Если у текущего блока после фото есть свой quiz — показываем его
-       block = get_vocab_list(data)[data["vocab_index"]]
-       if block.get("quiz"):
-           return await send_optional_vocab_quiz(cb.message, state)
-       # Иначе просто инкремент и следующий элемент
-       return await proceed_to_next(cb.message, state)
-# 💬 Теперь бот ждет 1.5 сек после реакции на фото, всё видно как надо!
+        # 💬 вычисляем индекс следующего элемента и сохраняем его в state
+        curr_idx = data.get("vocab_index", 0)
+        next_idx = curr_idx + 1
+        await state.update_data(vocab_index=next_idx)
+
+        # 💬 теперь передаём управление в общий send_one_vocab — он корректно обработает
+        # 💬 любой тип блока (quiz, textquiz, photo, link и т.д.) и установит нужные состояния
+        return await send_one_vocab(cb.message, state)
+
 
 
 
@@ -3784,6 +3786,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
