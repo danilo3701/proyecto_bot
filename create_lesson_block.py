@@ -5,7 +5,6 @@ import os
 import uuid  # 💬 Для генерации уникальных имён файлов
 import re
 import logging  # 💬 для логирования в receive_ad_source
-import base64, requests  # 💬 для загрузки файлов в GitHub (используется github_put_file)
 
 from pathlib import Path
 
@@ -2147,6 +2146,7 @@ async def save_ad_block(message: Message, state: FSMContext):
     await message.answer("✅ Реклама добавлена!\n\n📂 Выбери КАТЕГОРИЮ темы:", reply_markup=keyboard)
     await state.set_state(NewTopicStates.waiting_category)
     # 💬 После добавления рекламы — возвращаемся в главное меню тем
+
 
 
 
