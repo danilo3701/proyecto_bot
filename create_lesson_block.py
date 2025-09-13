@@ -75,7 +75,8 @@ def github_put_file(local_path: str, repo_path: str, commit_message: str):
 
     # пытаемся получить существующий файл, чтобы взять sha (если есть)
     try:
-        r_get = requests.get(api_url, headers=headers, params={"ref": braave_ads_data(ads
+        r_get = requests.get(api_url, headers=headers, params={"ref": branch}, timeout=15)
+                                                                                      
             sha = r_get.json().get("sha")
         else:
             sha = None
@@ -2109,6 +2110,7 @@ async def save_ad_block(message: Message, state: FSMContext):
     await message.answer("✅ Реклама добавлена!\n\n📂 Выбери КАТЕГОРИЮ темы:", reply_markup=keyboard)
     await state.set_state(NewTopicStates.waiting_category)
     # 💬 После добавления рекламы — возвращаемся в главное меню тем
+
 
 
 
