@@ -52,7 +52,7 @@ def github_put_file(local_path: str, repo_path: str, commit_message: str):
         return False, "no_token"
 
     owner = os.environ.get("GITHUB_OWNER")
-    repo  = os.environ.get("GITHUB_REPO")
+    repo = os.environ.get("GITHUB_REPO")
     branch = os.environ.get("GITHUB_BRANCH", "main")
 
     if not owner or not repo:
@@ -74,10 +74,15 @@ def github_put_file(local_path: str, repo_path: str, commit_message: str):
     }
 
     # пытаемся получить существующий файл, чтобы взять sha (если есть)
+    sha = None
     try:
         r_get = requests.get(api_url, headers=headers, params={"ref": branch}, timeout=15)
-                                                                                      
-            sha = r_get.json().get("sha")
+        if r_get.status_code == 200:
+            # Полезно защититься — иногда ответ не JSON
+            try:
+                sha = r_get.json().get("sha")
+            except Exception:
+                sha = None
         else:
             sha = None
     except Exception as e:
@@ -2110,6 +2115,7 @@ async def save_ad_block(message: Message, state: FSMContext):
     await message.answer("✅ Реклама добавлена!\n\n📂 Выбери КАТЕГОРИЮ темы:", reply_markup=keyboard)
     await state.set_state(NewTopicStates.waiting_category)
     # 💬 После добавления рекламы — возвращаемся в главное меню тем
+
 
 
 
