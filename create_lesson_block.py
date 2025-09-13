@@ -49,6 +49,16 @@ def save_ads_data(data):
     with open(ADS_DATA_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+try:
+    import requests
+except Exception:
+    requests = None
+    logging.warning("requests not installed — github_put_file will be disabled")
+
+# 💬 Базовые импорты: безопасный импорт requests (если нет — отключаем функционал GitHub)
+import base64
+import logging
+
 def github_put_file(local_path: str, repo_path: str, commit_message: str):
     """
     💬 Upload or update a file to GitHub via REST API.
@@ -2137,6 +2147,7 @@ async def save_ad_block(message: Message, state: FSMContext):
     await message.answer("✅ Реклама добавлена!\n\n📂 Выбери КАТЕГОРИЮ темы:", reply_markup=keyboard)
     await state.set_state(NewTopicStates.waiting_category)
     # 💬 После добавления рекламы — возвращаемся в главное меню тем
+
 
 
 
