@@ -1,0 +1,351 @@
+{
+  "title": "основные_глаголы_действия",
+  "visible_title": "🚀ОСНОВНЫЕ ГЛАГОЛЫ ДЕЙСТВИЯ🎲",
+  "description": "📚 В этой теме ты научишься…\n\nЧасто использовать глаголы действия\n\nСочетать их с предметами\n\nПросить и платить — без паники",
+  "category": "lex",
+  "level": "A0",
+  "vocab": [
+    {
+      "phase_id": 1,
+      "phase_name": "📦 PACK: «Действия и предметы»",
+      "vocab": [
+        {
+          "title": "🧩 СОЕДИНИ перевод",
+          "link": "https://wordwall.net/es/embed/aaad7535e8ef45bcbc3b5fc0a84a2841?themeId=2&templateId=3&fontStackId=21"
+        },
+        {
+          "title": "🧩 СОЕДИНИ ФРАЗЫ 🎭",
+          "link": "https://wordwall.net/es/embed/f7472707ac26431cb353fbdf99c47eef?themeId=44&templateId=3&fontStackId=0"
+        },
+        {
+          "title": "🖼 ФРАЗА → FOTO",
+          "link": "https://wordwall.net/es/embed/399139eb91194971a29720bb5f36ba6e?themeId=2&templateId=46&fontStackId=0"
+        },
+        {
+          "title": "📘 СУЩЕСТВИТЕЛЬНЫЕ ПО ОПИСАНИЮ 🎯",
+          "link": "https://wordwall.net/es/embed/804bceee4c9d4562941822b71e07dc3c?themeId=65&templateId=11&fontStackId=0"
+        },
+        {
+          "title": "🧩 СОЕДИНИ ФРАЗЫ 🎭",
+          "link": "https://wordwall.net/es/embed/8a53717f52d24025b127107509b96543?themeId=50&templateId=3&fontStackId=21"
+        },
+        {
+          "title": "✏️ FILL-IN COMBO 🎯",
+          "link": "https://wordwall.net/es/embed/a3d8548d70ae4a60a8338ffe8ae7fe2c?themeId=44&templateId=5&fontStackId=0"
+        },
+        {
+          "title": "🧩 ORDERING",
+          "link": "https://wordwall.net/es/embed/0a73f3766f2743ddbbfd4f2b9cf565e3?themeId=44&templateId=72&fontStackId=0"
+        }
+      ],
+      "textquiz_pool": [
+        {
+          "type": "textquiz",
+          "question": "Как будет «суп»? 🍲",
+          "correct_answer": "sopa"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «счёт»? 🧾",
+          "correct_answer": "cuenta"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «карточка (банковская)»? 💳",
+          "correct_answer": "tarjeta"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «тарелка/блюдо»? 🍽",
+          "correct_answer": "plato"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «вода»? 💧",
+          "correct_answer": "agua"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «книга»? 📖",
+          "correct_answer": "libro"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как сказать «заказывать»? 🍽",
+          "correct_answer": "pedir"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как сказать «приносить»? 🧾",
+          "correct_answer": "traer"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как сказать «платить»? 💳",
+          "correct_answer": "pagar"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как сказать «подавать»? 🍽",
+          "correct_answer": "servir"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как сказать «пить»? 💧",
+          "correct_answer": "beber"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как сказать «читать»? 📖",
+          "correct_answer": "leer"
+        }
+      ],
+      "quiz_pool": [
+        {
+          "type": "quiz",
+          "question": "Какой предмет подходит к глаголу «servir»? 🍽",
+          "options": [
+            "plato",
+            "agua",
+            "libro"
+          ],
+          "correct_answer": "plato",
+          "explanation_wrong": "Да: servir el plato."
+        },
+        {
+          "type": "quiz",
+          "question": "Вставь пропуск: «Pago con __». 💳",
+          "options": [
+            "tarjeta",
+            "cuenta",
+            "sopa"
+          ],
+          "correct_answer": "tarjeta",
+          "explanation_wrong": "Верно: con tarjeta."
+        },
+        {
+          "type": "quiz",
+          "question": "Что такое «libro»? 📖",
+          "options": [
+            "книга",
+            "вилка",
+            "счёт"
+          ],
+          "correct_answer": "книга",
+          "explanation_wrong": "Верно: libro = «книга»."
+        },
+        {
+          "type": "quiz",
+          "question": "Как переводится «sopa»? 🍲",
+          "options": [
+            "суп",
+            "тарелка",
+            "вода"
+          ],
+          "correct_answer": "суп",
+          "explanation_wrong": "Верно: sopa = «суп»."
+        },
+        {
+          "type": "quiz",
+          "question": "Как переводится «cuenta»? 🧾",
+          "options": [
+            "счёт",
+            "подарок",
+            "вечеринка"
+          ],
+          "correct_answer": "счёт",
+          "explanation_wrong": "Да, cuenta = «счёт»."
+        }
+      ]
+    },
+    {
+      "phase_id": 2,
+      "phase_name": "📦 PACK: «Действия повседневные»",
+      "vocab": [
+        {
+          "type": "text",
+          "text": "Посмотри, что мы выучим в этом паке 👇\n\n🔹 Глаголы\n\n🔑 abrir — открывать\n\n🚪 cerrar — закрывать\n\n✍️ escribir — писать\n\n🛒 comprar — покупать\n\n🎒 llevar — носить, нести\n\n🍳 cocinar — готовить\n\n🔹 Существительные\n\n🚪 puerta — дверь\n\n🪟 ventana — окно\n\n💌 carta — письмо\n\n🥖 pan — хлеб\n\n🛍 bolsa — сумка\n\n🍲 comida — еда"
+        },
+        {
+          "title": "🧩 СОЕДИНИ слово и перевод",
+          "link": "https://wordwall.net/es/embed/882935b52a354764904f2ad79b8b8fdc?themeId=65&templateId=3&fontStackId=0"
+        },
+        {
+          "title": "🧩 СОЕДИНИ ФРАЗЫ 🎭",
+          "link": "https://wordwall.net/es/embed/08d34eebe5324045855a4e08152dfeca?themeId=44&templateId=3&fontStackId=0"
+        },
+        {
+          "title": "🖼 ФРАЗА → РИСУНОК 🙂",
+          "link": "https://wordwall.net/es/embed/347db9e2be574e20955e16adae54ad4c?themeId=65&templateId=46&fontStackId=0"
+        },
+        {
+          "title": "🧠 QUIZ VERBS 🎯",
+          "link": "https://wordwall.net/es/embed/daffc3115f284cb098a3f261ff405b48?themeId=49&templateId=5&fontStackId=0"
+        },
+        {
+          "title": "🧩 СОЕДИНИ ФРАЗЫ 🎭",
+          "link": "https://wordwall.net/es/embed/b365a40c1e984e8da69e84b79668915b?themeId=2&templateId=25&fontStackId=0"
+        },
+        {
+          "title": "Слова перепутались — собери их правильно ✨",
+          "link": "https://wordwall.net/es/embed/bd57f2898cd54262a633559596fff1ca?themeId=2&templateId=72&fontStackId=0"
+        }
+      ],
+      "textquiz_pool": [
+        {
+          "type": "textquiz",
+          "question": "Как будет «открывать»? 🚪",
+          "correct_answer": "abrir"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «закрывать»? 🪟",
+          "correct_answer": "cerrar"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «писать»? ✍️",
+          "correct_answer": "escribir"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «покупать»? 🛒",
+          "correct_answer": "comprar"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «носить/нести»? 🎒",
+          "correct_answer": "llevar"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «готовить»? 🍲",
+          "correct_answer": "cocinar"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «дверь»? 🚪",
+          "correct_answer": "puerta"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «окно»? 🪟",
+          "correct_answer": "ventana"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «письмо»? 💌",
+          "correct_answer": "carta"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «хлеб»? 🥖",
+          "correct_answer": "pan"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «сумка»? 🛍",
+          "correct_answer": "bolsa"
+        },
+        {
+          "type": "textquiz",
+          "question": "Как будет «еда»? 🍲",
+          "correct_answer": "comida"
+        }
+      ],
+      "quiz_pool": [
+        {
+          "type": "quiz",
+          "question": "Что значит «abrir»? 🚪",
+          "options": [
+            "открывать",
+            "закрывать",
+            "писать"
+          ],
+          "correct_answer": "открывать",
+          "explanation_wrong": "Верно: abrir = открывать."
+        },
+        {
+          "type": "quiz",
+          "question": "Что значит «cerrar»? 🪟",
+          "options": [
+            "закрывать",
+            "открывать",
+            "готовить"
+          ],
+          "correct_answer": "закрывать",
+          "explanation_wrong": "Верно: cerrar = закрывать."
+        },
+        {
+          "type": "quiz",
+          "question": "Что значит «escribir»? ✍️",
+          "options": [
+            "писать",
+            "читать",
+            "покупать"
+          ],
+          "correct_answer": "писать",
+          "explanation_wrong": "Правильно: escribir = писать."
+        },
+        {
+          "type": "quiz",
+          "question": "Что значит «comprar»? 🛒",
+          "options": [
+            "покупать",
+            "носить",
+            "готовить"
+          ],
+          "correct_answer": "покупать",
+          "explanation_wrong": "Да, comprar = покупать."
+        },
+        {
+          "type": "quiz",
+          "question": "Как переводится «puerta»? 🚪",
+          "options": [
+            "дверь",
+            "окно",
+            "стол"
+          ],
+          "correct_answer": "дверь",
+          "explanation_wrong": "Верно: puerta = дверь."
+        },
+        {
+          "type": "quiz",
+          "question": "Как переводится «ventana»? 🪟",
+          "options": [
+            "окно",
+            "дверь",
+            "сумка"
+          ],
+          "correct_answer": "окно",
+          "explanation_wrong": "Правильно: ventana = окно."
+        },
+        {
+          "type": "quiz",
+          "question": "Как переводится «carta»? 💌",
+          "options": [
+            "письмо",
+            "книга",
+            "счёт"
+          ],
+          "correct_answer": "письмо",
+          "explanation_wrong": "Да, carta = письмо."
+        },
+        {
+          "type": "quiz",
+          "question": "Как переводится «pan»? 🥖",
+          "options": [
+            "хлеб",
+            "суп",
+            "вино"
+          ],
+          "correct_answer": "хлеб",
+          "explanation_wrong": "Верно: pan = хлеб."
+        }
+      ]
+    }
+  ],
+  "exercises": [],
+  "videos": [],
+  "dialogs": []
+}
