@@ -631,7 +631,7 @@ async def is_refusal_video(message: Message, state: FSMContext) -> bool:
 
 
 # ────────────────────────────────────────────────────────────────────────────────
-# 🏷 ФИЛЬТРЫ ПО CURRENT_STAGE для «🙊Читать диалог»
+# 🏷 ФИЛЬТРЫ ПО CURRENT_STAGE для «🙊Читать »
 # ────────────────────────────────────────────────────────────────────────────────
 
 async def is_before_dialog(message: Message, state: FSMContext) -> bool:
@@ -1547,7 +1547,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         f"<b><i>📖 Словарь:</i></b>    {stars}   {completed_phases}/{total_phases}\n"
         f"<b><i>🎲 Упражнения:</i></b> {ex_stars}   {done_ex_link}/{total_ex_link}\n"
         f"<b><i>🎬 Видео:</i></b>      {video_stars}   {dv_idx}/{total_video}\n"
-        f"<b><i>🙊 Диалоги:</i></b>    {dlg_stars}   {done_dlg}/{total_dlg}"
+        f"<b><i>🙊 Читать:</i></b>    {dlg_stars}   {done_dlg}/{total_dlg}"
     )
 
     # 3) Если ещё не разблокировано — строка «Набери минимум display_threshold»
@@ -1576,13 +1576,13 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         buttons.append([
             KeyboardButton(text="🎲 Упражнения"),
             KeyboardButton(text="🎬 Видео"),
-            KeyboardButton(text="🙊 Диалоги"),
+            KeyboardButton(text="🙊 Читать"),
         ])
     else:
         buttons.append([
             KeyboardButton(text="🔒 Упражнения"),
             KeyboardButton(text="🔒 Видео"),
-            KeyboardButton(text="🔒 Диалоги"),
+            KeyboardButton(text="🔒 Читать"),
         ])
     buttons.append([KeyboardButton(text="🔄 Сменить тему")])
     keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
@@ -3834,6 +3834,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
