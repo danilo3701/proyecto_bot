@@ -2054,9 +2054,13 @@ async def send_one_vocab(message: Message, state: FSMContext):
 
     # — TextQuiz —
     if btype == "textquiz":
-        msg = await smart_reply(message, block["question"], reply_markup=ReplyKeyboardRemove())
+        # 🔽 поддержка \n в JSON как переноса строки
+        q = block.get("question", "")
+        q = q.replace("\\n", "\n")
+    
+        msg = await smart_reply(message, q, reply_markup=ReplyKeyboardRemove())
         await state.update_data(last_prompt_id=msg.message_id)
-        
+    
         # 💬 Показываем смайлик ✍️ на 1 секунду, авто-удаляем (НЕ ждем)
         asyncio.create_task(send_and_auto_delete_text(
             bot,
@@ -2064,6 +2068,9 @@ async def send_one_vocab(message: Message, state: FSMContext):
             "✍️",
             delay=1
         ))
+
+    return await state.set_state(LessonStates.vocab_textquiz)
+
 
         return await state.set_state(LessonStates.vocab_textquiz)
         # 💬 Теперь после вопроса появляется ✍️ на 1 сек.
@@ -2286,13 +2293,15 @@ async def send_failed_vocab(chat_id: int, state: FSMContext):
 
     # ——— Повтор текст-квиза и запоминаем ID сообщения для удаления
     if block.get("type") == "textquiz":
-        # 1) отправляем вопрос
-        sent = await bot.send_message(chat_id, block["question"])
+        # 1) отправляем вопрос c поддержкой \n
+        q = block.get("question", "").replace("\\n", "\n")
+        sent = await bot.send_message(chat_id, q)
         # 2) сохраняем его message_id, чтобы потом удалить вместе с фидбэком
         await state.update_data(last_failed_textquiz_message_id=sent.message_id)
         # 3) переводим FSM в ревью-состояние
         await state.set_state(LessonStates.review_failed_textquiz)
         return
+
 
 
     # ——— Повтор встроенного quiz и запоминаем message_id для удаления
@@ -3834,6 +3843,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
