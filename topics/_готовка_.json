@@ -1,0 +1,862 @@
+{
+  "title": "_готовка_",
+  "visible_title": "🧑🏼‍🍳 ГОТОВКА 🔪",
+  "description": "В этой теме ты научишься:\n— описывать технологические этапы приготовления на испанском 😋",
+  "category": "lex",
+  "level": "B1-B2",
+  "vocab": [
+    {
+      "phase_id": 1,
+      "phase_name": "🥥 ДЕЙСТВИЯ С ЕДОЙ 🔪",
+      "vocab": [
+        {
+          "type": "text",
+          "text": "🔎 ВЗГЛЯНИ НА ФРАЗЫ\n🧐 Сейчас будем их смаковать 🤌\n\n<b>MARINAR LA CARNE</b> 👉 <b>мариновать</b> мясо\n\n<b>RALLAR EL QUESO</b> 👉 <b>тереть</b> сыр\n\n<b>TRITURAR LOS INGREDIENTES</b> 👉 <b>измельчать</b> ингредиенты\n\n<b>PICAR LA CEBOLLA</b> 👉 <b>рубить</b> лук\n\n<b>DEJAR REPOSAR LA MEZCLA</b> 👉 <b>дать смеси настояться</b>\n\n<b>ESCURRIR LA PASTA</b> 👉 <b>отцедить</b> пасту"
+        },
+        {
+          "title": "🔗 CОПОСТАВИТЬ",
+          "link": "https://wordwall.net/ru/embed/165ef7ac7f22431485d33b94ea0de9cf?themeId=2&templateId=3&fontStackId=21"
+        }
+      ],
+      "quiz_pool": [
+        {
+          "type": "quiz",
+          "question": "<b>marinar la carne 🍖</b>",
+          "options": [
+            "мариновать мясо",
+            "приправлять мясо",
+            "жарить мясо"
+          ],
+          "correct_answer": "мариновать мясо",
+          "explanation_wrong": "мариновать мясо"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>rallar el queso 🧀</b>",
+          "options": [
+            "тереть сыр",
+            "резать сыр",
+            "плавить сыр"
+          ],
+          "correct_answer": "тереть сыр",
+          "explanation_wrong": "тереть сыр"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>triturar los ingredientes 🥣</b>",
+          "options": [
+            "измельчать ингредиенты",
+            "смешивать ингредиенты",
+            "варить ингредиенты"
+          ],
+          "correct_answer": "измельчать ингредиенты",
+          "explanation_wrong": "измельчать ингредиенты"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>picar la cebolla 🧅</b>",
+          "options": [
+            "рубить лук",
+            "резать лук",
+            "очищать лук"
+          ],
+          "correct_answer": "рубить лук",
+          "explanation_wrong": "рубить лук"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>dejar reposar la mezcla</b>",
+          "options": [
+            "дать смеси настояться",
+            "перемешать смесь",
+            "нагреть смесь"
+          ],
+          "correct_answer": "дать смеси настояться",
+          "explanation_wrong": "дать смеси настояться"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>escurrir la pasta 🍝</b>",
+          "options": [
+            "отцедить пасту",
+            "варить пасту",
+            "промыть пасту"
+          ],
+          "correct_answer": "отцедить пасту",
+          "explanation_wrong": "отцедить пасту"
+        },
+        {
+          "type": "quiz",
+          "question": "мясо → <b>la ___NE</b> 🍖",
+          "options": [
+            "CAR",
+            "MAR",
+            "PAR"
+          ],
+          "correct_answer": "CAR",
+          "explanation_wrong": "CARNE"
+        },
+        {
+          "type": "quiz",
+          "question": "сыр → <b>el ___ESO</b> 🧀",
+          "options": [
+            "QUE",
+            "QUA",
+            "QUI"
+          ],
+          "correct_answer": "QUE",
+          "explanation_wrong": "QUESO"
+        },
+        {
+          "type": "quiz",
+          "question": "ингредиенты → <b>los ___REDIENTES</b> 🥣",
+          "options": [
+            "ING",
+            "ENG",
+            "ONG"
+          ],
+          "correct_answer": "ING",
+          "explanation_wrong": "INGREDIENTES"
+        },
+        {
+          "type": "quiz",
+          "question": "лук → <b>la ___BOLLA</b> 🧅",
+          "options": [
+            "CE",
+            "CI",
+            "CA"
+          ],
+          "correct_answer": "CE",
+          "explanation_wrong": "CEBOLLA"
+        },
+        {
+          "type": "quiz",
+          "question": "смесь → <b>la ___EZCLA</b>",
+          "options": [
+            "ME",
+            "MA",
+            "MI"
+          ],
+          "correct_answer": "ME",
+          "explanation_wrong": "MEZCLA"
+        },
+        {
+          "type": "quiz",
+          "question": "паста → <b>la ___ASTA</b> 🍝",
+          "options": [
+            "PA",
+            "PO",
+            "PU"
+          ],
+          "correct_answer": "PA",
+          "explanation_wrong": "PASTA"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>МАРИНОВАТЬ</b> мясо\\n👉 ___ la carne 🍖",
+          "options": [
+            "MARINAR",
+            "SAZONAR",
+            "MARCAR"
+          ],
+          "correct_answer": "MARINAR",
+          "explanation_wrong": "MARINAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ТЕРЕТЬ</b> сыр\\n👉 ___ el queso 🧀",
+          "options": [
+            "RALLAR",
+            "RAYAR",
+            "RELLENAR"
+          ],
+          "correct_answer": "RALLAR",
+          "explanation_wrong": "RALLAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ИЗМЕЛЬЧАТЬ</b> ингредиенты\\n👉 ___ los ingredientes 🥣",
+          "options": [
+            "TRITURAR",
+            "MEZCLAR",
+            "MACHUCAR"
+          ],
+          "correct_answer": "TRITURAR",
+          "explanation_wrong": "TRITURAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>РУБИТЬ</b> лук\\n👉 ___ la cebolla 🧅",
+          "options": [
+            "PICAR",
+            "CORTAR",
+            "PELAR"
+          ],
+          "correct_answer": "PICAR",
+          "explanation_wrong": "PICAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ДАТЬ СМЕСИ НАСТОЯТЬСЯ</b>\\n👉 ___ la mezcla",
+          "options": [
+            "DEJAR REPOSAR",
+            "AGITAR",
+            "CALENTAR"
+          ],
+          "correct_answer": "DEJAR REPOSAR",
+          "explanation_wrong": "DEJAR REPOSAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ОТЦЕДИТЬ</b> пасту\\n👉 ___ la pasta 🍝",
+          "options": [
+            "ESCURRIR",
+            "COCER",
+            "LAVAR"
+          ],
+          "correct_answer": "ESCURRIR",
+          "explanation_wrong": "ESCURRIR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>МАРИНОВАТЬ</b> мясо\\n→ <b>___INAR</b> carne🍖",
+          "options": [
+            "MAR",
+            "SAR",
+            "PAR"
+          ],
+          "correct_answer": "MAR",
+          "explanation_wrong": "MARINAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ТЕРЕТЬ</b> сыр\\n→ <b>___LLAR</b> queso🧀",
+          "options": [
+            "RAL",
+            "RIL",
+            "ROL"
+          ],
+          "correct_answer": "RAL",
+          "explanation_wrong": "RALLAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ИЗМЕЛЬЧАТЬ</b> ингредиенты\\n→ <b>___TURAR</b> ingredientes🥣",
+          "options": [
+            "TRI",
+            "TRA",
+            "TRO"
+          ],
+          "correct_answer": "TRI",
+          "explanation_wrong": "TRITURAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>РУБИТЬ</b> лук\\n→ <b>___CAR</b> cebolla🧅",
+          "options": [
+            "PI",
+            "PA",
+            "PO"
+          ],
+          "correct_answer": "PI",
+          "explanation_wrong": "PICAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ДАТЬ</b> смесь\\n→ <b>___JAR REPOSAR</b> la mezcla",
+          "options": [
+            "DEJ",
+            "DEG",
+            "DER"
+          ],
+          "correct_answer": "DEJ",
+          "explanation_wrong": "DEJAR REPOSAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ОТЦЕДИТЬ</b> пасту\\n→ <b>___CURRIR</b> pasta🍝",
+          "options": [
+            "ESC",
+            "ISC",
+            "ASC"
+          ],
+          "correct_answer": "ESC",
+          "explanation_wrong": "ESCURRIR"
+        }
+      ],
+      "textquiz_pool": [
+        {
+          "type": "textquiz",
+          "question": "Мариновать мясо\\n👉 [[MARINAR LA]] _____ 🍖",
+          "correct_answer": "carne"
+        },
+        {
+          "type": "textquiz",
+          "question": "Тереть сыр\\n👉 [[RALLAR EL]] ____ 🧀",
+          "correct_answer": "queso"
+        },
+        {
+          "type": "textquiz",
+          "question": "Измельчать ингредиенты\\n👉 [[TRITURAR LOS]] __________ 🥣",
+          "correct_answer": "ingredientes"
+        },
+        {
+          "type": "textquiz",
+          "question": "Рубить лук\\n👉 [[PICAR LA]] ______ 🧅",
+          "correct_answer": "cebolla"
+        },
+        {
+          "type": "textquiz",
+          "question": "Дать смеси настояться\\n👉 [[DEJAR REPOSAR LA]] _______",
+          "correct_answer": "mezcla"
+        },
+        {
+          "type": "textquiz",
+          "question": "Отцедить пасту\\n👉 [[ESCURRIR LA]] ____ 🍝",
+          "correct_answer": "pasta"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>МАРИНОВАТЬ</b>\\n👉 ___ la carne 🍖",
+          "correct_answer": "marinar"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ТЕРЕТЬ</b>\\n👉 ___ el queso 🧀",
+          "correct_answer": "rallar"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ИЗМЕЛЬЧАТЬ</b>\\n👉 ___ los ingredientes 🥣",
+          "correct_answer": "triturar"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>РУБИТЬ</b>\\n👉 ___ la cebolla 🧅",
+          "correct_answer": "picar"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ДАТЬ НАСТОЯТЬСЯ</b>\\n👉 ___ la mezcla",
+          "correct_answer": "dejar"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ОТЦЕДИТЬ</b>\\n👉 ___ la pasta 🍝",
+          "correct_answer": "escurrir"
+        }
+      ]
+    },
+    {
+      "phase_id": 2,
+      "phase_name": "🍷 ТЕХНИКИ ГОТОВКИ 🥘",
+      "vocab": [
+        {
+          "type": "text",
+          "text": "🔎 ВЗГЛЯНИ НА ФРАЗЫ\n🧐 Сейчас будем их смаковать 🤌\n\n<b>FREIR HUEVOS</b> 👉 <b>жарить</b> яйца 🥚\n\n<b>MEZCLAR INGREDIENTES</b> 👉 <b>смешивать</b> ингредиенты 🥣\n\n<b>ENCENDER LA COCINA</b> 👉 <b>включать</b> плиту 🔥\n\n<b>HORNEAR PAN</b> 👉 <b>печь</b> хлеб 🥖\n\n<b>GUARDAR COMIDA</b> 👉 <b>хранить</b> еду 🍲\n\n<b>RALLAR EL QUESO</b> 👉 <b>тереть</b> сыр 🧀"
+        },
+        {
+          "title": "🔗 MATCHING",
+          "link": "https://wordwall.net/ru/embed/4a0d5a8e1d47431f866215b1142b7442?themeId=43&templateId=3&fontStackId=0"
+        }
+      ],
+      "quiz_pool": [
+        {
+          "type": "quiz",
+          "question": "<b>freir huevos 🥚</b>",
+          "options": [
+            "жарить яйца",
+            "взбивать яйца",
+            "печь хлеб"
+          ],
+          "correct_answer": "жарить яйца",
+          "explanation_wrong": "жарить яйца"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>mezclar ingredientes 🥣</b>",
+          "options": [
+            "смешивать ингредиенты",
+            "мешать тесто",
+            "отваривать ингредиенты"
+          ],
+          "correct_answer": "смешивать ингредиенты",
+          "explanation_wrong": "смешивать ингредиенты"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>encender la cocina 🔥</b>",
+          "options": [
+            "включать плиту",
+            "выключать духовку",
+            "мыть плиту"
+          ],
+          "correct_answer": "включать плиту",
+          "explanation_wrong": "включать плиту"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>hornear pan 🥖</b>",
+          "options": [
+            "печь хлеб",
+            "жарить хлеб",
+            "разрезать хлеб"
+          ],
+          "correct_answer": "печь хлеб",
+          "explanation_wrong": "печь хлеб"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>guardar comida 🍲</b>",
+          "options": [
+            "хранить еду",
+            "выбрасывать еду",
+            "есть еду"
+          ],
+          "correct_answer": "хранить еду",
+          "explanation_wrong": "хранить еду"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>rallar el queso 🧀</b>",
+          "options": [
+            "тереть сыр",
+            "плавить сыр",
+            "резать сыр"
+          ],
+          "correct_answer": "тереть сыр",
+          "explanation_wrong": "тереть сыр"
+        },
+        {
+          "type": "quiz",
+          "question": "яйца → <b>los ___EVOS</b> 🥚",
+          "options": [
+            "HUE",
+            "HUEV",
+            "HUA"
+          ],
+          "correct_answer": "HUE",
+          "explanation_wrong": "HUEVOS"
+        },
+        {
+          "type": "quiz",
+          "question": "ингредиенты → <b>los ___REDIENTES</b> 🥣",
+          "options": [
+            "ING",
+            "IND",
+            "INGRE"
+          ],
+          "correct_answer": "ING",
+          "explanation_wrong": "INGREDIENTES"
+        },
+        {
+          "type": "quiz",
+          "question": "плита → <b>la ___OCINA</b> 🔥",
+          "options": [
+            "CO",
+            "CA",
+            "CU"
+          ],
+          "correct_answer": "CO",
+          "explanation_wrong": "COCINA"
+        },
+        {
+          "type": "quiz",
+          "question": "хлеб → <b>el ___AN</b> 🥖",
+          "options": [
+            "PA",
+            "PE",
+            "PI"
+          ],
+          "correct_answer": "PA",
+          "explanation_wrong": "PAN"
+        },
+        {
+          "type": "quiz",
+          "question": "еда → <b>la ___OMIDA</b> 🍲",
+          "options": [
+            "CO",
+            "CA",
+            "CU"
+          ],
+          "correct_answer": "CO",
+          "explanation_wrong": "COMIDA"
+        },
+        {
+          "type": "quiz",
+          "question": "сыр → <b>el ___UESO</b> 🧀",
+          "options": [
+            "QUE",
+            "QUA",
+            "QUI"
+          ],
+          "correct_answer": "QUE",
+          "explanation_wrong": "QUESO"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ЖАРИТЬ</b> яйца\\n👉 ___ los huevos 🥚",
+          "options": [
+            "FREIR",
+            "BATIR",
+            "HORNEAR"
+          ],
+          "correct_answer": "FREIR",
+          "explanation_wrong": "FREIR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>СМЕШИВАТЬ</b> ингредиенты\\n👉 ___ los ingredientes 🥣",
+          "options": [
+            "MEZCLAR",
+            "TRITURAR",
+            "ESCURRIR"
+          ],
+          "correct_answer": "MEZCLAR",
+          "explanation_wrong": "MEZCLAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ВКЛЮЧАТЬ</b> плиту\\n👉 ___ la cocina 🔥",
+          "options": [
+            "ENCENDER",
+            "APAGAR",
+            "MOVER"
+          ],
+          "correct_answer": "ENCENDER",
+          "explanation_wrong": "ENCENDER"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПЕЧЬ</b> хлеб\\n👉 ___ el pan 🥖",
+          "options": [
+            "HORNEAR",
+            "FREIR",
+            "CORTAR"
+          ],
+          "correct_answer": "HORNEAR",
+          "explanation_wrong": "HORNEAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ХРАНИТЬ</b> еду\\n👉 ___ la comida 🍲",
+          "options": [
+            "GUARDAR",
+            "TIRAR",
+            "COMER"
+          ],
+          "correct_answer": "GUARDAR",
+          "explanation_wrong": "GUARDAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ТЕРЕТЬ</b> сыр\\n👉 ___ el queso 🧀",
+          "options": [
+            "RALLAR",
+            "RAYAR",
+            "CORTAR"
+          ],
+          "correct_answer": "RALLAR",
+          "explanation_wrong": "RALLAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ЖАРИТЬ</b> яйца/n → <b>___EIR</b> huevos🥚",
+          "options": [
+            "FRE",
+            "FRI",
+            "FRA"
+          ],
+          "correct_answer": "FRE",
+          "explanation_wrong": "FREIR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>СМЕШИВАТЬ</b> ингредиенты/n → <b>___EZCLAR</b> ingredientes🥣",
+          "options": [
+            "MEZ",
+            "MOE",
+            "MAE"
+          ],
+          "correct_answer": "MEZ",
+          "explanation_wrong": "MEZCLAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ВКЛЮЧАТЬ</b> плиту/n → <b>___NCENDER</b> cocina🔥",
+          "options": [
+            "ENC",
+            "ANC",
+            "INC"
+          ],
+          "correct_answer": "ENC",
+          "explanation_wrong": "ENCENDER"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПЕЧЬ</b> хлеб/n → <b>___ORNEAR</b> pan🥖",
+          "options": [
+            "HOR",
+            "HAR",
+            "HIR"
+          ],
+          "correct_answer": "HOR",
+          "explanation_wrong": "HORNEAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ХРАНИТЬ</b> еду/n → <b>___UARDAR</b> comida🍲",
+          "options": [
+            "GUA",
+            "GUE",
+            "GUAJ"
+          ],
+          "correct_answer": "GUA",
+          "explanation_wrong": "GUARDAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ТЕРЕТЬ</b> сыр/n → <b>___ALLAR</b> queso🧀",
+          "options": [
+            "RAL",
+            "RIL",
+            "ROL"
+          ],
+          "correct_answer": "RAL",
+          "explanation_wrong": "RALLAR"
+        }
+      ],
+      "textquiz_pool": [
+        {
+          "type": "textquiz",
+          "question": "ЖАРИТЬ яйца\\n👉 [[FREÍR LOS]] ______ 🥚",
+          "correct_answer": "huevos"
+        },
+        {
+          "type": "textquiz",
+          "question": "СМЕШИВАТЬ ингредиенты\\n👉 [[MEZCLAR LOS]] ___________ 🥣",
+          "correct_answer": "ingredientes"
+        },
+        {
+          "type": "textquiz",
+          "question": "ВКЛЮЧАТЬ плиту\\n👉 [[ENCENDER LA]] ______ 🔥",
+          "correct_answer": "cocina"
+        },
+        {
+          "type": "textquiz",
+          "question": "ПЕЧЬ хлеб\\n👉 [[HORNEAR EL]] ___ 🥖",
+          "correct_answer": "pan"
+        },
+        {
+          "type": "textquiz",
+          "question": "ХРАНИТЬ еду\\n👉 [[GUARDAR LA]] ______ 🍲",
+          "correct_answer": "comida"
+        },
+        {
+          "type": "textquiz",
+          "question": "ТЕРЕТЬ сыр\\n👉 [[RALLAR EL]] _____ 🧀",
+          "correct_answer": "queso"
+        },
+        {
+          "type": "textquiz",
+          "question": "ЖАРИТЬ\\n👉 ___ los huevos 🥚",
+          "correct_answer": "freir"
+        },
+        {
+          "type": "textquiz",
+          "question": "СМЕШИВАТЬ\\n👉 ___ los ingredientes 🥣",
+          "correct_answer": "mezclar"
+        },
+        {
+          "type": "textquiz",
+          "question": "ВКЛЮЧАТЬ\\n👉 ___ la cocina 🔥",
+          "correct_answer": "encender"
+        },
+        {
+          "type": "textquiz",
+          "question": "ПЕЧЬ\\n👉 ___ el pan 🥖",
+          "correct_answer": "hornear"
+        },
+        {
+          "type": "textquiz",
+          "question": "ХРАНИТЬ\\n👉 ___ la comida 🍲",
+          "correct_answer": "guardar"
+        },
+        {
+          "type": "textquiz",
+          "question": "ТЕРЕТЬ\\n👉 ___ el queso 🧀",
+          "correct_answer": "rallar"
+        }
+      ]
+    }
+  ],
+  "exercises": [],
+  "videos": [
+    {
+      "title": "🧂Mi receta de gazpacho 🥘",
+      "link": "https://es.islcollective.com/espanol-ele-video-lecciones/embed/136308"
+    },
+    {
+      "title": "🔪 Receta de tortilla de patata 🧇",
+      "link": "https://es.islcollective.com/espanol-ele-video-lecciones/embed/1152806"
+    }
+  ],
+  "dialogs": [
+    {
+      "phase_id": 1,
+      "phase_name": "🥥 ДЕЙСТВИЯ С ЕДОЙ 🔪",
+      "blocks": [
+        {
+          "lines": [
+            "Я хочу <b>МАРИНОВАТЬ МЯСО</b> сегодня.",
+            "yo quiero [[<b>MARINAR LA CARNE</b>]] esta noche."
+          ]
+        },
+        {
+          "lines": [
+            "Сейчас я <b>ТЕРЕТЬ СЫР</b> для ужина.",
+            "ahora voy a [[<b>RALLAR EL QUESO</b>]] para la cena."
+          ]
+        },
+        {
+          "lines": [
+            "я хочу <b>мариновать мясо</b> сегодня.",
+            "[[yo quiero <b>marinar la carne</b> esta noche.]]"
+          ]
+        },
+        {
+          "lines": [
+            "сейчас я <b>тереть сыр</b> для ужина.",
+            "[[ahora voy a <b>rallar el queso</b> para la cena.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Мне нужно <b>ИЗМЕЛЬЧАТЬ ИНГРЕДИЕНТЫ</b> для соуса.",
+            "necesito [[<b>TRITURAR LOS INGREDIENTES</b>]] para la salsa."
+          ]
+        },
+        {
+          "lines": [
+            "Я собираюсь <b>РУБИТЬ ЛУК</b> сейчас.",
+            "voy a [[<b>PICAR LA CEBOLLA</b>]] ahora."
+          ]
+        },
+        {
+          "lines": [
+            "мне нужно <b>измельчать ингредиенты</b> для соуса.",
+            "[[necesito <b>triturar los ingredientes</b> para la salsa.]]"
+          ]
+        },
+        {
+          "lines": [
+            "я собираюсь <b>рубить лук</b> сейчас.",
+            "[[voy a <b>picar la cebolla</b> ahora.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Давайте <b>ДАТЬ СМЕСИ НАСТОЯТЬСЯ</b> десять минут.",
+            "vamos a [[<b>DEJAR REPOSAR LA MEZCLA</b>]] diez minutos."
+          ]
+        },
+        {
+          "lines": [
+            "Мне нужно <b>ОТЦЕДИТЬ ПАСТУ</b> сейчас.",
+            "tengo que [[<b>ESCURRIR LA PASTA</b>]] ahora."
+          ]
+        },
+        {
+          "lines": [
+            "давайте <b>дать смеси настояться</b> десять минут.",
+            "[[vamos a <b>dejar reposar la mezcla</b> diez minutos.]]"
+          ]
+        },
+        {
+          "lines": [
+            "мне нужно <b>отцедить пасту</b> сейчас.",
+            "[[tengo que <b>escurrir la pasta</b> ahora.]]"
+          ]
+        }
+      ]
+    },
+    {
+      "phase_id": 2,
+      "phase_name": "🍷 ТЕХНИКИ ГОТОВКИ 🥘",
+      "blocks": [
+        {
+          "lines": [
+            "Я хочу <b>ЖАРИТЬ ЯЙЦА</b> сейчас.",
+            "yo quiero [[<b>FREÍR LOS HUEVOS</b>]] ahora."
+          ]
+        },
+        {
+          "lines": [
+            "Давай <b>СМЕШИВАТЬ ИНГРЕДИЕНТЫ</b> сейчас.",
+            "vamos a [[<b>MEZCLAR LOS INGREDIENTES</b>]] ahora."
+          ]
+        },
+        {
+          "lines": [
+            "я хочу <b>жарить яйца</b> сейчас.",
+            "[[yo quiero <b>freír los huevos</b> ahora.]]"
+          ]
+        },
+        {
+          "lines": [
+            "давай <b>смешивать ингредиенты</b> сейчас.",
+            "[[vamos a <b>mezclar los ingredientes</b> ahora.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Мне нужно <b>ВКЛЮЧАТЬ ПЛИТУ</b> сейчас.",
+            "tengo que [[<b>ENCENDER LA COCINA</b>]] ahora."
+          ]
+        },
+        {
+          "lines": [
+            "Я собираюсь <b>ПЕЧЬ ХЛЕБ</b> на ужин.",
+            "yo voy a [[<b>HORNEAR EL PAN</b>]] para la cena."
+          ]
+        },
+        {
+          "lines": [
+            "мне нужно <b>включать плиту</b> сейчас.",
+            "[[tengo que <b>encender la cocina</b> ahora.]]"
+          ]
+        },
+        {
+          "lines": [
+            "я собираюсь <b>печь хлеб</b> на ужин.",
+            "[[yo voy a <b>hornear el pan</b> para la cena.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Давай <b>ХРАНИТЬ ЕДУ</b> в холодильнике.",
+            "vamos a [[<b>GUARDAR LA COMIDA</b>]] en la nevera."
+          ]
+        },
+        {
+          "lines": [
+            "Мне нужно <b>ТЕРЕТЬ СЫР</b> для пасты.",
+            "necesito [[<b>RALLAR EL QUESO</b>]] para la pasta."
+          ]
+        },
+        {
+          "lines": [
+            "давай <b>хранить еду</b> в холодильнике.",
+            "[[vamos a <b>guardar la comida</b> en la nevera.]]"
+          ]
+        },
+        {
+          "lines": [
+            "мне нужно <b>тереть сыр</b> для пасты.",
+            "[[necesito <b>rallar el queso</b> para la pasta.]]"
+          ]
+        }
+      ]
+    }
+  ]
+}

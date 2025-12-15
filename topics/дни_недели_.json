@@ -1,0 +1,513 @@
+{
+  "title": "дни_недели_",
+  "visible_title": "📝 ДНИ НЕДЕЛИ 📅",
+  "description": "В этой теме ты перестанешь путать lunes с viernes, особенно когда нужна пятница",
+  "category": "lex",
+  "level": "A0",
+  "vocab": [
+    {
+      "phase_id": 1,
+      "phase_name": "📦 ОСНОВНЫЕ ДНИ 📆",
+      "vocab": [
+        {
+          "title": "ФРАЗЫ С ДНЯМИ НЕДЕЛИ📅",
+          "link": "https://wordwall.net/ru/embed/8e66310d8c914571912ef8c9beba0308?themeId=2&templateId=3&fontStackId=21"
+        }
+      ],
+      "quiz_pool": [
+        {
+          "type": "quiz",
+          "question": "cada lunes",
+          "options": [
+            "каждый понедельник",
+            "каждую неделю",
+            "каждый вторник"
+          ],
+          "correct_answer": "каждый понедельник",
+          "explanation_wrong": "каждый понедельник"
+        },
+        {
+          "type": "quiz",
+          "question": "cada viernes",
+          "options": [
+            "каждую пятницу",
+            "каждый четверг",
+            "каждую субботу"
+          ],
+          "correct_answer": "каждую пятницу",
+          "explanation_wrong": "каждую пятницу"
+        },
+        {
+          "type": "quiz",
+          "question": "de jueves a domingo",
+          "options": [
+            "с четверга по воскресенье",
+            "с понедельника по пятницу",
+            "с пятницы по воскресенье"
+          ],
+          "correct_answer": "с четверга по воскресенье",
+          "explanation_wrong": "с четверга по воскресенье"
+        },
+        {
+          "type": "quiz",
+          "question": "de lunes a viernes",
+          "options": [
+            "с понедельника по пятницу",
+            "с понедельника по воскресенье",
+            "с четверга по пятницу"
+          ],
+          "correct_answer": "с понедельника по пятницу",
+          "explanation_wrong": "с понедельника по пятницу"
+        },
+        {
+          "type": "quiz",
+          "question": "todos los sábados",
+          "options": [
+            "каждую субботу",
+            "каждое воскресенье",
+            "каждый вторник"
+          ],
+          "correct_answer": "каждую субботу",
+          "explanation_wrong": "каждую субботу"
+        },
+        {
+          "type": "quiz",
+          "question": "toda la semana",
+          "options": [
+            "всю неделю",
+            "через неделю",
+            "два раза в неделю"
+          ],
+          "correct_answer": "всю неделю",
+          "explanation_wrong": "всю неделю"
+        },
+        {
+          "type": "quiz",
+          "question": "понедельник → <b>EL __NES</b>",
+          "options": [
+            "LU",
+            "LA",
+            "LI"
+          ],
+          "correct_answer": "LU",
+          "explanation_wrong": "EL LUNES"
+        },
+        {
+          "type": "quiz",
+          "question": "среда → <b>EL ____COLES</b>",
+          "options": [
+            "MIÉR",
+            "MUÉR",
+            "MAÉР"
+          ],
+          "correct_answer": "MIÉR",
+          "explanation_wrong": "EL MIÉRCOLES"
+        },
+        {
+          "type": "quiz",
+          "question": "пятница → <b>EL ____NES</b>",
+          "options": [
+            "VIER",
+            "VAER",
+            "VIAR"
+          ],
+          "correct_answer": "VIER",
+          "explanation_wrong": "EL VIERNES"
+        },
+        {
+          "type": "quiz",
+          "question": "суббота → <b>EL ___ADO</b>",
+          "options": [
+            "SÁB",
+            "SOB",
+            "SIB"
+          ],
+          "correct_answer": "SÁB",
+          "explanation_wrong": "EL SÁBADO"
+        },
+        {
+          "type": "quiz",
+          "question": "воскресенье → <b>EL __MINGO</b>",
+          "options": [
+            "DO",
+            "DE",
+            "DA"
+          ],
+          "correct_answer": "DO",
+          "explanation_wrong": "EL DOMINGО"
+        },
+        {
+          "type": "quiz",
+          "question": "неделя → <b>LA __MANA</b>",
+          "options": [
+            "SE",
+            "SA",
+            "SI"
+          ],
+          "correct_answer": "SE",
+          "explanation_wrong": "LA SEMANA"
+        },
+        {
+          "type": "quiz",
+          "question": "Я хожу в спортзал по понедельникам 👉 ___ voy al gimnasio",
+          "options": [
+            "los lunes",
+            "el lunes",
+            "los jueves"
+          ],
+          "correct_answer": "los lunes",
+          "explanation_wrong": "los lunes"
+        },
+        {
+          "type": "quiz",
+          "question": "Я много учусь до среды 👉 Estudio mucho hasta ___",
+          "options": [
+            "el miércoles",
+            "el lunes",
+            "el sábado"
+          ],
+          "correct_answer": "el miércoles",
+          "explanation_wrong": "el miércoles"
+        },
+        {
+          "type": "quiz",
+          "question": "Я отдыхаю с пятницы 👉 Descanso desde ___",
+          "options": [
+            "el viernes",
+            "el martes",
+            "el jueves"
+          ],
+          "correct_answer": "el viernes",
+          "explanation_wrong": "el viernes"
+        },
+        {
+          "type": "quiz",
+          "question": "Я работаю с четверга до воскресенья 👉 Trabajo de ___ a domingo",
+          "options": [
+            "jueves",
+            "lunes",
+            "martes"
+          ],
+          "correct_answer": "jueves",
+          "explanation_wrong": "jueves"
+        },
+        {
+          "type": "quiz",
+          "question": "Я обедаю вне дома по субботам 👉 Como fuera ___",
+          "options": [
+            "los sábados",
+            "los domingos",
+            "los martes"
+          ],
+          "correct_answer": "los sábados",
+          "explanation_wrong": "los sábados"
+        },
+        {
+          "type": "quiz",
+          "question": "Я путешествую между вторником и пятницей 👉 Viajo entre ___ y viernes",
+          "options": [
+            "martes",
+            "domingo",
+            "jueves"
+          ],
+          "correct_answer": "martes",
+          "explanation_wrong": "martes"
+        }
+      ]
+    },
+    {
+      "phase_id": 2,
+      "phase_name": "📆 ДНИ НЕДЕЛИ + НАРЕЧИЯ ЧАСТОСТИ 😤",
+      "vocab": [
+
+        {
+          "type": "text",
+          "text": "🔎 ВЗГЛЯНИ НА СЛОВА\n🧐 Сейчас будем их смаковать 🤌\n\n<b>LUNES</b> 👉 <b>понедельник</b>\n\n<b>MARTES</b> 👉 <b>вторник</b>\n\n<b>MIÉRCOLES</b> 👉 <b>среда</b>\n\n<b>JUEVES</b> 👉 <b>четверг</b>\n\n<b>VIERNES</b> 👉 <b>пятница</b>\n\n<b>SÁBADO</b> 👉 <b>суббота</b>\n\n<b>DOMINGO</b> 👉 <b>воскресенье</b>"
+        },
+        {
+          "title": "🔗 BUSCAR PAREJA",
+          "link": "https://wordwall.net/ru/embed/cc63c55159dd4ba1b80754458ef02a85?themeId=45&templateId=3&fontStackId=0"
+        }
+
+      ],
+      "quiz_pool": [
+        {
+          "type": "quiz",
+          "question": "работать <b>С ПОНЕДЕЛЬНИКА ПО ПЯТНИЦУ</b>\\n👉 trabajar ___",
+          "options": [
+            "de lunes a viernes",
+            "los sábados",
+            "todos los días"
+          ],
+          "correct_answer": "de lunes a viernes",
+          "explanation_wrong": "de lunes a viernes"
+        },
+        {
+          "type": "quiz",
+          "question": "учиться <b>ПО ВТОРНИКАМ ДНЁМ</b>\\n👉 estudiar ___",
+          "options": [
+            "los martes por la tarde",
+            "los jueves por la noche",
+            "los domingos por la mañana"
+          ],
+          "correct_answer": "los martes por la tarde",
+          "explanation_wrong": "los martes por la tarde"
+        },
+        {
+          "type": "quiz",
+          "question": "отдыхать <b>ПО СУББОТАМ</b>\\n👉 descansar ___",
+          "options": [
+            "los sábados",
+            "de lunes a viernes",
+            "los domingos"
+          ],
+          "correct_answer": "los sábados",
+          "explanation_wrong": "los sábados"
+        },
+        {
+          "type": "quiz",
+          "question": "выходить <b>ПО ЧЕТВЕРГАМ ВЕЧЕРОМ</b>\\n👉 salir ___",
+          "options": [
+            "los jueves por la noche",
+            "los martes por la tarde",
+            "por la mañana"
+          ],
+          "correct_answer": "los jueves por la noche",
+          "explanation_wrong": "los jueves por la noche"
+        },
+        {
+          "type": "quiz",
+          "question": "делать покупки <b>ПО СРЕДАМ УТРОМ</b>\\n👉 hacer la compra ___",
+          "options": [
+            "los miércoles por la mañana",
+            "los viernes por la tarde",
+            "por la noche"
+          ],
+          "correct_answer": "los miércoles por la mañana",
+          "explanation_wrong": "los miércoles por la mañana"
+        },
+        {
+          "type": "quiz",
+          "question": "встречаться с друзьями <b>ПО ВОСКРЕСЕНЬЯМ</b>\\n👉 quedar con amigos ___",
+          "options": [
+            "los domingos",
+            "todos los días",
+            "cada miércoles"
+          ],
+          "correct_answer": "los domingos",
+          "explanation_wrong": "los domingos"
+        },
+        {
+          "type": "quiz",
+          "question": "понедельник → <b>el ___NES</b>",
+          "options": [
+            "LU",
+            "LI",
+            "LA"
+          ],
+          "correct_answer": "LU",
+          "explanation_wrong": "LUNES"
+        },
+        {
+          "type": "quiz",
+          "question": "вторник → <b>el ___RTES</b>",
+          "options": [
+            "MAR",
+            "MER",
+            "MOR"
+          ],
+          "correct_answer": "MAR",
+          "explanation_wrong": "MARTES"
+        },
+        {
+          "type": "quiz",
+          "question": "среда → <b>el ___RCOLES</b>",
+          "options": [
+            "MIÉ",
+            "MAE",
+            "MOE"
+          ],
+          "correct_answer": "MIÉ",
+          "explanation_wrong": "MIÉRCOLES"
+        },
+        {
+          "type": "quiz",
+          "question": "четверг → <b>el ___EVES</b>",
+          "options": [
+            "JU",
+            "JA",
+            "JE"
+          ],
+          "correct_answer": "JU",
+          "explanation_wrong": "JUEVES"
+        },
+        {
+          "type": "quiz",
+          "question": "суббота → <b>el ___BADO</b>",
+          "options": [
+            "SÁ",
+            "SE",
+            "SO"
+          ],
+          "correct_answer": "SÁ",
+          "explanation_wrong": "SÁBADO"
+        },
+        {
+          "type": "quiz",
+          "question": "воскресенье → <b>el ___MINGO</b>",
+          "options": [
+            "DO",
+            "DA",
+            "DE"
+          ],
+          "correct_answer": "DO",
+          "explanation_wrong": "DOMINGO"
+        }
+      ],
+      "textquiz_pool": [
+        {
+          "type": "textquiz",
+          "question": "Сегодня понедельник\\n👉 [[HOY ES]] ______",
+          "correct_answer": "lunes"
+        },
+        {
+          "type": "textquiz",
+          "question": "Завтра вторник\\n👉 [[MAÑANA ES]] ______",
+          "correct_answer": "martes"
+        },
+        {
+          "type": "textquiz",
+          "question": "В эту среду\\n👉 [[ESTE]] ______",
+          "correct_answer": "miércoles"
+        },
+        {
+          "type": "textquiz",
+          "question": "В этот четверг\\n👉 [[ESTE]] ______",
+          "correct_answer": "jueves"
+        },
+        {
+          "type": "textquiz",
+          "question": "В эту пятницу\\n👉 [[ESTE]] ______",
+          "correct_answer": "viernes"
+        },
+        {
+          "type": "textquiz",
+          "question": "В эту субботу\\n👉 [[ESTE]] ______",
+          "correct_answer": "sábado"
+        },
+        {
+          "type": "textquiz",
+          "question": "Сегодня воскресенье\\n👉 [[HOY ES]] ______",
+          "correct_answer": "domingo"
+        },
+        {
+          "type": "textquiz",
+          "question": "Каждый понедельник\\n👉 [[CADA]] ______",
+          "correct_answer": "lunes"
+        },
+        {
+          "type": "textquiz",
+          "question": "Каждую среду\\n👉 [[CADA]] ______",
+          "correct_answer": "miércoles"
+        },
+        {
+          "type": "textquiz",
+          "question": "По четвергам вечером\\n👉 [[LOS]] ______",
+          "correct_answer": "jueves"
+        },
+        {
+          "type": "textquiz",
+          "question": "По субботам утром\\n👉 [[LOS]] ______",
+          "correct_answer": "sábados"
+        },
+        {
+          "type": "textquiz",
+          "question": "По воскресеньям\\n👉 [[LOS]] ______",
+          "correct_answer": "domingos"
+        }
+      ]
+    }
+  ],
+  "exercises": [],
+  "videos": [],
+  "dialogs": [
+    {
+      "phase_id": 1,
+      "phase_name": "📆 ДНИ НЕДЕЛИ + НАРЕЧИЯ ЧАСТОСТИ",
+      "blocks": [
+        {
+          "lines": [
+            "Я работаю <b>С ПОНЕДЕЛЬНИКА ПО ПЯТНИЦУ</b>.",
+            "trabajo [[<b>DE LUNES A VIERNES</b>]]."
+          ]
+        },
+        {
+          "lines": [
+            "Я учусь испанскому <b>ПО ВТОРНИКАМ ДНЁМ</b>.",
+            "estudio español [[<b>LOS MARTES POR LA TARDE</b>]]."
+          ]
+        },
+        {
+          "lines": [
+            "я работаю <b>с понедельника по пятницу</b>.",
+            "[[trabajo <b>de lunes a viernes</b>.]]"
+          ]
+        },
+        {
+          "lines": [
+            "я учусь испанскому <b>по вторникам днём</b>.",
+            "[[estudio español <b>los martes por la tarde</b>.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Я делаю покупки <b>КАЖДУЮ СРЕДУ УТРОМ</b>.",
+            "hago la compra [[<b>TODOS LOS MIÉRCOLES POR LA MAÑANA</b>]]."
+          ]
+        },
+        {
+          "lines": [
+            "Я выхожу гулять <b>ПО ЧЕТВЕРГАМ ВЕЧЕРОМ</b>.",
+            "salgo con amigos [[<b>LOS JUEVES POR LA NOCHE</b>]]."
+          ]
+        },
+        {
+          "lines": [
+            "я делаю покупки <b>каждую среду утром</b>.",
+            "[[hago la compra <b>todos los miércoles por la mañana</b>.]]"
+          ]
+        },
+        {
+          "lines": [
+            "я выхожу гулять <b>по четвергам вечером</b>.",
+            "[[salgo con amigos <b>los jueves por la noche</b>.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Я выхожу гулять <b>ПО СУББОТАМ ВЕЧЕРОМ</b>.",
+            "salgo de fiesta [[<b>LOS SÁBADOS POR LA NOCHE</b>]]."
+          ]
+        },
+        {
+          "lines": [
+            "Я отдыхаю дома <b>КАЖДОЕ ВОСКРЕСЕНЬЕ УТРОМ</b>.",
+            "descanso en casa [[<b>CADA DOMINGO POR LA MAÑANA</b>]]."
+          ]
+        },
+        {
+          "lines": [
+            "я выхожу гулять <b>по субботам вечером</b>.",
+            "[[salgo de fiesta <b>los sábados por la noche</b>.]]"
+          ]
+        },
+        {
+          "lines": [
+            "я отдыхаю дома <b>каждое воскресенье утром</b>.",
+            "[[descanso en casa <b>cada domingo por la mañana</b>.]]"
+          ]
+        }
+      ]
+    }
+  ]
+}

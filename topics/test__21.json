@@ -1,0 +1,176 @@
+{
+  "title": "test__21",
+  "visible_title": "test  21",
+  "description": "ef",
+  "category": "lex",
+  "level": "A1-A2",
+  "vocab": [
+    {
+      "phase_id": 1,
+      "phase_name": "test 1",
+      "vocab": [
+        {
+          "type": "text",
+          "text": "Я разложил поведение на два уровня: компоновка vocab_list и пошаговая FSM-логика handle_vocab_poll_answer/cb_scenario_vocab.\n\nПроверил входы/выходы: от JSON-структуры фазы → get_vocab_list → q_positions/BLOCK → сцены offer_continue и переход к следующему сету или к textquiz."
+        },
+        {
+          "title": "test  1",
+          "link": "https://wordwall.net/ru/embed/cc63c55159dd4ba1b80754458ef02a85?themeId=45&templateId=3&fontStackId=0"
+        },
+        {
+          "type": "text",
+          "text": "🧠 Использован метод: Step-by-Step FSM"
+        },
+        {
+          "type": "text",
+          "text": "Есть ли отдельная проверка «перед тем, как показать следующие 6 квизов, показать текст/линк, если он есть»?\n\nНет."
+        },
+        {
+          "title": "test2",
+          "link": "https://wordwall.net/ru/embed/cc63c55159dd4ba1b80754458ef02a85?themeId=45&templateId=3&fontStackId=0"
+        },
+        {
+          "type": "text",
+          "text": "а, по инструкции в [[...]] у нас всё равно сидит глагольный/служебный кусок (HOY ES, LOS);\n\nНО писать ученик должен именно lunes / sábados / domingos — то есть мишень реально = день недели.\n\nТо есть педагогически мы бьём по дням, а по ф"
+        }
+      ],
+      "quiz_pool": [
+        {
+          "type": "quiz",
+          "question": "<b>РАБОТАТЬ</b> с понедельника по пятницу\\n👉 trabajar ___",
+          "options": [
+            "de lunes a viernes",
+            "los martes por la tarde",
+            "los sábados"
+          ],
+          "correct_answer": "de lunes a viernes",
+          "explanation_wrong": "de lunes a viernes"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>УЧИТЬСЯ</b> по вторникам днём\\n👉 estudiar ___",
+          "options": [
+            "los martes por la tarde",
+            "los jueves por la noche",
+            "los domingos"
+          ],
+          "correct_answer": "los martes por la tarde",
+          "explanation_wrong": "los martes por la tarde"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ОТДЫХАТЬ</b> по субботам\\n👉 descansar ___",
+          "options": [
+            "los sábados",
+            "los lunes",
+            "los domingos"
+          ],
+          "correct_answer": "los sábados",
+          "explanation_wrong": "los sábados"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ВЫХОДИТЬ</b> вечером по четвергам\\n👉 salir ___",
+          "options": [
+            "los jueves por la noche",
+            "los martes por la tarde",
+            "los miércoles"
+          ],
+          "correct_answer": "los jueves por la noche",
+          "explanation_wrong": "los jueves por la noche"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ДЕЛАТЬ ПОКУПКИ</b> по средам\\n👉 hacer la compra ___",
+          "options": [
+            "los miércoles",
+            "los domingos",
+            "los viernes"
+          ],
+          "correct_answer": "los miércoles",
+          "explanation_wrong": "los miércoles"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ВСТРЕЧАТЬСЯ</b> с друзьями по воскресеньям\\n👉 quedar con amigos ___",
+          "options": [
+            "los domingos",
+            "los sábados",
+            "los lunes"
+          ],
+          "correct_answer": "los domingos",
+          "explanation_wrong": "los domingos"
+        },
+        {
+          "type": "quiz",
+          "question": "понедельник → <b>el ___NES</b>",
+          "options": [
+            "LU",
+            "LI",
+            "LA"
+          ],
+          "correct_answer": "LU",
+          "explanation_wrong": "LUNES"
+        },
+        {
+          "type": "quiz",
+          "question": "вторник → <b>el ___RTES</b>",
+          "options": [
+            "MAR",
+            "MER",
+            "MOR"
+          ],
+          "correct_answer": "MAR",
+          "explanation_wrong": "MARTES"
+        },
+        {
+          "type": "quiz",
+          "question": "среда → <b>el ___RCOLES</b>",
+          "options": [
+            "MIÉ",
+            "MAE",
+            "MOE"
+          ],
+          "correct_answer": "MIÉ",
+          "explanation_wrong": "MIÉRCOLES"
+        },
+        {
+          "type": "quiz",
+          "question": "четверг → <b>el ___EVES</b>",
+          "options": [
+            "JU",
+            "JA",
+            "JE"
+          ],
+          "correct_answer": "JU",
+          "explanation_wrong": "JUEVES"
+        },
+        {
+          "type": "quiz",
+          "question": "суббота → <b>el ___BADO</b>",
+          "options": [
+            "SÁ",
+            "SE",
+            "SO"
+          ],
+          "correct_answer": "SÁ",
+          "explanation_wrong": "SÁBADO"
+        },
+        {
+          "type": "quiz",
+          "question": "воскресенье → <b>el ___MINGO</b>",
+          "options": [
+            "DO",
+            "DA",
+            "DE"
+          ],
+          "correct_answer": "DO",
+          "explanation_wrong": "DOMINGO"
+        }
+      ]
+    }
+  ],
+  "exercises": [],
+  "videos": [],
+  "dialogs": []
+}

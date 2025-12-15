@@ -1,0 +1,46 @@
+{
+  "7267599701": {
+    "name": "ESPAÑOLingo",
+    "tg_username": "@espanoljuega_bot",
+    "first_join": 1764938610,
+    "last_active": 1764947283,
+    "total_xp": 30,
+    "by_topic": {
+      "_en_el_banco": 30
+    },
+    "stats": {
+      "words_learned": 0,
+      "exercises_done": 0
+    },
+    "words_learned_week": 0,
+    "words_week_number": 49,
+    "words_learned_month": 0,
+    "words_month_number": 12,
+    "words_learned_today": 0,
+    "words_today_date": "2025-12-05"
+  },
+  "930240763": {
+    "total_xp": 4346,
+    "by_topic": {
+      "_en_el_banco": 2304,
+      "_ir_al_medico": 33,
+      "дни_недели_": 647,
+      "test__21": 1382,
+      "unknown": -20
+    },
+    "stats": {
+      "words_learned": 15,
+      "exercises_done": 0
+    },
+    "first_join": 1764945924,
+    "words_learned_today": 0,
+    "words_today_date": "2025-12-13",
+    "last_active": 1765606748,
+    "words_learned_week": 2,
+    "words_week_number": 50,
+    "words_learned_month": 15,
+    "words_month_number": 12,
+    "name": "Dani",
+    "tg_username": "@Drancherrro"
+  }
+}

@@ -1,0 +1,192 @@
+{
+  "title": "_покупка_и_оплата_",
+  "visible_title": "🛍 ПОКУПКА и ОПЛАТА 🥳",
+  "description": "В этой теме ты научишься:\n— спрашивать цену и понимать ответ\n— оплачивать по-разному: карта/наличными — базовые фразы.\n— просить чек, сдачу и подтверждать покупку — коротко и ясно",
+  "category": "lex",
+  "level": "A0",
+  "vocab": [
+    {
+      "phase_id": 1,
+      "phase_name": "🛍 НА ПОКУПКАХ 🤑",
+      "vocab": [
+        {
+          "type": "text",
+          "text": "🔎 ВЗГЛЯНИ НА ФРАЗЫ\n🧐 Сейчас будем их смаковать 🤌\n\n¿CUÁNTO CUESTA? 👉 Сколько стоит?\n\n¿CUÁNTO ES? 👉 Сколько это?\n\n¿ACEPTAN TARJETA? 👉 Принимаете карту?\n\n¿EN EFECTIVO? 👉 Наличными?\n\n¿ME LO LLEVO? 👉 Я беру это?\n\nY YA ESTÁ 👉 и всё"
+        },
+        {
+          "title": "🔗 MATCHING",
+          "link": "https://wordwall.net/ru/embed/b0403c81d53a43568173e0915a7d6535?themeId=65&templateId=3&fontStackId=21"
+        }
+      ],
+      "quiz_pool": [
+        {
+          "type": "quiz",
+          "question": "<b>¿Cuánto cuesta?</b>",
+          "options": [
+            "Сколько стоит?",
+            "Сколько это?",
+            "Какова цена?"
+          ],
+          "correct_answer": "Сколько стоит?",
+          "explanation_wrong": "Сколько стоит?"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>¿Cuánto es?</b>",
+          "options": [
+            "Сколько это?",
+            "Сколько стоит?",
+            "Сколько надо заплатить?"
+          ],
+          "correct_answer": "Сколько это?",
+          "explanation_wrong": "Сколько это?"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>¿Aceptan tarjeta?</b>",
+          "options": [
+            "Принимаете карту?",
+            "Принимаете наличные?",
+            "Принимаете чеки?"
+          ],
+          "correct_answer": "Принимаете карту?",
+          "explanation_wrong": "Принимаете карту?"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>¿En efectivo?</b>",
+          "options": [
+            "Наличными?",
+            "Картой?",
+            "Онлайн?"
+          ],
+          "correct_answer": "Наличными?",
+          "explanation_wrong": "Наличными?"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>¿Me lo llevo?</b>",
+          "options": [
+            "Я беру это?",
+            "Хочу примерить?",
+            "Это в наличии?"
+          ],
+          "correct_answer": "Я беру это?",
+          "explanation_wrong": "Я беру это?"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>Y ya está</b>",
+          "options": [
+            "И всё",
+            "На этом всё",
+            "Всё готово?"
+          ],
+          "correct_answer": "И всё",
+          "explanation_wrong": "И всё"
+        },
+        {
+          "type": "quiz",
+          "question": "цена → <b>el ___CIO</b>",
+          "options": [
+            "PRE",
+            "PRO",
+            "PRI"
+          ],
+          "correct_answer": "PRE",
+          "explanation_wrong": "EL PRECIO"
+        },
+        {
+          "type": "quiz",
+          "question": "карта → <b>la ___JETA</b>",
+          "options": [
+            "TAR",
+            "TAS",
+            "TAZ"
+          ],
+          "correct_answer": "TAR",
+          "explanation_wrong": "LA TARJETA"
+        },
+        {
+          "type": "quiz",
+          "question": "наличные → <b>el ___ECTIVO</b>",
+          "options": [
+            "EFE",
+            "EFA",
+            "EFO"
+          ],
+          "correct_answer": "EFE",
+          "explanation_wrong": "EL EFECTIVO"
+        },
+        {
+          "type": "quiz",
+          "question": "товар → <b>el ___DUCTO</b>",
+          "options": [
+            "PRO",
+            "PRA",
+            "PLO"
+          ],
+          "correct_answer": "PRO",
+          "explanation_wrong": "EL PRODUCTO"
+        },
+        {
+          "type": "quiz",
+          "question": "покупка → <b>la ___MPRA</b>",
+          "options": [
+            "COM",
+            "CAP",
+            "COP"
+          ],
+          "correct_answer": "COM",
+          "explanation_wrong": "LA COMPRA"
+        },
+        {
+          "type": "quiz",
+          "question": "чек → <b>el ___CIBO</b>",
+          "options": [
+            "REC",
+            "REN",
+            "RIC"
+          ],
+          "correct_answer": "REC",
+          "explanation_wrong": "EL RECIBO"
+        }
+      ],
+      "textquiz_pool": [
+        {
+          "type": "textquiz",
+          "question": "ОПЛАТИТЬ СЧЁТ\\n👉 [[PAGAR LA]] ______ 🧾",
+          "correct_answer": "cuenta"
+        },
+        {
+          "type": "textquiz",
+          "question": "ПОЛУЧИТЬ СДАЧУ\\n👉 [[RECIBIR EL]] ______ 💵",
+          "correct_answer": "cambio"
+        },
+        {
+          "type": "textquiz",
+          "question": "ПЛАТИТЬ НАЛИЧНЫМИ\\n👉 [[PAGAR EN]] ______ 💵",
+          "correct_answer": "efectivo"
+        },
+        {
+          "type": "textquiz",
+          "question": "СПРОСИТЬ ЦЕНУ\\n👉 [[PREGUNTAR EL]] ______ 🧾",
+          "correct_answer": "precio"
+        },
+        {
+          "type": "textquiz",
+          "question": "ПОПРОСИТЬ ПАКЕТ\\n👉 [[PEDIR UNA]] ______ 🛍",
+          "correct_answer": "bolsa"
+        },
+        {
+          "type": "textquiz",
+          "question": "СОХРАНИТЬ ЧЕК\\n👉 [[GUARDAR EL]] ______ 🧾",
+          "correct_answer": "recibo"
+        }
+      ]
+    }
+  ],
+  "exercises": [],
+  "videos": [],
+  "dialogs": []
+}

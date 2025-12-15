@@ -1,0 +1,866 @@
+{
+  "title": "_в_банке__",
+  "visible_title": "🏦 В БАНКЕ 💸",
+  "description": "В этой теме ты научишься: 😎\n\nзвучать так, будто разбираешься в счетах\n\nболтать про автоплатежи и квитанции, будто ты взрослый человек\n\nжаловаться на комиссии без мата",
+  "category": "lex",
+  "level": "B1-B2",
+  "vocab": [
+    {
+      "phase_id": 1,
+      "phase_name": "🏦 СЧЕТА И КОМИССИИ 💸",
+      "vocab": [
+        {
+          "type": "text",
+          "text": "🔎 ВЗГЛЯНИ НА ФРАЗЫ\n🧐 Сейчас будем их смаковать 🤌\n\nABRIR CUENTA CORRIENTE 👉 открыть текущий счёт\n\nABRIR CUENTA AHORRO 👉 открыть сберегательный счёт\n\nDOMICILIAR RECIBOS 👉 подключить автоплатёж по квитанциям\n\nCANCELAR RECIBO 👉 отменить платёж\n\nRECLAMAR COMISIÓN 👉 обжаловать комиссию\n\nHACER TRANSFERENCIA INTERNACIONAL 👉 сделать международный перевод\n\nМаленькие шаги — большой прогресс. банк покорится!"
+        },
+        {
+          "title": "🔗 MATCHING",
+          "link": "https://wordwall.net/ru/embed/3429d87826f3417ba9bebf38557d448c?themeId=2&templateId=3&fontStackId=0"
+        }
+      ],
+      "quiz_pool": [
+        {
+          "type": "quiz",
+          "question": "<b>abrir una cuenta corriente</b>",
+          "options": [
+            "открыть текущий счёт",
+            "закрыть текущий счёт",
+            "открыть сберегательный счёт"
+          ],
+          "correct_answer": "открыть текущий счёт",
+          "explanation_wrong": "открыть текущий счёт"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>abrir una cuenta de ahorro</b>",
+          "options": [
+            "открыть сберегательный счёт",
+            "закрыть сберегательный счёт",
+            "открыть текущий счёт"
+          ],
+          "correct_answer": "открыть сберегательный счёт",
+          "explanation_wrong": "открыть сберегательный счёт"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>domiciliar los recibos</b>",
+          "options": [
+            "подключать платёж на дом",
+            "отменять платёж на дом",
+            "оплачивать квитанции один раз"
+          ],
+          "correct_answer": "подключать платёж на дом",
+          "explanation_wrong": "подключать платёж на дом"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>cancelar un recibo</b>",
+          "options": [
+            "отменять платёж",
+            "оплачивать квитанцию",
+            "подключать платёж на дом"
+          ],
+          "correct_answer": "отменять платёж",
+          "explanation_wrong": "отменять платёж"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>reclamar una comisión</b>",
+          "options": [
+            "обжаловать комиссию",
+            "заплатить комиссию",
+            "игнорировать комиссию"
+          ],
+          "correct_answer": "обжаловать комиссию",
+          "explanation_wrong": "обжаловать комиссию"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>hacer una transferencia internacional</b>",
+          "options": [
+            "делать международный перевод",
+            "делать внутренний перевод",
+            "оплачивать квитанцию"
+          ],
+          "correct_answer": "делать международный перевод",
+          "explanation_wrong": "делать международный перевод"
+        },
+        {
+          "type": "quiz",
+          "question": "текущий счёт → <b>la ___TA CORRIENTE</b>",
+          "options": [
+            "CUEN",
+            "CUAN",
+            "CAUN"
+          ],
+          "correct_answer": "CUEN",
+          "explanation_wrong": "LA CUENTA CORRIENTE"
+        },
+        {
+          "type": "quiz",
+          "question": "сберегательный счёт → <b>la ___TA DE AHORRO</b>",
+          "options": [
+            "CUEN",
+            "CUAN",
+            "CAUN"
+          ],
+          "correct_answer": "CUEN",
+          "explanation_wrong": "LA CUENTA DE AHORRO"
+        },
+        {
+          "type": "quiz",
+          "question": "квитанции (платежи) → <b>los ___IBOS</b>",
+          "options": [
+            "REC",
+            "RIC",
+            "ROC"
+          ],
+          "correct_answer": "REC",
+          "explanation_wrong": "LOS RECIBOS"
+        },
+        {
+          "type": "quiz",
+          "question": "квитанция (платёж) → <b>el ___IBO</b>",
+          "options": [
+            "REC",
+            "RIC",
+            "ROC"
+          ],
+          "correct_answer": "REC",
+          "explanation_wrong": "EL RECIBO"
+        },
+        {
+          "type": "quiz",
+          "question": "комиссия → <b>la ___SIÓN</b>",
+          "options": [
+            "COMI",
+            "CAMI",
+            "COME"
+          ],
+          "correct_answer": "COMI",
+          "explanation_wrong": "LA COMISIÓN"
+        },
+        {
+          "type": "quiz",
+          "question": "международный перевод → <b>la ___SFERENCIA INTERNACIONAL</b>",
+          "options": [
+            "TRAN",
+            "TREN",
+            "TRON"
+          ],
+          "correct_answer": "TRAN",
+          "explanation_wrong": "LA TRANSFERENCIA INTERNACIONAL"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПОДКЛЮЧАТЬ</b> ПЛАТЁЖ НА ДОМ\\n👉 ___  los recibos",
+          "options": [
+            "DOMICILIAR",
+            "DOMINAR",
+            "DOMITAR"
+          ],
+          "correct_answer": "DOMICILIAR",
+          "explanation_wrong": "DOMICILIAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ОТКРЫВАТЬ</b> ТЕКУЩИЙ СЧЁТ\\n👉 ___  una cuenta corriente",
+          "options": [
+            "ABRIR",
+            "ABRIGAR",
+            "ABORDAR"
+          ],
+          "correct_answer": "ABRIR",
+          "explanation_wrong": "ABRIR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ОТКРЫВАТЬ</b> СБЕРЕГАТЕЛЬНЫЙ СЧЁТ\\n👉 ___  una cuenta de ahorro",
+          "options": [
+            "ABRIR",
+            "ABRIGAR",
+            "ABORDAR"
+          ],
+          "correct_answer": "ABRIR",
+          "explanation_wrong": "ABRIR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ОТМЕНЯТЬ</b> ПЛАТЁЖ\\n👉 ___  un recibo",
+          "options": [
+            "CANCELAR",
+            "CANTAR",
+            "CENAR"
+          ],
+          "correct_answer": "CANCELAR",
+          "explanation_wrong": "CANCELAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ОБЖАЛОВАТЬ</b> КОМИССИЮ\\n👉 ___  una comisión",
+          "options": [
+            "RECLAMAR",
+            "RECUPERAR",
+            "RECLUTAR"
+          ],
+          "correct_answer": "RECLAMAR",
+          "explanation_wrong": "RECLAMAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ДЕЛАТЬ</b> МЕЖДУНАРОДНЫЙ ПЕРЕВОД\\n👉 ___  una transferencia internacional",
+          "options": [
+            "HACER",
+            "HABER",
+            "HACAR"
+          ],
+          "correct_answer": "HACER",
+          "explanation_wrong": "HACER"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ОТКРЫВАТЬ</b> (счёт) → <b>___BRIR</b>",
+          "options": [
+            "AB",
+            "EB",
+            "IB"
+          ],
+          "correct_answer": "AB",
+          "explanation_wrong": "ABRIR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ОТКРЫВАТЬ</b> (сберегательный счёт) → <b>___BRIR</b>",
+          "options": [
+            "AB",
+            "EB",
+            "IB"
+          ],
+          "correct_answer": "AB",
+          "explanation_wrong": "ABRIR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПОДКЛЮЧАТЬ</b> (платёж на дом) → <b>___CILIAR</b>",
+          "options": [
+            "DOMI",
+            "DUMI",
+            "DEMI"
+          ],
+          "correct_answer": "DOMI",
+          "explanation_wrong": "DOMICILIAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ОТМЕНЯТЬ</b> (платёж) → <b>___CELAR</b>",
+          "options": [
+            "CAN",
+            "CEN",
+            "CON"
+          ],
+          "correct_answer": "CAN",
+          "explanation_wrong": "CANCELAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ОБЖАЛОВЫВАТЬ</b> (комиссию) → <b>___CLAMAR</b>",
+          "options": [
+            "RE",
+            "RA",
+            "RI"
+          ],
+          "correct_answer": "RE",
+          "explanation_wrong": "RECLAMAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ДЕЛАТЬ</b> (перевод) → <b>___CER</b>",
+          "options": [
+            "HA",
+            "HE",
+            "HO"
+          ],
+          "correct_answer": "HA",
+          "explanation_wrong": "HACER"
+        }
+      ],
+      "textquiz_pool": [
+        {
+          "type": "textquiz",
+          "question": "Открыть текущий счёт\\n👉 [[ABRIR UNA]] ______ corriente 🏦",
+          "correct_answer": "cuenta"
+        },
+        {
+          "type": "textquiz",
+          "question": "Открыть сберегательный счёт\\n👉 [[ABRIR UNA]] ______ de ahorro 🏦",
+          "correct_answer": "cuenta"
+        },
+        {
+          "type": "textquiz",
+          "question": "Подключить платёж на дом\\n👉 [[DOMICILIAR LOS]] ______ 🧾",
+          "correct_answer": "recibos"
+        },
+        {
+          "type": "textquiz",
+          "question": "Отменить платёж\\n👉 [[CANCELAR UN]] ______ 🧾",
+          "correct_answer": "recibo"
+        },
+        {
+          "type": "textquiz",
+          "question": "Обжаловать комиссию\\n👉 [[RECLAMAR UNA]] ______ 💸",
+          "correct_answer": "comisión"
+        },
+        {
+          "type": "textquiz",
+          "question": "Сделать международный перевод\\n👉 [[HACER UNA]] ______ internacional 🌍",
+          "correct_answer": "transferencia"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ОТКРЫТЬ</b> текущий счёт\\n👉 ___ cuenta corriente 🏦",
+          "correct_answer": "abrir"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ОТКРЫТЬ</b> сберегательный счёт\\n👉 ___ cuenta de ahorro 🏦",
+          "correct_answer": "abrir"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ПОДКЛЮЧИТЬ</b> платёж на дом\\n👉 ___ los recibos 🧾",
+          "correct_answer": "domiciliar"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ОТМЕНИТЬ</b> платёж\\n👉 ___ un recibo 🧾",
+          "correct_answer": "cancelar"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ОБЖАЛОВАТЬ</b> комиссию\\n👉 ___ una comisión 💸",
+          "correct_answer": "reclamar"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>СДЕЛАТЬ</b> международный перевод\\n👉 ___ una transferencia internacional 🌍",
+          "correct_answer": "hacer"
+        }
+      ]
+    },
+    {
+      "phase_id": 2,
+      "phase_name": "💳 КАРТЫ, ВАЛЮТЫ И ДОЛГИ 💶",
+      "vocab": [
+        {
+          "type": "text",
+          "text": "Фразы по деньгам — чтоб банк не ел нервов 🙂\n\nRENOVAR TARJETA 👉 перевыпустить карту\n\nINGRESAR EFECTIVO 👉 внести наличные\n\nSACAR EFECTIVO 👉 снять наличные\n\nPEDIR EXTRACTO 👉 попросить выписку\n\nCAMBIAR MONEDA 👉 поменять валюту\n\nSOLICITAR PRÉSTAMO 👉 запросить кредит"
+        },
+        {
+          "title": "🔗 CОЕДИНИ ПЕРЕВОД и не поедешь на завод ☺️",
+          "link": "https://wordwall.net/ru/embed/485b82f63d7b47888aa2640d99825848?themeId=43&templateId=3&fontStackId=0"
+        }
+      ],
+      "quiz_pool": [
+        {
+          "type": "quiz",
+          "question": "<b>renovar tarjeta</b>",
+          "options": [
+            "перевыпускать карту",
+            "блокировать карту",
+            "выпускать карту впервые"
+          ],
+          "correct_answer": "перевыпускать карту",
+          "explanation_wrong": "перевыпускать карту"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ingresar efectivo</b>",
+          "options": [
+            "вносить наличные",
+            "снимать наличные",
+            "прятать наличные"
+          ],
+          "correct_answer": "вносить наличные",
+          "explanation_wrong": "вносить наличные"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>sacar efectivo</b>",
+          "options": [
+            "снимать наличные",
+            "вносить наличные",
+            "хранить наличные"
+          ],
+          "correct_answer": "снимать наличные",
+          "explanation_wrong": "снимать наличные"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>pedir extracto</b>",
+          "options": [
+            "просить выписку",
+            "просить карту",
+            "просить перевод"
+          ],
+          "correct_answer": "просить выписку",
+          "explanation_wrong": "просить выписку"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>cambiar moneda</b>",
+          "options": [
+            "менять валюту",
+            "менять карту",
+            "менять банк"
+          ],
+          "correct_answer": "менять валюту",
+          "explanation_wrong": "менять валюту"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>solicitar préstamo</b>",
+          "options": [
+            "запрашивать кредит",
+            "погашать кредит",
+            "отменять кредит"
+          ],
+          "correct_answer": "запрашивать кредит",
+          "explanation_wrong": "запрашивать кредит"
+        },
+        {
+          "type": "quiz",
+          "question": "карта → <b>la ___JETA</b>",
+          "options": [
+            "TAR",
+            "CAR",
+            "TUR"
+          ],
+          "correct_answer": "TAR",
+          "explanation_wrong": "LA TARJETA"
+        },
+        {
+          "type": "quiz",
+          "question": "наличные → <b>el ___FECTIVO</b>",
+          "options": [
+            "E",
+            "A",
+            "I"
+          ],
+          "correct_answer": "E",
+          "explanation_wrong": "EL EFECTIVO"
+        },
+        {
+          "type": "quiz",
+          "question": "выписка (по счёту) → <b>el ___TRACTO</b>",
+          "options": [
+            "EX",
+            "AX",
+            "IX"
+          ],
+          "correct_answer": "EX",
+          "explanation_wrong": "EL EXTRACTO"
+        },
+        {
+          "type": "quiz",
+          "question": "валюта → <b>la ___NEDA</b>",
+          "options": [
+            "MO",
+            "MU",
+            "MA"
+          ],
+          "correct_answer": "MO",
+          "explanation_wrong": "LA MONEDA"
+        },
+        {
+          "type": "quiz",
+          "question": "кредит, займ → <b>el ___STAMO</b>",
+          "options": [
+            "PRÉ",
+            "PRO",
+            "PRA"
+          ],
+          "correct_answer": "PRÉ",
+          "explanation_wrong": "EL PRÉSTAMO"
+        },
+        {
+          "type": "quiz",
+          "question": "банк → <b>el ___NCO</b>",
+          "options": [
+            "BA",
+            "BE",
+            "BO"
+          ],
+          "correct_answer": "BA",
+          "explanation_wrong": "EL BANCO"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПЕРЕВЫПУСТИТЬ</b> карту\\n👉 ___  la tarjeta",
+          "options": [
+            "RENOVAR",
+            "BLOQUEAR",
+            "COMPRAR"
+          ],
+          "correct_answer": "RENOVAR",
+          "explanation_wrong": "RENOVAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ВНЕСТИ</b> наличные\\n👉 ___  efectivo",
+          "options": [
+            "INGRESAR",
+            "SACAR",
+            "GUARDAR"
+          ],
+          "correct_answer": "INGRESAR",
+          "explanation_wrong": "INGRESAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>СНЯТЬ</b> наличные\\n👉 ___  efectivo",
+          "options": [
+            "SACAR",
+            "INGRESAR",
+            "AHORRAR"
+          ],
+          "correct_answer": "SACAR",
+          "explanation_wrong": "SACAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПОПРОСИТЬ</b> выписку\\n👉 ___  un extracto",
+          "options": [
+            "PEDIR",
+            "PAGAR",
+            "PONER"
+          ],
+          "correct_answer": "PEDIR",
+          "explanation_wrong": "PEDIR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПОМЕНЯТЬ</b> валюту\\n👉 ___  moneda",
+          "options": [
+            "CAMBIAR",
+            "CAMINAR",
+            "CARGAR"
+          ],
+          "correct_answer": "CAMBIAR",
+          "explanation_wrong": "CAMBIAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ЗАПРОСИТЬ</b> кредит\\n👉 ___  un préstamo",
+          "options": [
+            "SOLICITAR",
+            "TOMAR",
+            "PAGAR"
+          ],
+          "correct_answer": "SOLICITAR",
+          "explanation_wrong": "SOLICITAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПЕРЕВЫПУСТИТЬ</b> (карту) → <b>___NOVAR</b>",
+          "options": [
+            "RE",
+            "RA",
+            "RO"
+          ],
+          "correct_answer": "RE",
+          "explanation_wrong": "RENOVAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ВНЕСТИ</b> (наличные) → <b>___GRESAR</b>",
+          "options": [
+            "IN",
+            "EN",
+            "AN"
+          ],
+          "correct_answer": "IN",
+          "explanation_wrong": "INGRESAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>СНЯТЬ</b> (наличные) → <b>___CAR</b>",
+          "options": [
+            "SA",
+            "SE",
+            "SI"
+          ],
+          "correct_answer": "SA",
+          "explanation_wrong": "SACAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПОПРОСИТЬ</b> (выписку) → <b>___DIR</b>",
+          "options": [
+            "PE",
+            "PA",
+            "PI"
+          ],
+          "correct_answer": "PE",
+          "explanation_wrong": "PEDIR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПОМЕНЯТЬ</b> (валюту) → <b>___MBIAR</b>",
+          "options": [
+            "CA",
+            "CE",
+            "CI"
+          ],
+          "correct_answer": "CA",
+          "explanation_wrong": "CAMBIAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ЗАПРОСИТЬ</b> (кредит) → <b>___LICITAR</b>",
+          "options": [
+            "SO",
+            "SA",
+            "SU"
+          ],
+          "correct_answer": "SO",
+          "explanation_wrong": "SOLICITAR"
+        }
+      ],
+      "textquiz_pool": [
+        {
+          "type": "textquiz",
+          "question": "Перевыпустить карту\\n👉 [[RENOVAR]] ______ 💳",
+          "correct_answer": "tarjeta"
+        },
+        {
+          "type": "textquiz",
+          "question": "Внести наличные\\n👉 [[INGRESAR]] ______ 💵",
+          "correct_answer": "efectivo"
+        },
+        {
+          "type": "textquiz",
+          "question": "Снять наличные\\n👉 [[SACAR]] ______ 💵",
+          "correct_answer": "efectivo"
+        },
+        {
+          "type": "textquiz",
+          "question": "Попросить выписку\\n👉 [[PEDIR]] ______ 📄",
+          "correct_answer": "extracto"
+        },
+        {
+          "type": "textquiz",
+          "question": "Поменять валюту\\n👉 [[CAMBIAR]] ______ 💱",
+          "correct_answer": "moneda"
+        },
+        {
+          "type": "textquiz",
+          "question": "Запросить кредит\\n👉 [[SOLICITAR]] ______ 💸",
+          "correct_answer": "préstamo"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ПЕРЕВЫПУСТИТЬ</b> карту\\n👉 ___ tarjeta 💳",
+          "correct_answer": "renovar"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ВНЕСТИ</b> наличные\\n👉 ___ efectivo 💵",
+          "correct_answer": "ingresar"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>СНЯТЬ</b> наличные\\n👉 ___ efectivo 💵",
+          "correct_answer": "sacar"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ПОПРОСИТЬ</b> выписку\\n👉 ___ un extracto 📄",
+          "correct_answer": "pedir"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ПОМЕНЯТЬ</b> валюту\\n👉 ___ moneda 💱",
+          "correct_answer": "cambiar"
+        },
+        {
+          "type": "textquiz",
+          "question": "<b>ЗАПРОСИТЬ</b> кредит\\n👉 ___ un préstamo 💸",
+          "correct_answer": "solicitar"
+        }
+      ]
+    }
+  ],
+  "exercises": [],
+  "videos": [
+    {
+      "title": "🏦 LA PRIMERA VEZ EN BANCO",
+      "link": "https://youtube.com/shorts/QqwNJXwvf9s?si=vhroXC1fo2xPigmV"
+    },
+    {
+      "title": "🏧NO PUEDO SACAR DINERO 🥲",
+      "link": "https://youtube.com/shorts/MS9z_ZPiJ1A?si=K__60GKZ58uWX6mu"
+    },
+    {
+      "title": "🏦 ABRIR UNA CUENTA",
+      "link": "https://youtu.be/saiVZHLjg28?si=LtZIwDAzLfQ36rfR"
+    }
+  ],
+  "dialogs": [
+    {
+      "phase_id": 1,
+      "phase_name": "🏦 СЧЕТА И КОМИССИИ 💸",
+      "blocks": [
+        {
+          "lines": [
+            "Сегодня я хочу ОТКРЫТЬ ТЕКУЩИЙ СЧЁТ здесь.",
+            "hoy quiero [[ABRIR UNA CUENTA CORRIENTE]] aquí."
+          ]
+        },
+        {
+          "lines": [
+            "Потом я хочу ОТКРЫТЬ СБЕРЕГАТЕЛЬНЫЙ СЧЁТ здесь.",
+            "luego quiero [[ABRIR UNA CUENTA DE AHORRO]] aquí."
+          ]
+        },
+        {
+          "lines": [
+            "К этому счёту хочу ПОДКЛЮЧИТЬ ПЛАТЁЖ НА ДОМ.",
+            "a esta cuenta quiero [[DOMICILIAR LOS RECIBOS]]."
+          ]
+        },
+        {
+          "lines": [
+            "Если что-то идёт не так, могу ОТМЕНИТЬ ПЛАТЁЖ.",
+            "si algo va mal, puedo [[CANCELAR UN RECIBO]]."
+          ]
+        },
+        {
+          "lines": [
+            "Если комиссия странная, хочу ОБЖАЛОВАТЬ КОМИССИЮ.",
+            "si la comisión es rara, quiero [[RECLAMAR UNA COMISIÓN]]."
+          ]
+        },
+        {
+          "lines": [
+            "В конце дня нужно СДЕЛАТЬ МЕЖДУНАРОДНЫЙ ПЕРЕВОД.",
+            "al final del día necesito [[HACER UNA TRANSFERENCIA INTERNACIONAL]]."
+          ]
+        },
+        {
+          "lines": [
+            "сегодня я хочу открыть текущий счёт здесь.",
+            "[[hoy quiero abrir una cuenta corriente aquí.]]"
+          ]
+        },
+        {
+          "lines": [
+            "потом я хочу открыть сберегательный счёт здесь.",
+            "[[luego quiero abrir una cuenta de ahorro aquí.]]"
+          ]
+        },
+        {
+          "lines": [
+            "к этому счёту хочу подключить платёж на дом.",
+            "[[a esta cuenta quiero domiciliar los recibos.]]"
+          ]
+        },
+        {
+          "lines": [
+            "если что-то идёт не так, могу отменить платёж.",
+            "[[si algo va mal, puedo cancelar un recibo.]]"
+          ]
+        },
+        {
+          "lines": [
+            "если комиссия странная, хочу обжаловать комиссию.",
+            "[[si la comisión es rara, quiero reclamar una comisión.]]"
+          ]
+        },
+        {
+          "lines": [
+            "в конце дня нужно сделать международный перевод.",
+            "[[al final del día necesito hacer una transferencia internacional.]]"
+          ]
+        }
+      ]
+    },
+    {
+      "phase_id": 2,
+      "phase_name": "💳 КАРТЫ, ВАЛЮТЫ И ДОЛГИ 💶",
+      "blocks": [
+        {
+          "lines": [
+            "Сегодня я хочу <b>ПЕРЕВЫПУСТИТЬ КАРТУ</b> в этом банке.",
+            "hoy quiero [[<b>RENOVAR LA TARJETA</b>]] en este banco."
+          ]
+        },
+        {
+          "lines": [
+            "Потом я хочу <b>ВНЕСТИ НАЛИЧНЫЕ</b> на этот счёт.",
+            "después quiero [[<b>INGRESAR EFECTIVO</b>]] en esta cuenta."
+          ]
+        },
+        {
+          "lines": [
+            "Иногда я хочу <b>СНЯТЬ НАЛИЧНЫЕ</b> в банкомате.",
+            "a veces quiero [[<b>SACAR EFECTIVO</b>]] en el cajero."
+          ]
+        },
+        {
+          "lines": [
+            "Также я хочу <b>ПОПРОСИТЬ ВЫПИСКУ</b> по счёту.",
+            "también quiero [[<b>PEDIR UN EXTRACTO</b>]] de la cuenta."
+          ]
+        },
+        {
+          "lines": [
+            "Потом мне нужно <b>ПОМЕНЯТЬ ВАЛЮТУ</b> для поездки.",
+            "luego necesito [[<b>CAMBIAR MONEDA</b>]] para el viaje."
+          ]
+        },
+        {
+          "lines": [
+            "В конце я собираюсь <b>ЗАПРОСИТЬ КРЕДИТ</b> в банке.",
+            "al final voy a [[<b>SOLICITAR UN PRÉSTAMO</b>]] en el banco."
+          ]
+        },
+        {
+          "lines": [
+            "сегодня я хочу <b>перевыпустить карту</b> в этом банке.",
+            "[[hoy quiero <b>renovar la tarjeta</b> en este banco.]]"
+          ]
+        },
+        {
+          "lines": [
+            "потом я хочу <b>внести наличные</b> на этот счёт.",
+            "[[después quiero <b>ingresar efectivo</b> en esta cuenta.]]"
+          ]
+        },
+        {
+          "lines": [
+            "иногда я хочу <b>снять наличные</b> в банкомате.",
+            "[[a veces quiero <b>sacar efectivo</b> en el cajero.]]"
+          ]
+        },
+        {
+          "lines": [
+            "также я хочу <b>попросить выписку</b> по счёту.",
+            "[[también хочу <b>pedir un extracto</b> de la cuenta.]]"
+          ]
+        },
+        {
+          "lines": [
+            "потом мне нужно <b>поменять валюту</b> для поездки.",
+            "[[luego necesito <b>cambiar moneda</b> para el viaje.]]"
+          ]
+        },
+        {
+          "lines": [
+            "в конце я собираюсь <b>запросить кредит</b> в банке.",
+            "[[al final voy a <b>solicitar un préstamo</b> en el banco.]]"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,857 @@
+{
+  "title": "_ir_al_medico",
+  "visible_title": "🏥 IR AL MEDICO👨‍⚕️",
+  "description": "В этой теме ты научишься:\n— объяснять врачу, что болит и где, без паники и пантомимы\n— записываться на приём и терпеть очередь",
+  "category": "lex",
+  "level": "A1-A2",
+  "vocab": [
+    {
+      "phase_id": 1,
+      "phase_name": "⏳ ОЧЕРЕДЬ и ПРИЁМ 👨‍⚕️",
+      "vocab": [
+        {
+          "type": "text",
+          "text": "🔎 ВЗГЛЯНИ НА ФРАЗЫ\n🧐 Сейчас будем их смаковать 🤌\n\n<b>TENER FIEBRE</b> 👉 <b>иметь</b> температуру\n\n<b>ME DUELE LA BARRIGA</b> 👉 <b>болит</b> живот\n\n<b>PEDIR CITA</b> 👉 <b>записаться</b> на приём\n\n<b>ESTAR ENFERMO</b> 👉 <b>быть</b> больным\n\n<b>TOMAR PASTILLAS</b> 👉 <b>принимать</b> таблетки\n\n<b>ESPERAR TURNO</b> 👉 <b>ждать</b> своей очереди\n\nС этими фразами ты точно не потеряешься в походе к врачу."
+        },
+        {
+          "title": "🔗 BUSCAR PAREJA",
+          "link": "https://wordwall.net/ru/embed/4ecd556508c84fc78d5ac1bea8b2b3ad?themeId=2&templateId=3&fontStackId=0"
+        },
+        {
+          "type": "text",
+          "text": "Сегодня у меня <b>ВЫСОКАЯ ТЕМПЕРАТУРА</b>.\nhoy [[<b>TENGO FIEBRE</b>]] alta.\n\nсегодня у меня <b>высокая температура</b>.\n[[hoy <b>tengo fiebre</b> alta.]]\n\nСейчас у меня <b>БОЛИТ ЖИВОТ</b>.\nahora [[<b>ME DUELE LA BARRIGA</b>]].\n\nсейчас у меня <b>болит живот</b>.\n[[ahora <b>me duele la barriga</b>.]]\n\nСегодня я <b>ЗАПИСЫВАЮСЬ НА ПРИЁМ</b> к врачу.\nhoy [[<b>PIDO CITA</b>]] con el médico.\n\nсегодня я <b>записываюсь на приём</b> к врачу.\n[[hoy <b>pido cita</b> con el médico.]]\n\nСегодня я <b>БОЛЕН</b> и сижу дома.\nhoy [[<b>ESTOY ENFERMO</b>]] en casa.\n\nсегодня я <b>болен</b> и сижу дома.\n[[hoy <b>estoy enfermo</b> en casa.]]\n\nСейчас я <b>ПРИНИМАЮ ТАБЛЕТКИ</b> после еды.\nahora [[<b>TOMO PASTILLAS</b>]] después de comer.\n\nсейчас я <b>принимаю таблетки</b> после еды.\n[[ahora <b>tomo pastillas</b> después de comer.]]\n\nВ клинике я <b>ЖДУ СВОЮ ОЧЕРЕДЬ</b>.\nen la clínica [[<b>ESPERO MI TURNO</b>]].\n\nв клинике я <b>жду свою очередь</b>.\n[[en la clínica <b>espero mi turno</b>.]]"
+        }
+      ],
+      "quiz_pool": [
+        {
+          "type": "quiz",
+          "question": "<b>Tengo fiebre</b>",
+          "options": [
+            "у меня температура",
+            "у меня кашель",
+            "я меряю температуру"
+          ],
+          "correct_answer": "у меня температура",
+          "explanation_wrong": "у меня температура"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>Me duele la barriga</b>",
+          "options": [
+            "у меня болит живот",
+            "у меня болит голова",
+            "мне холодно"
+          ],
+          "correct_answer": "у меня болит живот",
+          "explanation_wrong": "у меня болит живот"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>Pido cita</b>",
+          "options": [
+            "я записываюсь на приём",
+            "я спрашиваю врача",
+            "я звоню врачу"
+          ],
+          "correct_answer": "я записываюсь на приём",
+          "explanation_wrong": "я записываюсь на приём"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>Estoy enfermo</b>",
+          "options": [
+            "я болен",
+            "я здоров",
+            "я чувствую себя лучше"
+          ],
+          "correct_answer": "я болен",
+          "explanation_wrong": "я болен"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>Tomo pastillas</b>",
+          "options": [
+            "я принимаю таблетки",
+            "я покупаю таблетки",
+            "я делаю уколы"
+          ],
+          "correct_answer": "я принимаю таблетки",
+          "explanation_wrong": "я принимаю таблетки"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>Espero mi turno</b>",
+          "options": [
+            "я жду своей очереди",
+            "я записываюсь в очередь",
+            "я пропускаю свою очередь"
+          ],
+          "correct_answer": "я жду своей очереди",
+          "explanation_wrong": "я жду своей очереди"
+        },
+        {
+          "type": "quiz",
+          "question": "температура → la ___bre",
+          "options": [
+            "fie",
+            "fo",
+            "fa"
+          ],
+          "correct_answer": "fie",
+          "explanation_wrong": "fiebre"
+        },
+        {
+          "type": "quiz",
+          "question": "живот → la ___rriga",
+          "options": [
+            "ba",
+            "be",
+            "bo"
+          ],
+          "correct_answer": "ba",
+          "explanation_wrong": "barriga"
+        },
+        {
+          "type": "quiz",
+          "question": "приём (запись) → la ___ta",
+          "options": [
+            "ci",
+            "si",
+            "ce"
+          ],
+          "correct_answer": "ci",
+          "explanation_wrong": "cita"
+        },
+        {
+          "type": "quiz",
+          "question": "больной (человек) → el ___fermo",
+          "options": [
+            "en",
+            "an",
+            "in"
+          ],
+          "correct_answer": "en",
+          "explanation_wrong": "enfermo"
+        },
+        {
+          "type": "quiz",
+          "question": "таблетки → las ___tillas",
+          "options": [
+            "pas",
+            "pis",
+            "pos"
+          ],
+          "correct_answer": "pas",
+          "explanation_wrong": "pastillas"
+        },
+        {
+          "type": "quiz",
+          "question": "очередь → el ___no",
+          "options": [
+            "tur",
+            "tor",
+            "tir"
+          ],
+          "correct_answer": "tur",
+          "explanation_wrong": "turno"
+        },
+        {
+          "type": "quiz",
+          "question": "У меня температура\\n👉 ___  fiebre",
+          "options": [
+            "tener",
+            "temer",
+            "tender"
+          ],
+          "correct_answer": "tener",
+          "explanation_wrong": "tener"
+        },
+        {
+          "type": "quiz",
+          "question": "У меня болит живот\\n👉 ___  la barriga",
+          "options": [
+            "doler",
+            "dormir",
+            "oler"
+          ],
+          "correct_answer": "doler",
+          "explanation_wrong": "doler"
+        },
+        {
+          "type": "quiz",
+          "question": "Я хочу записаться на приём\\n👉 ___  cita",
+          "options": [
+            "pedir",
+            "perder",
+            "pegar"
+          ],
+          "correct_answer": "pedir",
+          "explanation_wrong": "pedir"
+        },
+        {
+          "type": "quiz",
+          "question": "Я сейчас болен\\n👉 ___  enfermo",
+          "options": [
+            "estar",
+            "entrar",
+            "esperar"
+          ],
+          "correct_answer": "estar",
+          "explanation_wrong": "estar"
+        },
+        {
+          "type": "quiz",
+          "question": "Я принимаю таблетки\\n👉 ___  pastillas",
+          "options": [
+            "tomar",
+            "tocar",
+            "tapar"
+          ],
+          "correct_answer": "tomar",
+          "explanation_wrong": "tomar"
+        },
+        {
+          "type": "quiz",
+          "question": "Я жду своей очереди\\n👉 ___  turno",
+          "options": [
+            "esperar",
+            "separar",
+            "espiar"
+          ],
+          "correct_answer": "esperar",
+          "explanation_wrong": "esperar"
+        },
+        {
+          "type": "quiz",
+          "question": "иметь (температуру) → ___ner",
+          "options": [
+            "te",
+            "ta",
+            "ti"
+          ],
+          "correct_answer": "te",
+          "explanation_wrong": "tener"
+        },
+        {
+          "type": "quiz",
+          "question": "болеть (о части тела) → ___ler",
+          "options": [
+            "do",
+            "du",
+            "da"
+          ],
+          "correct_answer": "do",
+          "explanation_wrong": "doler"
+        },
+        {
+          "type": "quiz",
+          "question": "просить (записаться) → ___dir",
+          "options": [
+            "pe",
+            "pa",
+            "pi"
+          ],
+          "correct_answer": "pe",
+          "explanation_wrong": "pedir"
+        },
+        {
+          "type": "quiz",
+          "question": "быть (больным) → ___tar",
+          "options": [
+            "es",
+            "as",
+            "os"
+          ],
+          "correct_answer": "es",
+          "explanation_wrong": "estar"
+        },
+        {
+          "type": "quiz",
+          "question": "принимать (таблетки) → ___mar",
+          "options": [
+            "to",
+            "ta",
+            "ti"
+          ],
+          "correct_answer": "to",
+          "explanation_wrong": "tomar"
+        },
+        {
+          "type": "quiz",
+          "question": "ждать (своей очереди) → ___perar",
+          "options": [
+            "es",
+            "as",
+            "os"
+          ],
+          "correct_answer": "es",
+          "explanation_wrong": "esperar"
+        }
+      ],
+      "textquiz_pool": [
+        {
+          "type": "textquiz",
+          "question": "У меня температура\\n👉 [[TENER]] ______",
+          "correct_answer": "fiebre"
+        },
+        {
+          "type": "textquiz",
+          "question": "У меня болит живот\\n👉 [[DOLER LA]] ______",
+          "correct_answer": "barriga"
+        },
+        {
+          "type": "textquiz",
+          "question": "Я записываюсь на приём\\n👉 [[PEDIR]] ______",
+          "correct_answer": "cita"
+        },
+        {
+          "type": "textquiz",
+          "question": "Я болен\\n👉 [[ESTAR]] ______",
+          "correct_answer": "enfermo"
+        },
+        {
+          "type": "textquiz",
+          "question": "Я принимаю таблетки\\n👉 [[TOMAR]] ______",
+          "correct_answer": "pastillas"
+        },
+        {
+          "type": "textquiz",
+          "question": "Я жду своей очереди\\n👉 [[ESPERAR]] ______",
+          "correct_answer": "turno"
+        },
+        {
+          "type": "textquiz",
+          "question": "Сегодня у меня температура\\n👉 [[TENER]] ______",
+          "correct_answer": "fiebre"
+        },
+        {
+          "type": "textquiz",
+          "question": "Иногда у меня болит живот\\n👉 [[DOLER LA]] ______",
+          "correct_answer": "barriga"
+        },
+        {
+          "type": "textquiz",
+          "question": "Мне нужно записаться на приём\\n👉 [[PEDIR]] ______",
+          "correct_answer": "cita"
+        },
+        {
+          "type": "textquiz",
+          "question": "Сейчас я болен\\n👉 [[ESTAR]] ______",
+          "correct_answer": "enfermo"
+        },
+        {
+          "type": "textquiz",
+          "question": "Сейчас я принимаю таблетки\\n👉 [[TOMAR]] ______",
+          "correct_answer": "pastillas"
+        },
+        {
+          "type": "textquiz",
+          "question": "Сегодня я жду своей очереди\\n👉 [[ESPERAR]] ______",
+          "correct_answer": "turno"
+        }
+      ]
+    },
+    {
+      "phase_id": 2,
+      "phase_name": "🚑 СТУЛ И БУМАЖКИ 📝",
+      "vocab": [
+        {
+          "type": "text",
+          "text": "🔎 ВЗГЛЯНИ НА ФРАЗЫ\n🧐 Сейчас будем их смаковать 🤌\n\n<b>IR DE URGENCIAS</b> 👉 <b>идти</b> в неотложку\n\n<b>LLAMAR AL MÉDICO</b> 👨‍⚕️ 👉 <b>звонить</b> врачу\n\n<b>FIRMAR EL FORMULARIO</b> 👉 <b>подписать</b> бланк\n\n<b>TUMBARSE EN LA CAMA</b> 👉 <b>лечь</b> на кровать\n\n<b>SENTARSE EN LA SILLA</b> 👉 <b>сесть</b> на стул\n\n<b>HACER LOS ANÁLISIS</b> 👉 <b>сдавать</b> анализы"
+        },
+        {
+          "title": "🔗 BUSCAR PAREJA",
+          "link": "https://wordwall.net/ru/embed/47983898a7644d79b011b50e43ee4491?themeId=2&templateId=3&fontStackId=21"
+        }
+      ],
+      "quiz_pool": [
+        {
+          "type": "quiz",
+          "question": "<b>ir de urgencias</b>",
+          "options": [
+            "поехать срочно к врачу",
+            "идти в аптеку",
+            "идти домой"
+          ],
+          "correct_answer": "поехать срочно к врачу",
+          "explanation_wrong": "поехать срочно к врачу"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>llamar al médico</b>",
+          "options": [
+            "звонить врачу",
+            "звать медсестру",
+            "писать врачу"
+          ],
+          "correct_answer": "звонить врачу",
+          "explanation_wrong": "звонить врачу"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>firmar el formulario</b>",
+          "options": [
+            "подписывать бланк",
+            "заполнять бланк",
+            "читать бланк"
+          ],
+          "correct_answer": "подписывать бланк",
+          "explanation_wrong": "подписывать бланк"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>tumbarse en la cama</b>",
+          "options": [
+            "ложиться на кровать",
+            "сидеть на кровати",
+            "вставать с кровати"
+          ],
+          "correct_answer": "ложиться на кровать",
+          "explanation_wrong": "ложиться на кровать"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>sentarse en la silla</b>",
+          "options": [
+            "садиться на стул",
+            "ложиться на стул",
+            "стоять у стула"
+          ],
+          "correct_answer": "садиться на стул",
+          "explanation_wrong": "садиться на стул"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>hacer análisis</b>",
+          "options": [
+            "сдавать анализы",
+            "читать анализы",
+            "проверять анализы"
+          ],
+          "correct_answer": "сдавать анализы",
+          "explanation_wrong": "сдавать анализы"
+        },
+        {
+          "type": "quiz",
+          "question": "неотложка → <b>las __GENCIAS</b>",
+          "options": [
+            "UR",
+            "AR",
+            "IR"
+          ],
+          "correct_answer": "UR",
+          "explanation_wrong": "LAS URGENCIAS"
+        },
+        {
+          "type": "quiz",
+          "question": "врач → <b>el __DICO</b>",
+          "options": [
+            "MÉ",
+            "MA",
+            "MI"
+          ],
+          "correct_answer": "MÉ",
+          "explanation_wrong": "MÉDICO"
+        },
+        {
+          "type": "quiz",
+          "question": "бланк → <b>el ___MULARIO</b>",
+          "options": [
+            "FOR",
+            "FAR",
+            "FER"
+          ],
+          "correct_answer": "FOR",
+          "explanation_wrong": "FORMULARIO"
+        },
+        {
+          "type": "quiz",
+          "question": "кровать → <b>la __MA</b>",
+          "options": [
+            "CA",
+            "CO",
+            "CU"
+          ],
+          "correct_answer": "CA",
+          "explanation_wrong": "CAMA"
+        },
+        {
+          "type": "quiz",
+          "question": "стул → <b>la __LLA</b>",
+          "options": [
+            "SI",
+            "SO",
+            "SA"
+          ],
+          "correct_answer": "SI",
+          "explanation_wrong": "SILLA"
+        },
+        {
+          "type": "quiz",
+          "question": "анализы → <b>los __ÁLISIS</b>",
+          "options": [
+            "AN",
+            "EN",
+            "IN"
+          ],
+          "correct_answer": "AN",
+          "explanation_wrong": "ANÁLISIS"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПОЕХАТЬ</b> срочно к врачу\\n👉 ___  de urgencias",
+          "options": [
+            "IR DE",
+            "IR A",
+            "IR EN"
+          ],
+          "correct_answer": "IR DE",
+          "explanation_wrong": "IR DE"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ЗВОНИТЬ</b> врачу\\n👉 ___  al médico",
+          "options": [
+            "LLAMAR A",
+            "LLAMAR EN",
+            "LLEGAR A"
+          ],
+          "correct_answer": "LLAMAR A",
+          "explanation_wrong": "LLAMAR A"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПОДПИСЫВАТЬ</b> бланк\\n👉 ___  el formulario",
+          "options": [
+            "FIRMAR",
+            "FORMAR",
+            "FUMAR"
+          ],
+          "correct_answer": "FIRMAR",
+          "explanation_wrong": "FIRMAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ЛОЖИТЬСЯ</b> на кровать\\n👉 ___  en la cama",
+          "options": [
+            "TUMBARSE EN",
+            "TUMBAR EN",
+            "TOMBARSE EN"
+          ],
+          "correct_answer": "TUMBARSE EN",
+          "explanation_wrong": "TUMBARSE EN"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>САДИТЬСЯ</b> на стул\\n👉 ___  en la silla",
+          "options": [
+            "SENTARSE EN",
+            "SENTAR EN",
+            "SENTIRSE EN"
+          ],
+          "correct_answer": "SENTARSE EN",
+          "explanation_wrong": "SENTARSE EN"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>СДАВАТЬ</b> анализы\\n👉 ___  los análisis",
+          "options": [
+            "HACER",
+            "HACIR",
+            "HACAR"
+          ],
+          "correct_answer": "HACER",
+          "explanation_wrong": "HACER"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПОЕХАТЬ</b> срочно к врачу (в неотложку) → <b>__R</b>",
+          "options": [
+            "IR",
+            "ER",
+            "AR"
+          ],
+          "correct_answer": "IR",
+          "explanation_wrong": "IR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ЗВОНИТЬ</b> врачу (по телефону) → <b>___MAR</b>",
+          "options": [
+            "LLA",
+            "LLE",
+            "YA"
+          ],
+          "correct_answer": "LLA",
+          "explanation_wrong": "LLAMAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ПОДПИСЫВАТЬ</b> бланк → <b>___MAR</b>",
+          "options": [
+            "FIR",
+            "FAR",
+            "FER"
+          ],
+          "correct_answer": "FIR",
+          "explanation_wrong": "FIRMAR"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>ЛОЖИТЬСЯ</b> на кровать → <b>___BARSE</b>",
+          "options": [
+            "TUM",
+            "TOM",
+            "TIM"
+          ],
+          "correct_answer": "TUM",
+          "explanation_wrong": "TUMBARSE"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>САДИТЬСЯ</b> на стул → <b>___NTARSE</b>",
+          "options": [
+            "SE",
+            "SA",
+            "SI"
+          ],
+          "correct_answer": "SE",
+          "explanation_wrong": "SENTARSE"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>СДАВАТЬ</b> анализы → <b>___CER</b>",
+          "options": [
+            "HA",
+            "HE",
+            "HI"
+          ],
+          "correct_answer": "HA",
+          "explanation_wrong": "HACER"
+        }
+      ],
+      "textquiz_pool": [
+        {
+          "type": "textquiz",
+          "question": "Поехать срочно к врачу\\n👉 [[IR DE]] ______",
+          "correct_answer": "urgencias"
+        },
+        {
+          "type": "textquiz",
+          "question": "Я звоню врачу\\n👉 [[LLAMAR AL]] ______",
+          "correct_answer": "médico"
+        },
+        {
+          "type": "textquiz",
+          "question": "Я подписываю бланк\\n👉 [[FIRMAR EL]] ______",
+          "correct_answer": "formulario"
+        },
+        {
+          "type": "textquiz",
+          "question": "Я ложусь на кровать\\n👉 [[TUMBARSE EN LA]] ______",
+          "correct_answer": "cama"
+        },
+        {
+          "type": "textquiz",
+          "question": "Я сажусь на стул\\n👉 [[SENTARSE EN LA]] ______",
+          "correct_answer": "silla"
+        },
+        {
+          "type": "textquiz",
+          "question": "Я сдаю анализы\\n👉 [[HACER]] ______",
+          "correct_answer": "análisis"
+        },
+        {
+          "type": "textquiz",
+          "question": "Иногда мне нужно поехать срочно к врачу\\n👉 [[IR DE]] ______",
+          "correct_answer": "urgencias"
+        },
+        {
+          "type": "textquiz",
+          "question": "Иногда я звоню врачу вечером\\n👉 [[LLAMAR AL]] ______",
+          "correct_answer": "médico"
+        },
+        {
+          "type": "textquiz",
+          "question": "Сегодня я подписываю бланк\\n👉 [[FIRMAR EL]] ______",
+          "correct_answer": "formulario"
+        },
+        {
+          "type": "textquiz",
+          "question": "Сейчас я ложусь на кровать\\n👉 [[TUMBARSE EN LA]] ______",
+          "correct_answer": "cama"
+        },
+        {
+          "type": "textquiz",
+          "question": "Сейчас я сажусь на стул\\n👉 [[SENTARSE EN LA]] ______",
+          "correct_answer": "silla"
+        },
+        {
+          "type": "textquiz",
+          "question": "Сегодня я сдаю анализы\\n👉 [[HACER]] ______",
+          "correct_answer": "análisis"
+        }
+      ]
+    }
+  ],
+  "exercises": [],
+  "videos": [],
+  "dialogs": [
+    {
+      "phase_id": 1,
+      "phase_name": "⏳ ОЧЕРЕДЬ И ПРИЁМ 👨‍⚕️",
+      "blocks": [
+        {
+          "lines": [
+            "Сегодня у меня <b>ВЫСОКАЯ ТЕМПЕРАТУРА</b>.",
+            "hoy [[<b>TENGO FIEBRE</b>]] alta."
+          ]
+        },
+        {
+          "lines": [
+            "сегодня у меня <b>высокая температура</b>.",
+            "[[hoy <b>tengo fiebre</b> alta.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Сейчас у меня <b>БОЛИТ ЖИВОТ</b>.",
+            "ahora [[<b>ME DUELE LA BARRIGA</b>]]."
+          ]
+        },
+        {
+          "lines": [
+            "сейчас у меня <b>болит живот</b>.",
+            "[[ahora <b>me duele la barriga</b>.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Сегодня я <b>ЗАПИСЫВАЮСЬ НА ПРИЁМ</b> к врачу.",
+            "hoy [[<b>PIDO CITA</b>]] con el médico."
+          ]
+        },
+        {
+          "lines": [
+            "сегодня я <b>записываюсь на приём</b> к врачу.",
+            "[[hoy <b>pido cita</b> con el médico.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Сегодня я <b>БОЛЕН</b> и сижу дома.",
+            "hoy [[<b>ESTOY ENFERMO</b>]] en casa."
+          ]
+        },
+        {
+          "lines": [
+            "сегодня я <b>болен</b> и сижу дома.",
+            "[[hoy <b>estoy enfermo</b> en casa.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Сейчас я <b>ПРИНИМАЮ ТАБЛЕТКИ</b> после еды.",
+            "ahora [[<b>TOMO PASTILLAS</b>]] después de comer."
+          ]
+        },
+        {
+          "lines": [
+            "сейчас я <b>принимаю таблетки</b> после еды.",
+            "[[ahora <b>tomo pastillas</b> después de comer.]]"
+          ]
+        },
+        {
+          "lines": [
+            "В клинике я <b>ЖДУ СВОЮ ОЧЕРЕДЬ</b>.",
+            "en la clínica [[<b>ESPERO MI TURNO</b>]]."
+          ]
+        },
+        {
+          "lines": [
+            "в клинике я <b>жду свою очередь</b>.",
+            "[[en la clínica <b>espero mi turno</b>.]]"
+          ]
+        }
+      ]
+    },
+    {
+      "phase_id": 2,
+      "phase_name": "🚑 СТУЛ И БУМАЖКИ 📝",
+      "blocks": [
+        {
+          "lines": [
+            "Сегодня мне нужно <b>ПОЕХАТЬ СРОЧНО К ВРАЧУ</b>.",
+            "hoy tengo que [[<b>IR DE URGENCIAS</b>]]."
+          ]
+        },
+        {
+          "lines": [
+            "сегодня мне нужно <b>поехать срочно к врачу</b>.",
+            "[[hoy tengo que <b>ir de urgencias</b>.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Потом я хочу <b>ПОЗВОНИТЬ ВРАЧУ</b> из дома.",
+            "luego quiero [[<b>LLAMAR AL MÉDICO</b>]] desde casa."
+          ]
+        },
+        {
+          "lines": [
+            "потом я хочу <b>позвонить врачу</b> из дома.",
+            "[[luego quiero <b>llamar al médico</b> desde casa.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Потом я должен <b>ПОДПИСАТЬ БЛАНК</b> в клинике.",
+            "después debo [[<b>FIRMAR EL FORMULARIO</b>]] en la clínica."
+          ]
+        },
+        {
+          "lines": [
+            "потом я должен <b>подписать бланк</b> в клинике.",
+            "[[después debo <b>firmar el formulario</b> en la clínica.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Потом я <b>ЛОЖУСЬ НА КРОВАТЬ</b> и жду врача.",
+            "luego [[<b>ME TOMBO EN LA CAMA</b>]] y espero al médico."
+          ]
+        },
+        {
+          "lines": [
+            "потом я <b>ложусь на кровать</b> и жду врача.",
+            "[[luego <b>me tombo en la cama</b> y espero al médico.]]"
+          ]
+        },
+        {
+          "lines": [
+            "В кабинете я <b>САЖУСЬ НА СТУЛ</b> и говорю всё врачу.",
+            "en la consulta [[<b>ME SIENTO EN LA SILLA</b>]] y le cuento todo al médico."
+          ]
+        },
+        {
+          "lines": [
+            "в кабинете я <b>сажусь на стул</b> и говорю всё врачу.",
+            "[[en la consulta <b>me siento en la silla</b> y le cuento todo al médico.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Сегодня я <b>СДАЮ АНАЛИЗЫ</b> крови.",
+            "hoy [[<b>HAGO ANÁLISIS</b>]] de sangre."
+          ]
+        },
+        {
+          "lines": [
+            "сегодня я <b>сдаю анализы</b> крови.",
+            "[[hoy <b>hago análisis</b> de sangre.]]"
+          ]
+        }
+      ]
+    }
+  ]
+}

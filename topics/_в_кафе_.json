@@ -1,0 +1,310 @@
+{
+  "title": "_в_кафе_",
+  "visible_title": "☕️ В КАФЕ 🥐",
+  "description": "В этой теме ты научишься:\n— начинать диалог в кафе без ступора\n— понимать короткие вопросы официанта\n— вежливо завершать заказ и разговор",
+  "category": "lex",
+  "level": "A0",
+  "vocab": [
+    {
+      "phase_id": 1,
+      "phase_name": "🍽 БАЗОВЫЙ ДИАЛОГ 🥐",
+      "vocab": [
+        {
+          "type": "text",
+          "text": "🔎 ВЗГЛЯНИ НА ФРАЗЫ\n\n🧐 Сейчас будем их смаковать 🤌\n\nHOLA, BUENAS. 👉 здравствуйте\n\nMESA PARA DOS. 👉 столик на двоих\n\nNADA MÁS, GRACIAS. 👉 больше ничего, спасибо\n\n¿QUÉ QUIERES TOMAR? 👉 что хочешь выпить\n\n¿PARA AQUÍ O PARA LLEVAR? 👉 здесь или с собой\n\n¿ALGO MÁS? 👉 что-нибудь ещё"
+        },
+        {
+          "title": "🔗 Соедини фразу",
+          "link": "https://wordwall.net/ru/embed/e0a0207f0372496d9fadfa3d8658cbc8?themeId=2&templateId=3&fontStackId=21"
+        }
+      ],
+      "quiz_pool": [
+        {
+          "type": "quiz",
+          "question": "<b>Hola, buenas.</b>",
+          "options": [
+            "здравствуйте",
+            "привет",
+            "спасибо"
+          ],
+          "correct_answer": "здравствуйте",
+          "explanation_wrong": "здравствуйте"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>Mesa para dos.</b>",
+          "options": [
+            "столик на двоих",
+            "столик на одного",
+            "большой стол"
+          ],
+          "correct_answer": "столик на двоих",
+          "explanation_wrong": "столик на двоих"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>Nada más, gracias.</b>",
+          "options": [
+            "больше ничего, спасибо",
+            "ещё что-нибудь",
+            "спасибо"
+          ],
+          "correct_answer": "больше ничего, спасибо",
+          "explanation_wrong": "больше ничего, спасибо"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>¿Qué quieres tomar?</b>",
+          "options": [
+            "что хочешь выпить",
+            "что ты делаешь",
+            "где ты"
+          ],
+          "correct_answer": "что хочешь выпить",
+          "explanation_wrong": "что хочешь выпить"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>¿Para aquí o para llevar?</b>",
+          "options": [
+            "здесь или с собой",
+            "сейчас или потом",
+            "внутри или снаружи"
+          ],
+          "correct_answer": "здесь или с собой",
+          "explanation_wrong": "здесь или с собой"
+        },
+        {
+          "type": "quiz",
+          "question": "<b>¿Algo más?</b>",
+          "options": [
+            "что-нибудь ещё",
+            "всё хорошо",
+            "можно счёт"
+          ],
+          "correct_answer": "что-нибудь ещё",
+          "explanation_wrong": "что-нибудь ещё"
+        },
+        {
+          "type": "quiz",
+          "question": "Как сказать «Здравствуйте»?",
+          "options": [
+            "Hola, buenas.",
+            "Gracias.",
+            "Nada más."
+          ],
+          "correct_answer": "Hola, buenas.",
+          "explanation_wrong": "Hola, buenas."
+        },
+        {
+          "type": "quiz",
+          "question": "Как сказать «Столик на двоих»?",
+          "options": [
+            "Mesa para dos.",
+            "Mesa libre.",
+            "Dos mesas."
+          ],
+          "correct_answer": "Mesa para dos.",
+          "explanation_wrong": "Mesa para dos."
+        },
+        {
+          "type": "quiz",
+          "question": "Как сказать «Больше ничего, спасибо»?",
+          "options": [
+            "Nada más, gracias.",
+            "Algo más.",
+            "Gracias mucho."
+          ],
+          "correct_answer": "Nada más, gracias.",
+          "explanation_wrong": "Nada más, gracias."
+        },
+        {
+          "type": "quiz",
+          "question": "Как спросит официант «Что хочешь выпить»?",
+          "options": [
+            "¿Qué quieres tomar?",
+            "¿Algo más?",
+            "¿Para aquí?"
+          ],
+          "correct_answer": "¿Qué quieres tomar?",
+          "explanation_wrong": "¿Qué quieres tomar?"
+        },
+        {
+          "type": "quiz",
+          "question": "Как спросить «Здесь или с собой»?",
+          "options": [
+            "¿Para aquí o para llevar?",
+            "¿Algo más?",
+            "¿Mesa para dos?"
+          ],
+          "correct_answer": "¿Para aquí o para llevar?",
+          "explanation_wrong": "¿Para aquí o para llevar?"
+        },
+        {
+          "type": "quiz",
+          "question": "Как спросить «Что-нибудь ещё»?",
+          "options": [
+            "¿Algo más?",
+            "¿Todo bien?",
+            "¿La cuenta?"
+          ],
+          "correct_answer": "¿Algo más?",
+          "explanation_wrong": "¿Algo más?"
+        },
+        {
+          "type": "quiz",
+          "question": "Hola, ___",
+          "options": [
+            "BUENAS",
+            "BUENOS",
+            "BUENA"
+          ],
+          "correct_answer": "BUENAS",
+          "explanation_wrong": "BUENAS"
+        },
+        {
+          "type": "quiz",
+          "question": "Mesa para ___",
+          "options": [
+            "DOS",
+            "DOSA",
+            "DOSO"
+          ],
+          "correct_answer": "DOS",
+          "explanation_wrong": "DOS"
+        },
+        {
+          "type": "quiz",
+          "question": "Nada más, ___",
+          "options": [
+            "GRACIAS",
+            "GRACIA",
+            "GRATO"
+          ],
+          "correct_answer": "GRACIAS",
+          "explanation_wrong": "GRACIAS"
+        },
+        {
+          "type": "quiz",
+          "question": "¿Qué quieres ___?",
+          "options": [
+            "TOMAR",
+            "COMER",
+            "LLEVAR"
+          ],
+          "correct_answer": "TOMAR",
+          "explanation_wrong": "TOMAR"
+        },
+        {
+          "type": "quiz",
+          "question": "¿Para aquí o para ___?",
+          "options": [
+            "LLEVAR",
+            "TOMAR",
+            "COMER"
+          ],
+          "correct_answer": "LLEVAR",
+          "explanation_wrong": "LLEVAR"
+        },
+        {
+          "type": "quiz",
+          "question": "¿Algo ___?",
+          "options": [
+            "MÁS",
+            "MENOS",
+            "MUCHO"
+          ],
+          "correct_answer": "MÁS",
+          "explanation_wrong": "MÁS"
+        }
+      ]
+    }
+  ],
+  "exercises": [],
+  "videos": [
+    {
+      "title": "Un café y dos bocadillos 🥐☕️",
+      "link": "https://es.islcollective.com/espanol-ele-video-lecciones/embed/792760"
+    }
+  ],
+  "dialogs": [
+    {
+      "phase_id": 1,
+      "phase_name": "🍽 БАЗОВЫЙ ДИАЛОГ 🥐",
+      "blocks": [
+        {
+          "lines": [
+            "Я говорю <b>ЗДРАВСТВУЙТЕ</b> в кафе.",
+            "yo digo [[<b>HOLA, BUENAS</b>]] en el café."
+          ]
+        },
+        {
+          "lines": [
+            "Я прошу <b>СТОЛИК НА ДВОИХ</b> сейчас.",
+            "yo pido [[<b>MESA PARA DOS</b>]] ahora."
+          ]
+        },
+        {
+          "lines": [
+            "я говорю <b>здравствуйте</b> в кафе.",
+            "[[yo digo <b>hola, buenas</b> en el café.]]"
+          ]
+        },
+        {
+          "lines": [
+            "я прошу <b>столик на двоих</b> сейчас.",
+            "[[yo pido <b>mesa para dos</b> ahora.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Официантка спрашивает <b>ЧТО ТЫ БУДЕШЬ ПИТЬ</b>.",
+            "la camarera pregunta [[<b>QUÉ QUIERES TOMAR</b>]] ahora."
+          ]
+        },
+        {
+          "lines": [
+            "Я отвечаю <b>БОЛЬШЕ НИЧЕГО СПАСИБО</b>.",
+            "yo respondo [[<b>NADA MÁS, GRACIAS</b>]]."
+          ]
+        },
+        {
+          "lines": [
+            "официантка спрашивает <b>что ты будешь пить</b>.",
+            "[[la camarera pregunta <b>qué quieres tomar</b> ahora.]]"
+          ]
+        },
+        {
+          "lines": [
+            "я отвечаю <b>больше ничего спасибо</b>.",
+            "[[yo respondo <b>nada más, gracias</b>.]]"
+          ]
+        },
+        {
+          "lines": [
+            "Официантка спрашивает <b>ЗДЕСЬ ИЛИ С СОБОЙ</b>.",
+            "la camarera pregunta [[<b>PARA AQUÍ O PARA LLEVAR</b>]]."
+          ]
+        },
+        {
+          "lines": [
+            "Официантка спрашивает <b>ЧТО-НИБУДЬ ЕЩЁ</b>.",
+            "la camarera pregunta [[<b>ALGO MÁS</b>]]."
+          ]
+        },
+        {
+          "lines": [
+            "официантка спрашивает <b>здесь или с собой</b>.",
+            "[[la camarera pregunta <b>para aquí o para llevar</b>.]]"
+          ]
+        },
+        {
+          "lines": [
+            "официантка спрашивает <b>что-нибудь ещё</b>.",
+            "[[la camarera pregunta <b>algo más</b>.]]"
+          ]
+        }
+      ]
+    }
+  ]
+}
