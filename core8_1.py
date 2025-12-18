@@ -1688,9 +1688,11 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
     await blank.delete()
 
     await query.message.answer(
-        f"🔒 Чтобы получить доступ, подпишись на:",
+        "🎁 🔒 Бесплатный доступ на 3 дня\n"
+        "👇🏼Подпишись на спонсорские каналы:",  # 💬 оффер 3-дневного доступа
         reply_markup=check_subscription_kb(topic_key, required),
     )
+
 
     # 💬 Переводим FSM в состояние ожидания проверки подписки
     await state.set_state(LessonStates.waiting_subscription)
@@ -5375,9 +5377,11 @@ async def check_subscription(query: CallbackQuery, state: FSMContext):
             # показываем список каналов и inline-кнопку «Проверить подписку»
             channels_str = ", ".join(required)
             return await query.message.answer(
-                f"🔒 Чтобы получить доступ, подпишись на:",
+                "🔒 Бесплатный доступ на 3 дня\n"
+                "👇🏼Подпишись на спонсорские каналы:",  # 💬 повторяем оффер при провале проверки
                 reply_markup=check_subscription_kb(topic_key, required)
             )
+
 
 
 
@@ -5682,6 +5686,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
