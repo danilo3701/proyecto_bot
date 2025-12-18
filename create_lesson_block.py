@@ -35,6 +35,7 @@ LEVEL_FROM_BUTTON = {
 #from core8_1 import load_ads_data, save_ads_data
 
 ADS_DATA_PATH = "ads_data.json"
+SUBSCRIPTION_CHANNELS_PATH = "subscription_channels.json"  # 💬 общий список каналов для рекламной подписки
 
 
 def load_ads_data():
@@ -766,6 +767,33 @@ async def save_channel_to_topic(message: Message, state: FSMContext):
         if not uname.startswith("@"):
             uname = "@" + uname
         parsed.append(uname)
+    # 💬 добавляем каналы в общий список subscription_channels.json (для рекламной подписки)
+    try:
+        if not os.path.exists(SUBSCRIPTION_CHANNELS_PATH):
+            with open(SUBSCRIPTION_CHANNELS_PATH, "w", encoding="utf-8") as f:
+                json.dump({"channels": []}, f, ensure_ascii=False, indent=2)
+
+        with open(SUBSCRIPTION_CHANNELS_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f) or {}
+
+        channels = payload.get("channels", [])
+        if not isinstance(channels, list):
+            channels = []
+
+        changed = False
+        for ch in parsed:
+            if ch and ch not in channels:
+                channels.append(ch)
+                changed = True
+
+        if changed:
+            payload["channels"] = channels
+            with open(SUBSCRIPTION_CHANNELS_PATH, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    except Exception:
+        logging.exception("save_channel_to_topic: cannot update subscription_channels.json")
+
 
     data = await state.get_data()
     topic = data.get("topic", {})
@@ -1734,6 +1762,7 @@ async def save_ad_block(message: Message, state: FSMContext):
     await message.answer("✅ Реклама добавлена!\n\n📂 Выбери КАТЕГОРИЮ темы:", reply_markup=keyboard)
     await state.set_state(NewTopicStates.waiting_category)
     # 💬 После добавления рекламы — возвращаемся в главное меню тем
+
 
 
 
