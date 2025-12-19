@@ -589,11 +589,20 @@ congrats_media = [
 
 # 💬 сюда добавишь file_id стикеров-приветствий для /start
 start_stickers = [
-    "CAACAgIAAxkBAAINeGksVItUr6uZEWIcdaZycygjzLYBAALCLQACHRFISD6hmpcMg6daNgQ",
-    "CAACAgIAAxkBAAINemksVMXIJUrXMdNPS_Ohk1ttSnFUAAKFAAPBnGAMi4wdH0hTXSI2BA",
-    "CAACAgIAAxkBAAINfGksVNJ3tWDoKQGrtCk7OKMcyPuFAAI0AQACUomRIxPN12_1HAdYNgQ",
-    "CAACAgIAAxkBAAINfmksVO1iKxH0NCSuS-CZRZk37UQWAALTBQACP5XMCp9au9JdR8cxNgQ",
-    "CAACAgIAAxkBAAINgGksVSNDGcybHqNlxHI9m1BEV1IvAALLEQACYqCQSbOuqz8nuqtyNgQ",
+    "CAACAgIAAxkBAAIQ3GlEyuQi7yxA9rylY01y_s6PMJpzAAKFAAPBnGAMi4wdH0hTXSI2BA",
+    "CAACAgIAAxkBAAIQ8mlEzTi8V6r0zBUnDjP5-EWljagqAALCLQACHRFISD6hmpcMg6daNgQ",
+    "CAACAgIAAxkBAAIQ9GlEzVWXC195fdC_RdGwJwlkcnVwAALLEQACYqCQSbOuqz8nuqtyNgQ",
+    "CAACAgIAAxkBAAIQsGlExWMckBjTRHgKTyp04F95eThGAAL9DAACBlBAS0k4CbFNG6-0NgQ",
+    "CAACAgIAAxkBAAIQ-mlEzZxyfooB58S32zq_zdDz0CQfAAKpDgACNuCRSVnSkxKS3C4WNgQ",  # 💬 стартовый стикер 1
+    "CAACAgIAAxkBAAIRAmlEzfbITyYjHWk9r1WoxItrVjh5AAIFAAM7YCQUPBiIAAElS3YxNgQ",  # 💬 стартовый стикер 2
+    "CAACAgIAAxkBAAIRBGlEzopd0Kmy0gu9lkxpKuHwHv-oAALGEQACg-zxSaJOx2F8TUm1NgQ",  # 💬 стартовый стикер 3
+    "CAACAgIAAxkBAAIRDGlEz1rcfR17u8KonwUkCnNXrJFNAAJ9AwACbbBCA70TLvm2TbpTNgQ",  # 💬 стартовый стикер 4
+    "CAACAgIAAxkBAAIRDmlEz2p-J6qMtKRP2ZWUrWN1x97rAAKBAwACbbBCA7GoAAFnFyiVAAE2BA",  # 💬 стартовый стикер 5
+    "CAACAgIAAxkBAAIREGlEz8Npj25B6RYsTakAAScVm1io1wACDw8AAntg0EvYTsoycPsK4jYE",  # 💬 стартовый стикер 5
+    "CAACAgIAAxkBAAIREmlE0Alt40YYfz2-IR2-31TzD9D7AAKVFQACV0koS2sM18g5gm-ZNgQ",  # 💬 стартовый стикер 5
+    "CAACAgIAAxkBAAIRFGlE0DRiJsfbeL0LcqOwS-FURwLDAAJQFwACw3-xSbdxcaVkLk9aNgQ",  # 💬 стартовый стикер 5
+    "CAACAgEAAxkBAAIRFmlE0Jd4lxQv_CZGEcLbRPx3apgzAAKyAwACfyVwRQJV4YjDC-pbNgQ",  # 💬 стартовый стикер 5
+    "CAACAgIAAxkBAAIRGGlE0OifKY-RzWPqixOggebP5t1EAAJ6EAACIPhoSoEIWQ5nZex6NgQ",  # 💬 стартовый стикер 5
 ]
 
 # 💬 набор фраз вместо жёсткой «Что изучаем?⭐»
@@ -714,3 +723,4 @@ refusal_stickers = [
     "CAACAgIAAxkBAAE2DQ5oRGDF1SENDelf-9iOMU8r-1KGuwAC3AUAAj-VzArxX-zMZBcVlzYE"
 
 ]
+
