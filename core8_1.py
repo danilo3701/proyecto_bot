@@ -3129,7 +3129,7 @@ async def handle_review_failed_vocab(poll_answer: PollAnswer, state: FSMContext)
 
     xp_fb = await bot.send_message(
         user_id,
-        f"{'🎉 +' + str(delta) + ' XP' if delta > 0 else '⚠️ ' + str(delta) + ' XP'}\nВсего XP: {xp}"
+        f"{'🎉 +' + str(delta) + ' XP' if delta > 0 else '⚠️ ' + str(delta)"
     )
 
     # 7) Подождать 1.5 с, чтобы успели прочесть
@@ -3206,7 +3206,7 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
 
 
     xp = (await state.get_data()).get("xp", 0)
-    fb = await bot.send_message(chat_id, f"⚠️ -20 XP\nВсего XP: {xp}")
+    fb = await bot.send_message(chat_id, f"⚠️ -20 XP")
 
     # ── Сохраняем этот индекс в failed_vocab ──
     idx    = data.get("vocab_index", 0)
@@ -3604,35 +3604,18 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
     # ─── Рандомное оформление сообщения об изменении XP ─────────────────────────
     xp_variants = [
-
-        lambda d, x: (
-            f"🔥 <b>+{d} XP</b> 🔥\n"
-            f"🏆 Всего: <b>{x} XP</b> ❄️"
-        ) if d>0 else (
-            f"❄️ <b>{d} XP</b> ❄️\n"
-            f"🔥 Всего: <b>{x} XP</b> 🔥"
-        ),
-        lambda d, x: (
-            f"👍 <b>{d:+} XP</b> 👍\n"
-            f"🏆 Всего XP: <b>{x}</b>"
-        ),
-        lambda d, x: (
-            f"➕ <b>{d}</b> XP!\n"
-            f"🏆 Всего: <b>{x} XP</b>\n"
-            " Продолжай в том же духе!"
-        ),
-        lambda d, x: (
-            f"{'🚀' if d>0 else '🐌'} <b>{d:+} XP</b> {'🚀' if d>0 else '🐌'}\n"
-            f"🏆 Всего XP: <b>{x}</b> ⭐️"
-        )
+        lambda d, x: f"➕ <b>{d}</b> XP · 🏆 <b>{x}</b>",        # 💬 позитив
+        lambda d, x: f"➖ <b>{abs(d)}</b> XP · 🏆 <b>{x}</b>",   # 💬 негатив
     ]
+]
 
     # 💬 XP-фидбэк показываем раз в 3 ответа для обычных квизов
     cnt = (data.get("quiz_fb_counter", 0) + 1)
     await state.update_data(quiz_fb_counter=cnt)
     fb = None
     if cnt % 3 == 0:
-        text = random.choice(xp_variants)(delta, xp)
+        # 💬 выбираем шаблон строго по знаку (без рандома)
+        text = xp_variants[0](delta, xp) if delta > 0 else xp_variants[1](delta, xp)
         fb = await bot.send_message(poll_answer.user.id, text, parse_mode="HTML")
 
 
@@ -5754,6 +5737,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
