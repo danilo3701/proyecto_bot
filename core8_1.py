@@ -1501,8 +1501,10 @@ async def back_to_menu(message: Message, state: FSMContext):
 UNAVAILABLE_STICKERS = [
     "CAACAgIAAxkBAAIQtGlExnTmmic3O0KvpIIspVsWb7JzAAKvEAACH1yYSbY5sQMKIUkvNgQ",  # 💬 вставь ID стикера
     "CAACAgIAAxkBAAIQtmlExoF2ySyJV2ZfWGmjvZTkm6gtAALDEAACyy6YSWRm4_6tdy94NgQ",  # 💬 вставь ID стикера
-    "CAACAgIAAxkBAAIQumlExqqBgH3NG6UBPyoVybbf9qCEAAL9EwAC_89ISy8wcZEgTRc-NgQ",  # 💬 вставь ID стикера
     "CAACAgIAAxkBAAIQuGlExpaDen0-RArL7Y1B0_X-gleoAAL2DgACMowBSlhbMUADkul4NgQ",  # 💬 вставь ID стикера
+    "CAACAgIAAxkBAAIQvmlEyFItz7xyloNqTjJ8CJkDUNd8AAJzAAPBnGAMCyMQkP6llyc2BA",  # 💬 вставь ID стикера
+    "CAACAgIAAxkBAAIQwGlEyGHOeggqkrRWCRSJ8wk16SlYAAKGAAPBnGAM5riI3F3JHAQ2BA",
+    "CAACAgIAAxkBAAIQwmlEyI0iFrq1o3yDm7WSpILFS9bkAAIqAQACUomRIz_Z0LQz8_8SNgQ",
 ]
 
 
@@ -5719,6 +5721,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
