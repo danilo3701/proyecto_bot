@@ -3177,7 +3177,7 @@ else:
 
     xp_fb = await bot.send_message(
         user_id,
-        f"{'🎉 +' + str(delta) + ' XP' if delta > 0 else '⚠️ ' + str(delta)"
+        f"{'🎉' if delta > 0 else '⚠️'} <b>{delta:+}</b> XP"
     )
 
     # 7) Подождать 1.5 с, чтобы успели прочесть
@@ -5789,6 +5789,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
