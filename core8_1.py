@@ -2832,6 +2832,32 @@ async def send_one_vocab(message: Message, state: FSMContext):
 async def send_ad_block(message: Message, state: FSMContext):
     ads = load_ads_data()
     data = await state.get_data()
+
+    
+
+    # 💬 анти-реклама для новых: первые 2 часа после first_join пропускаем ad-блок и идём в show_phase_menu
+    user_id = str(message.from_user.id) if getattr(message, "from_user", None) else str(message.chat.id)
+    now = int(time.time())
+
+    ud = load_user_data()
+    u = ud.get(user_id, {})
+    first_join = int(u.get("first_join") or 0)
+
+    # 💬 если first_join почему-то не зафиксирован — фиксируем сейчас (на всякий случай)
+    if not first_join:
+        u["first_join"] = now
+        ud[user_id] = u
+        save_user_data(ud)
+        first_join = now
+
+    # 💬 2 часа = 7200 секунд
+    if (now - first_join) < 2 * 60 * 60:
+        await state.update_data(pending_phase=False)  # 💬 сбрасываем флаг, чтобы show_phase_menu продолжил без рекламы
+        return await show_phase_menu(message, state)
+
+    
+
+
     # 1) Если рекламы нет — сразу возвращаемся в выбор фазы
     if not ads:
         await state.update_data(pending_phase=False)
@@ -5822,6 +5848,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
