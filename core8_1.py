@@ -3154,24 +3154,25 @@ async def handle_review_failed_vocab(poll_answer: PollAnswer, state: FSMContext)
     xp = (await state.get_data())["xp"]
 
 
-# 💬 Новый: показываем правильный ответ или фразу похвалы перед XP
-if is_correct:
-    await send_and_auto_delete_text(
-        bot,
-        user_id,
-        random.choice(vocab_quiz_success_phrases),
-        delay=SLEEP_BEFORE_FEEDBACK_S
-    )  # 💬 короткий показ
-    await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)  # 💬 пауза перед XP/штрафом
-else:
-    # 💬 при ошибке: правильный ответ 2 сек + иногда «негативный» стикер
-    asyncio.create_task(_maybe_send_negative_sticker(bot, user_id))  # 💬 шанс/тайминги в константах
-    await send_and_auto_delete_text(
-        bot,
-        user_id,
-        f"✅ {block['correct_answer']}",
-        delay=WRONG_FB_TEXT_TOTAL_S
-    )
+    # 💬 Новый: показываем правильный ответ или фразу похвалы перед XP
+    if is_correct:
+        await send_and_auto_delete_text(
+            bot,
+            user_id,
+            random.choice(vocab_quiz_success_phrases),
+            delay=SLEEP_BEFORE_FEEDBACK_S
+        )  # 💬 короткий показ
+        await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)  # 💬 пауза перед XP/штрафом
+    else:
+        # 💬 при ошибке: правильный ответ 2 сек + иногда «негативный» стикер
+        asyncio.create_task(_maybe_send_negative_sticker(bot, user_id))  # 💬 шанс/тайминги в константах
+        await send_and_auto_delete_text(
+            bot,
+            user_id,
+            f"✅ {block['correct_answer']}",
+            delay=WRONG_FB_TEXT_TOTAL_S
+        )
+
 
     xp_fb = await bot.send_message(
         user_id,
@@ -3622,33 +3623,32 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
     # 💬 Новый: показываем правильный ответ или фразу похвалы перед XP
   
-if is_correct:
-    # 💬 20% шанс — показать стикер, 80% — фразу поддержки
-    if random.random() < 0.2:
-        from scenarios_estiloso8_1 import exercise_stickers  # 💬 стикеры для успеха в упражнениях
-        sticker_id = random.choice(exercise_stickers)
-        await send_and_auto_delete_sticker(bot, user_id, sticker_id)
+    # 💬 Новый: показываем правильный ответ или фразу похвалы перед XP
+    if is_correct:
+        # 💬 20% шанс — показать стикер, 80% — фразу поддержки
+        if random.random() < 0.2:
+            from scenarios_estiloso8_1 import exercise_stickers  # 💬 стикеры для успеха в упражнениях
+            sticker_id = random.choice(exercise_stickers)
+            await send_and_auto_delete_sticker(bot, user_id, sticker_id)
+        else:
+            await send_and_auto_delete_text(
+                bot,
+                user_id,
+                random.choice(vocab_quiz_success_phrases),
+                delay=SLEEP_BEFORE_FEEDBACK_S,  # 💬 короткий показ текста
+            )
     else:
+        # 💬 при ошибке: держим правильный ответ 2 сек + иногда даём «негативный» стикер поверх
+        asyncio.create_task(_maybe_send_negative_sticker(bot, user_id))  # 💬 шанс/тайминги в константах
         await send_and_auto_delete_text(
             bot,
             user_id,
-            random.choice(vocab_quiz_success_phrases),
-            delay=SLEEP_BEFORE_FEEDBACK_S,  # 💬 короткий показ текста
+            f"✅ {block['correct_answer']}",
+            delay=WRONG_FB_TEXT_TOTAL_S,  # 💬 чтобы успели прочитать
         )
-else:
-    # 💬 при ошибке: держим правильный ответ 2 сек + иногда даём «негативный» стикер поверх
-    asyncio.create_task(_maybe_send_negative_sticker(bot, user_id))  # 💬 шанс/тайминги в константах
-    await send_and_auto_delete_text(
-        bot,
-        user_id,
-        f"✅ {block['correct_answer']}",
-        delay=WRONG_FB_TEXT_TOTAL_S,  # 💬 чтобы успели прочитать
-    )
 
-
-if is_correct:
-    await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)  # 💬 пауза перед XP только для «быстрого» фидбэка
-
+    if is_correct:
+        await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)  # 💬 пауза перед XP только для «быстрого» фидбэка
 
 
 
@@ -5789,6 +5789,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
