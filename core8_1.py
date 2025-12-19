@@ -3658,7 +3658,7 @@ if is_correct:
         lambda d, x: f"➕ <b>{d}</b> XP · 🏆 <b>{x}</b>",        # 💬 позитив
         lambda d, x: f"➖ <b>{abs(d)}</b> XP · 🏆 <b>{x}</b>",   # 💬 негатив
     ]
-]
+
 
     # 💬 XP-фидбэк показываем раз в 3 ответа для обычных квизов
     cnt = (data.get("quiz_fb_counter", 0) + 1)
@@ -5789,6 +5789,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
