@@ -1061,15 +1061,7 @@ async def start_handler(message: Message, state: FSMContext):
         "Holaaa...",  # 💬 НЕ пустой текст, чтобы не ловить BadRequest: text must be non-empty
         reply_markup=ReplyKeyboardRemove()
     )
-    # 💬 Сразу после приветствия показываем палец вниз и авто-удаляем
-    asyncio.create_task(
-        send_and_auto_delete_text(
-            bot,
-            message.chat.id,
-            "👇",
-            delay=1.5
-        )
-    )
+
 
 
     # 💬 Отправляем рандомный стартовый стикер и авто-удаляем через 3 секунды
@@ -5848,6 +5840,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
