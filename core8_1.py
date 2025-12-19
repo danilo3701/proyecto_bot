@@ -862,6 +862,29 @@ AUTO_DELETE_STICKER_DELAY_S = 2.3   # 🧹 авто-удаление стике�
 LONG_STICKER_DELETE_S       = 10.0  # 🧹 редкий длинный показ стикера (подписка/баннер)
 # 💬 если не нужен длинный кейс — можно обеих местами использовать AUTO_DELETE_STICKER_DELAY_S
 
+# ─── Негативный фидбек при ошибке (квиз) ───────────────────────
+NEGATIVE_STICKERS = [
+      "CAACAgIAAxkBAAIRIGlE3W3MzKs6hfGC6PBO1kNZnIkdAAKhMgACnIfBSFQYZ8fI6S5UNgQ.",  # 💬 вставь сюда ID стикера №1
+      "CAACAgIAAxkBAAIQtGlExnTmmic3O0KvpIIspVsWb7JzAAKvEAACH1yYSbY5sQMKIUkvNgQ",  # 💬 №2
+      "CAACAgIAAxkBAAIQwGlEyGHOeggqkrRWCRSJ8wk16SlYAAKGAAPBnGAM5riI3F3JHAQ2BA",  # 💬 №3
+      "CAACAgIAAxkBAAIRJmlE3iEgwjBN2ZJagKtYmbauKs-kAALVCgAC16xhS8dwLdmVKEAtNgQ",  # 💬 №4
+      "CAACAgIAAxkBAAIRMGlE3pe_U8eaS2iRnDKdmV1Vb1m-AAIVMAACvxdJSHkF7H2f3kAaNgQ",  # 💬 №5
+      "CAACAgIAAxkBAAIRNGlE3q8aCIWKQZTrDaPe_iTl4l8AA-svAAJLt1FJWR9bn1FKlyY2BA",  # 💬 вставь сюда ID стикера №1
+      "CAACAgIAAxkBAAIROmlE3vTINWHAQRbefMkaaQgQ0FjWAAIrEAACIfiYSfeadbBgPmtmNgQ",  # 💬 №2
+      "CAACAgIAAxkBAAIRPmlE30Jnig-Oi5-n16Uuyi3FeJ_sAAIzAQACUomRI9GLrMjcGVmbNgQ",  # 💬 №3
+      "CAACAgIAAxkBAAIRQmlE31ct037BwKN26N_p-8L765eNAAImAQACUomRI3VoLZaREiseNgQ",  # 💬 №4
+      "CAACAgIAAxkBAAIRRmlE33yP9FpaV1RLhgIjG8cXperuAAJJAQACUomRI4JZzSRvd3QzNgQ",  # 💬 №5
+      "CAACAgIAAxkBAAIRSmlE36yXFEuP_JdjsrUIIb0mLPrlAAJMAQACUomRIyzkKh0sMQYCNgQ",  # 💬 №5
+      "CAACAgIAAxkBAAIRTmlE39AM4lV1UOtN8k4Je_Tcj9BfAALOAAP3AsgPXJhH4Myrboo2BA",  # 💬 №5
+      "CAACAgIAAxkBAAIRUmlE4AUDdKUh0k6c08vvP6OVpkBGAAIzAQAC9wLIDzvK4ZTu2U7NNgQ",  # 💬 №5
+      "CAACAgIAAxkBAAIRWGlE4EfuynZEoFaKP-PDGmYh9_i7AAK5AAP3AsgPkCGq-Dl3Rtg2BA",  # 💬 №5
+]
+
+NEGATIVE_STICKER_PROB   = 0.30  # 💬 шанс показать «негативный» стикер при ошибке
+WRONG_FB_TEXT_TOTAL_S   = 2.0   # 💬 сколько держим сообщение с правильным ответом (всего)
+WRONG_STICKER_DELAY_S   = 0.5   # 💬 через сколько после ответа показать стикер
+WRONG_STICKER_SHOW_S    = 1.0   # 💬 сколько показываем стикер (потом удаляем)
+
 
 AD_REACTION_DELETE_S     = 2.0    # 🎯 пауза перед зачисткой рекламного блока после клика
 
@@ -900,6 +923,21 @@ async def send_and_auto_delete_gif(bot, chat_id, gif, delay=AUTO_DELETE_GIF_DELA
     except Exception:
         pass
 
+
+
+async def _maybe_send_negative_sticker(bot, chat_id: int):  # 💬 1 из NEGATIVE_STICKERS при ошибке
+    if not NEGATIVE_STICKERS:
+        return
+    if random.random() >= NEGATIVE_STICKER_PROB:
+        return
+
+    await asyncio.sleep(WRONG_STICKER_DELAY_S)  # 💬 даём увидеть правильный ответ
+    await send_and_auto_delete_sticker(
+        bot,
+        chat_id,
+        random.choice(NEGATIVE_STICKERS),
+        delay=WRONG_STICKER_SHOW_S  # 💬 показываем 1 секунду
+    )
 
 
 # ===============================================================================  
@@ -3116,15 +3154,25 @@ async def handle_review_failed_vocab(poll_answer: PollAnswer, state: FSMContext)
     xp = (await state.get_data())["xp"]
 
 
-    # 💬 Новый: показываем правильный ответ или фразу похвалы перед XP
-    if is_correct:
-        await send_and_auto_delete_text(bot, user_id,
-                                       random.choice(vocab_quiz_success_phrases),
-                                       delay=SLEEP_BEFORE_FEEDBACK_S)  # 💬 короткий показ
-    else:
-        await send_and_auto_delete_text(bot, poll_answer.user.id, f"✅ {block['correct_answer']}", delay=SLEEP_BEFORE_FEEDBACK_S)
+# 💬 Новый: показываем правильный ответ или фразу похвалы перед XP
+if is_correct:
+    await send_and_auto_delete_text(
+        bot,
+        user_id,
+        random.choice(vocab_quiz_success_phrases),
+        delay=SLEEP_BEFORE_FEEDBACK_S
+    )  # 💬 короткий показ
+    await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)  # 💬 пауза перед XP/штрафом
+else:
+    # 💬 при ошибке: правильный ответ 2 сек + иногда «негативный» стикер
+    asyncio.create_task(_maybe_send_negative_sticker(bot, user_id))  # 💬 шанс/тайминги в константах
+    await send_and_auto_delete_text(
+        bot,
+        user_id,
+        f"✅ {block['correct_answer']}",
+        delay=WRONG_FB_TEXT_TOTAL_S
+    )
 
-    await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)  # 💬 выдерживаем паузу перед XP/штрафом
 
 
     xp_fb = await bot.send_message(
@@ -3588,16 +3636,19 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
                 random.choice(vocab_quiz_success_phrases),
                 delay=SLEEP_BEFORE_FEEDBACK_S,  # 💬 короткий показ текста
             )
-    else:
-        # 💬 при ошибке ВСЕГДА показываем правильный ответ текстом
-        await send_and_auto_delete_text(
-            bot,
-            poll_answer.user.id,
-            f"✅ {block['correct_answer']}",
-            delay=SLEEP_BEFORE_FEEDBACK_S,
-        )
+else:
+    # 💬 при ошибке: держим правильный ответ 2 сек + иногда даём «негативный» стикер поверх
+    asyncio.create_task(_maybe_send_negative_sticker(bot, user_id))  # 💬 шанс/тайминги в константах
+    await send_and_auto_delete_text(
+        bot,
+        user_id,
+        f"✅ {block['correct_answer']}",
+        delay=WRONG_FB_TEXT_TOTAL_S,  # 💬 чтобы успели прочитать
+    )
 
-    await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)  # 💬 выдерживаем паузу перед XP/штрафом
+if is_correct:
+    await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)  # 💬 пауза перед XP только для «быстрого» фидбэка
+
 
 
 
@@ -3888,9 +3939,10 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     else:
         # 💬 остальные случаи (и все неверные ответы) — обычный текстовый XP-фидбэк
         xp_fb = await message.answer(
-            f"{'🎉 +' if delta>0 else '⚠️ '}{delta} XP\nВсего XP: {xp_total}",
+            f"{'🏆' if delta > 0 else '⚠️'} <b>{delta:+}</b> XP · 📊 <b>{xp_total}</b>",  # 💬 1 строка, без "Всего XP"
             parse_mode="HTML"
         )
+
 
     # 🔐 Новый критерий разблокировки:
     #   1) глобальный XP по теме >= порога xp_threshold
@@ -5737,6 +5789,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
