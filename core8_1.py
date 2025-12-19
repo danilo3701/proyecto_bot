@@ -2607,6 +2607,14 @@ async def topic_phase_chosen(cb: CallbackQuery, state: FSMContext):
     passed      = data.get("vocab_done_per_phase", {}).get(phase_id, 0)
     threshold   = math.ceil(total * 0.8) if total else 0
 
+
+    # 💬 считаем общее число квизов внутри выбранной фазы (для прогресс-бара OfferContinue)
+    total_quizzes_phase = 0
+    if phase:
+        total_quizzes_phase += len(phase.get("quiz_pool", [])) + len(phase.get("textquiz_pool", []))
+    total_quizzes_phase += sum(1 for b in blocks if b.get("type") in ("quiz", "textquiz"))
+    total_quizzes_phase += sum(1 for b in blocks if b.get("quiz"))
+
     # 1) фаза уже пройдена?
     if total and passed >= threshold:
         # 💬 Пытаемся показать pop-up, но не падаем, если callback уже «протух»
@@ -2639,15 +2647,21 @@ async def topic_phase_chosen(cb: CallbackQuery, state: FSMContext):
     # Если переключаемся на новую фазу — инициализируем счётчики
     if prev_phase != phase_id:
         await state.update_data(
-            selected_phase_id   = phase_id,
-            vocab_index         = 0,
-            failed_vocab        = [],
-            # (если используете per-phase счётчики, их тоже можно сбросить здесь:)
-            # vocab_done_per_phase = {}
+            selected_phase_id       = phase_id,
+            vocab_index             = 0,
+            failed_vocab            = [],
+            total_quizzes_phase     = total_quizzes_phase,  # 💬 total квизов именно в этой фазе
+            quiz_correct_phase      = 0,                     # 💬 правильные poll-quiz внутри фазы
+            textquiz_correct_phase  = 0,                     # 💬 правильные textquiz внутри фазы
         )
+
     else:
         # если возвращаемся в ту же фазу — просто обновляем ID фазы, остальные данные сохраняем
-        await state.update_data(selected_phase_id=phase_id)
+        await state.update_data(
+            selected_phase_id   = phase_id,
+            total_quizzes_phase = total_quizzes_phase,  # 💬 чтобы всегда был актуальный total по фазе
+        )
+
 
     # 💬 показываем «загрузку» и удаляем её через 5 сек (не блокируем переход)
     asyncio.create_task(
@@ -3569,10 +3583,15 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     delta = random.randint(28, 37) if is_correct else -10
     await award_xp(delta, state)
 
-    # 💬 Счётчик правильных квизов для прогресса
+    # 💬 Счётчики правильных квизов: общий (для меню) + по фазе (для OfferContinue)
     if is_correct:
         quiz_correct_total = data.get("quiz_correct_total", 0) + 1
-        await state.update_data(quiz_correct_total=quiz_correct_total)
+        quiz_correct_phase = data.get("quiz_correct_phase", 0) + 1  # 💬 прогресс именно внутри фазы
+        await state.update_data(
+            quiz_correct_total=quiz_correct_total,
+            quiz_correct_phase=quiz_correct_phase
+        )
+
 
 
     # 🔥 Level-Up: сохраняем прошлый глобальный XP
@@ -3721,8 +3740,12 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
             # 💬 2) Затем считаем прогресс и показываем его на 5 сек
             data2 = await state.get_data()
-            total_q   = data2.get("total_quizzes", 0)
-            correct_q = data2.get("quiz_correct_total", 0) + data2.get("textquiz_correct", 0)
+            total_q = data2.get("total_quizzes_phase", data2.get("total_quizzes", 0))  # 💬 total по фазе
+            correct_q = (
+                data2.get("quiz_correct_phase", data2.get("quiz_correct_total", 0)) +
+                data2.get("textquiz_correct_phase", data2.get("textquiz_correct", 0))
+            )  # 💬 correct по фазе
+
 
             correct_q = min(correct_q, total_q)
             perc = int((correct_q / total_q) * 100) if total_q else 0
@@ -3955,8 +3978,14 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
  
     if is_correct:
         correct_cnt += 1
-        await state.update_data(textquiz_correct=correct_cnt)
+        phase_cnt = data2.get("textquiz_correct_phase", 0) + 1  # 💬 прогресс именно внутри фазы
+        await state.update_data(
+            textquiz_correct=correct_cnt,
+            textquiz_correct_phase=phase_cnt
+        )
         data2["textquiz_correct"] = correct_cnt
+        data2["textquiz_correct_phase"] = phase_cnt
+
 
     threshold = data2.get("xp_threshold", 0)
     topic_xp = (
@@ -4080,8 +4109,12 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
             # 💬 2) Считаем прогресс по квизам и показываем его на 5 сек, затем авто-удаляем
             data2 = await state.get_data()
-            total_q   = data2.get("total_quizzes", 0)
-            correct_q = data2.get("quiz_correct_total", 0) + data2.get("textquiz_correct", 0)
+            total_q = data2.get("total_quizzes_phase", data2.get("total_quizzes", 0))  # 💬 total по фазе
+            correct_q = (
+                data2.get("quiz_correct_phase", data2.get("quiz_correct_total", 0)) +
+                data2.get("textquiz_correct_phase", data2.get("textquiz_correct", 0))
+            )  # 💬 correct по фазе
+
 
             # 💬 режем сверху, чтобы не было >100% из-за пересдач
             correct_q = min(correct_q, total_q)
@@ -5789,6 +5822,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
