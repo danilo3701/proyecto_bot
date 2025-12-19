@@ -1497,6 +1497,13 @@ async def back_to_menu(message: Message, state: FSMContext):
 
 
 
+# 🎲 Стикеры для заблокированных кнопок (🔒 Читать / 🔒 Видео и т.д.)
+UNAVAILABLE_STICKERS = [
+    "CAACAgIAAxkBAAIQtGlExnTmmic3O0KvpIIspVsWb7JzAAKvEAACH1yYSbY5sQMKIUkvNgQ",  # 💬 вставь ID стикера
+    "CAACAgIAAxkBAAIQtmlExoF2ySyJV2ZfWGmjvZTkm6gtAALDEAACyy6YSWRm4_6tdy94NgQ",  # 💬 вставь ID стикера
+    "CAACAgIAAxkBAAIQumlExqqBgH3NG6UBPyoVybbf9qCEAAL9EwAC_89ISy8wcZEgTRc-NgQ",  # 💬 вставь ID стикера
+    "CAACAgIAAxkBAAIQuGlExpaDen0-RArL7Y1B0_X-gleoAAL2DgACMowBSlhbMUADkul4NgQ",  # 💬 вставь ID стикера
+]
 
 
 
@@ -1507,8 +1514,10 @@ async def handle_unavailable_buttons(message: Message, state: FSMContext):
     💬 Если пользователь нажимает на недоступную кнопку,
     отправляем стикер отказа, который удаляется через 1.5 секунды.
     """
-    sticker = "CAACAgIAAxkBAAE4YOhogox6Armq-TOX3f5IkYPXCeUwuAACRAMAArVx2gYMtzsTtIZDMDYE"
-    await send_and_auto_delete_sticker(bot, message.chat.id, sticker, delay=1.5)
+    # 🎲 выбираем один случайный стикер из списка
+    sticker_id = random.choice(UNAVAILABLE_STICKERS) if UNAVAILABLE_STICKERS else "CAACAgIAAxkBAAE4YOhogox6Armq-TOX3f5IkYPXCeUwuAACRAMAArVx2gYMtzsTtIZDMDYE"  # 💬 fallback если список пустой
+    await send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=1.5)  # 💬 показали и удалили
+
 
 
 
@@ -2148,6 +2157,13 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
     # 🙊 Читать диалоги — новая логика
     if action == "read":
         await callback.answer()
+        # 🎲 Рандомный стикер при старте «Читать» из инлайн-меню (и авто-удаление)
+        try:
+            sticker_id = random.choice(READ_STICKERS)  # 💬 берём один из списка
+            await send_and_auto_delete_sticker(callback.bot, callback.message.chat.id, sticker_id)  # 💬 показываем и удаляем
+            await asyncio.sleep(AUTO_DELETE_STICKER_DELAY_S)  # 💬 ждём удаления, чтобы не мешал диалогам
+        except Exception:
+            pass
         # 💬 Запуск потока чтения диалогов из инлайн-меню
         return await start_dialog_reading(callback.message, state)
 
@@ -2268,6 +2284,14 @@ async def handle_read_dialogs_button(message: Message, state: FSMContext):
         await message.delete()
     except Exception:
         pass
+        
+    # 🎲 Рандомный стикер при старте «Читать» (и авто-удаление)
+    try:
+        sticker_id = random.choice(READ_STICKERS)  # 💬 берём один из списка
+        await send_and_auto_delete_sticker(bot, message.chat.id, sticker_id)  # 💬 показываем и удаляем
+        await asyncio.sleep(AUTO_DELETE_STICKER_DELAY_S)  # 💬 ждём удаления, чтобы не мешал диалогам
+    except Exception:
+        pass
 
     # 💬 Запускаем поток чтения диалогов
     return await start_dialog_reading(message, state)
@@ -2280,6 +2304,15 @@ LOCKED_STICKERS = [
     "CAACAgIAAxkBAAE2o1BoV03m9PlLTn4Z5mKDqnajd6c1_wACRwMAAm2wQgNSVSv5NcWAgjYE",
     
 ]
+
+# 📦 ID стикеров для кнопки «🙊 Читать»
+READ_STICKERS = [
+    "CAACAgIAAxkBAAIQrGlExR9h-U-6mBmdpV3fI2VoD_D-AAKBAAPBnGAM6PbLODBd3jc2BA",  # 💬 сюда вставь ID стикера
+    "CAACAgIAAxkBAAIQrmlExVAUmsZxZhqY6Q0sHedu9ArTAAJUXAACp2-AS1fkWR4Yo5d4NgQ",  # 💬 сюда вставь ID стикера
+    "CAACAgIAAxkBAAIQsGlExWMckBjTRHgKTyp04F95eThGAAL9DAACBlBAS0k4CbFNG6-0NgQ",  # 💬 сюда вставь ID стикера
+    "CAACAgIAAxkBAAIQqmlExOTyYtYHvJFnaU8veDz7KCRdAAIPPAAC81LISNODlD5N8m0pNgQ",  # 💬 сюда вставь ID стикера
+]
+
 
 # 📦 Стикер для временно закрытого раздела «Грамматика»
 GRAMMAR_LOCKED_STICKER = "CAACAgIAAxkBAAINjmksZviqm03_fPbJTCZirDrJdVwhAALDEAACyy6YSWRm4_6tdy94NgQ"  # 💬 сюда вставь ID нужного стикера
@@ -5686,6 +5719,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
