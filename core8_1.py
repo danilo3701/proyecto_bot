@@ -243,7 +243,7 @@ VID_GIF_FOLDER      = "gif/dudoso_after_link"   # То же для видео (�
 ADS_VIDEO_FOLDER = "ads_videos" # ——— Папка с видеорекламой
 
 # ——— Инициализация бота и FSM ——————————————————————————————————————
-BOT_TOKEN = "7267599701:AAEjhQX6xGqZxxnUYeR1L_73ty1JiePiPvQ"  
+BOT_TOKEN = "7267599701:AAG4duS6_2R8PFpoUzroIY1M5ib1OWw8o6s"  
 bot        = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp         = Dispatcher(storage=MemoryStorage())  
 
@@ -5848,6 +5848,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
