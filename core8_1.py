@@ -2062,7 +2062,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         try:
             sticker_id = random.choice(IT_MENU_STICKERS)  # 💬 1 из 5
             asyncio.create_task(
-                send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=1.0)
+                send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=1.7)
             )  # 💬 task: показать и удалить через 1 сек без await
         except Exception:
             pass
@@ -2105,7 +2105,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     try:
         sticker_id = random.choice(IT_MENU_STICKERS)  # 💬 1 из 5
         asyncio.create_task(
-            send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=1.0)
+            send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=1.7)
         )  # 💬 task: показать и удалить через 1 сек без await
     except Exception:
         pass
@@ -5754,6 +5754,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
