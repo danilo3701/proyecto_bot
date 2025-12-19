@@ -2058,6 +2058,16 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         # Финальный follow-up
         choice_text = random.choice(follow_up_phrases)
 
+        # 🤖 показываем IT-стикер перед меню (не блокируем поток)
+        try:
+            sticker_id = random.choice(IT_MENU_STICKERS)  # 💬 1 из 5
+            asyncio.create_task(
+                send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=1.0)
+            )  # 💬 task: показать и удалить через 1 сек без await
+        except Exception:
+            pass
+
+
         # 💬 отправляем меню урока и запоминаем его message_id для последующего удаления
         menu_msg = await smart_reply(
             message,
@@ -2091,6 +2101,15 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
     # Финальный follow-up
     choice_text = random.choice(follow_up_phrases)
+    # 🤖 показываем IT-стикер перед меню (не блокируем поток)
+    try:
+        sticker_id = random.choice(IT_MENU_STICKERS)  # 💬 1 из 5
+        asyncio.create_task(
+            send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=1.0)
+        )  # 💬 task: показать и удалить через 1 сек без await
+    except Exception:
+        pass
+
 
     # 💬 отправляем меню урока и запоминаем его message_id для последующего удаления
     menu_msg = await smart_reply(
@@ -2306,6 +2325,20 @@ LOCKED_STICKERS = [
     "CAACAgIAAxkBAAE2o1BoV03m9PlLTn4Z5mKDqnajd6c1_wACRwMAAm2wQgNSVSv5NcWAgjYE",
     
 ]
+
+# 🤖 IT-стикеры для показа перед меню урока (1 из 5, авто-удаление)
+IT_MENU_STICKERS = [
+    "CAACAgIAAxkBAAIQxGlEygsK1CDVEgABN6jOaVIBNjm1ogACYxAAAvaWQUmNof6XoMsbajYE",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQxmlEyhiFkQT7P9YSwAfd3Y8vg71nAAKrEgACGOJASeltNUEW4IxONgQ",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQymlEykJzr6fQAqvtgTTwaSLP55-UAALYLgACQ7nYSMxMa3UjThHMNgQ",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQsGlExWMckBjTRHgKTyp04F95eThGAAL9DAACBlBAS0k4CbFNG6-0NgQ",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQ0mlEypViSYH9C3sWzeF5VCQHvPYHAALkEgACOHUAAUoE0LZNVG4hoDYE",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQrmlExVAUmsZxZhqY6Q0sHedu9ArTAAJUXAACp2-AS1fkWR4Yo5d4NgQ",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQrGlExR9h-U-6mBmdpV3fI2VoD_D-AAKBAAPBnGAM6PbLODBd3jc2BA",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQ5GlEyzQYEAudwYG6_rO0dv5pmzRrAAJiAAPANk8TCvfTpUq3n5Q2BA",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQ7mlEy3qSidLYSqSvNY-Pl4ybYs69AALyEgAC8aOgSNoW844h2hMwNgQ",  # 💬 вставь ID
+]
+
 
 # 📦 ID стикеров для кнопки «🙊 Читать»
 READ_STICKERS = [
@@ -5721,6 +5754,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
