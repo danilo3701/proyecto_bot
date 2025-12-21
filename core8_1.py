@@ -308,10 +308,26 @@ class LoggingMiddleware(BaseMiddleware):
             curr = handler_history[-1] if handler_history else "unknown"
             prev = handler_history[-2] if len(handler_history) >= 2 else "none"
             # 💬 отправляем админу только названия хендлеров
+            # 💬 пытаемся вытащить тему из FSM (если есть)
+            topic_key = "unknown"
+            topic_name = "unknown"
+            st = data.get("state")
+            if st:
+                try:
+                    st_data = await st.get_data()
+                    topic_key = st_data.get("selected_topic", "unknown")
+                    info = topics.get(topic_key, {}) if isinstance(topics, dict) else {}
+                    topic_name = info.get("title") or info.get("name") or topic_key
+                except Exception:
+                    pass
+
+            # 💬 отправляем админу хендлеры + тему, где упало
             await bot.send_message(
                 ADMIN_CHAT_ID,
-                f"🔴 Ошибка в `{curr}` (prev: `{prev}`)"
+                f"🔴 Ошибка в `{curr}` (prev: `{prev}`)\n"
+                f"📌 Тема: `{topic_name}` ({topic_key})"
             )
+
             raise
 
 
@@ -5840,6 +5856,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
