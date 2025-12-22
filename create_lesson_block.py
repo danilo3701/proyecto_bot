@@ -791,6 +791,17 @@ async def save_channel_to_topic(message: Message, state: FSMContext):
             with open(SUBSCRIPTION_CHANNELS_PATH, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
 
+            # 💬 Пушим обновлённый subscription_channels.json в GitHub, чтобы Railway подтянул изменения
+            try:
+                github_put_file(
+                    local_path=SUBSCRIPTION_CHANNELS_PATH,
+                    repo_path="subscription_channels.json",
+                    commit_message="Update subscription channels via bot"
+                )
+            except Exception:
+                logging.exception("save_channel_to_topic: cannot push subscription_channels.json to GitHub")
+
+
     except Exception:
         logging.exception("save_channel_to_topic: cannot update subscription_channels.json")
 
@@ -1762,6 +1773,7 @@ async def save_ad_block(message: Message, state: FSMContext):
     await message.answer("✅ Реклама добавлена!\n\n📂 Выбери КАТЕГОРИЮ темы:", reply_markup=keyboard)
     await state.set_state(NewTopicStates.waiting_category)
     # 💬 После добавления рекламы — возвращаемся в главное меню тем
+
 
 
 
