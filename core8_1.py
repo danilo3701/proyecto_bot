@@ -6094,6 +6094,8 @@ if __name__ == '__main__':
             BotCommand(command="menu",  description="Главное меню")
         ])
 
+        migrate_runtime_files_to_volume()  # 💬 выполняется один раз при старте
+
 
         print("🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀 Бот запущен!")
         await dp.start_polling(bot)
@@ -6116,6 +6118,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
