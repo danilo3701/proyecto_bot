@@ -11,6 +11,7 @@ import os                           # Работа с файлами и папк
 if os.getenv("DISABLED") == "true":
     print("🚫 Бот временно отключён.")
     exit()
+os.makedirs("/data", exist_ok=True)  # 💬 создаём папку Volume, если ещё не создана
 
 import json                         # Чтение/запись JSON-топиков
 import random                       # Рандомизация (CTA-фразы, сценарии, стикеры)
@@ -444,7 +445,7 @@ def get_vocab_list(data: dict) -> list:
 
 import os
 
-XP_DATA_PATH = "xp_data.json"
+XP_DATA_PATH = "/data/xp_data.json"
 
 def load_xp_data():
     # 💬 Загружает XP-файл, если его нет — создаёт пустой
@@ -469,7 +470,20 @@ def save_xp_data(xp_data):
     with open(XP_DATA_PATH, "w", encoding="utf-8") as f:
         json.dump(xp_data, f, ensure_ascii=False, indent=2)
 
-# ➕ ВСТАВЬ вот это после строки: json.dump(xp_data, f, ensure_ascii=False, indent=2)
+
+def migrate_runtime_files_to_volume():
+    # 💬 переносим данные из контейнера в Volume (один раз)
+    try:
+        if not os.path.exists(XP_DATA_PATH) and os.path.exists("xp_data.json"):
+            with open("xp_data.json", "rb") as src, open(XP_DATA_PATH, "wb") as dst:
+                dst.write(src.read())
+
+        if not os.path.exists(USER_DATA_PATH) and os.path.exists("user_data.json"):
+            with open("user_data.json", "rb") as src, open(USER_DATA_PATH, "wb") as dst:
+                dst.write(src.read())
+    except Exception:
+        logging.exception("migrate_runtime_files_to_volume failed")
+
 
 def _analytics_purge_days(days: dict, keep_days: int = 30) -> dict:
     # 💬 оставляем только последние keep_days дат формата YYYY-MM-DD
@@ -554,7 +568,7 @@ def analytics_set_last_context(user_id: str, handler_name: str, topic_key: str =
 
 
 # 💬 USER DATA: сохраняем, какие темы разблокированы, и подписки на каналы
-USER_DATA_PATH = "user_data.json"
+USER_DATA_PATH = "/data/user_data.json" # 💬 данные хранятся в Railway Volume и не теряются при redeploy
 
 def load_user_data():
     # Загружает файл user_data.json, если нет — создаёт пустой
@@ -6102,6 +6116,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
