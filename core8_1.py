@@ -3095,81 +3095,49 @@ async def send_one_vocab(message: Message, state: FSMContext):
         return await bot.send_message(chat_id, scene["text"], reply_markup=inline_kb)  # 💬 отправляем кнопки
 
 
-
 @track_handler
 async def send_ad_block(message: Message, state: FSMContext):
     ads = load_ads_data()
-    data = await state.get_data()
-
-    
-
-    # 💬 анти-реклама для новых: первые 2 часа после first_join пропускаем ad-блок и идём в show_phase_menu
-    user_id = str(message.from_user.id) if getattr(message, "from_user", None) else str(message.chat.id)
-    now = int(time.time())
-
-    ud = load_user_data()
-    u = ud.get(user_id, {})
-    first_join = int(u.get("first_join") or 0)
-
-    # 💬 если first_join почему-то не зафиксирован — фиксируем сейчас (на всякий случай)
-    if not first_join:
-        u["first_join"] = now
-        ud[user_id] = u
-        save_user_data(ud)
-        first_join = now
-
-    # 💬 2 часа = 7200 секунд
-    if (now - first_join) < 2 * 60 * 60:
-        await state.update_data(pending_phase=False)  # 💬 сбрасываем флаг, чтобы show_phase_menu продолжил без рекламы
-        return await show_phase_menu(message, state)
-
-    
-
-
-    # 1) Если рекламы нет — сразу возвращаемся в выбор фазы
     if not ads:
-        await state.update_data(pending_phase=False)
-        return await show_phase_menu(message, state)
+        await message.answer("⚠️ Реклама не найдена.")
+        return
 
-    # 2) Вычисляем текущий индекс и сохраняем следующий
-    next_idx = data.get("ad_index", 0) % len(ads)
-    ad = ads[next_idx]
+    data = await state.get_data()
+    next_idx = data.get("ad_index", 0)
+    ad = ads[next_idx % len(ads)]
     await state.update_data(ad_index=next_idx + 1)
 
-    # 3) Пересылаем рекламный пост
+    # 💬 форвардим, чтобы была шапка/глазки (не copy!)
+    ad_msg = await bot.forward_message(
+        chat_id=message.chat.id,
+        from_chat_id=ad["channel_id"],
+        message_id=ad["message_id"]
+    )
+
+    # 💬 одна кнопка OK, без вопросов/реакций
+    ok_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅", callback_data="ad_ok")]
+    ])
+
+    # 💬 пробуем повесить кнопку прямо на форвард
     try:
-        forwarded_msg = await bot.copy_message(
+        await bot.edit_message_reply_markup(
             chat_id=message.chat.id,
-            from_chat_id=str(ad["channel_id"]),
-            message_id=ad["message_id"]
+            message_id=ad_msg.message_id,
+            reply_markup=ok_kb
         )
-    except TelegramBadRequest:
-        # при ошибке просто пропускаем и возвращаемся
-        await state.update_data(pending_phase=False)
-        return await show_phase_menu(message, state)
+        ok_msg_id = None
+    except Exception:
+        # 💬 fallback: если нельзя редактировать форвард — шлём отдельную кнопку
+        ok_msg = await message.answer("✅", reply_markup=ok_kb)
+        ok_msg_id = ok_msg.message_id
 
-    # 4) Inline-кнопки с реакциями бок о бок и жирный вопрос
-    buttons = [
-        InlineKeyboardButton(
-            text=btn["text"],
-            callback_data=f"ad_answer:{next_idx}:{i}"
-        )
-        for i, btn in enumerate(ad["btns"])
-    ]
-    kb = InlineKeyboardMarkup(inline_keyboard=[buttons])
-    question_msg = await message.answer(
-        f"<b>{ad['question']}</b>",
-        reply_markup=kb,
-        parse_mode="HTML"
-    )
-
-
-
-    # 5) Запоминаем ID, чтобы потом всё удалить
     await state.update_data(
-        current_ad_msg_id=forwarded_msg.message_id,
-        current_ad_question_id=question_msg.message_id
+        current_ad_msg_id=ad_msg.message_id,
+        current_ad_ok_msg_id=ok_msg_id,
+        current_ad_question_id=None  # 💬 больше не используем
     )
+
 
 @track_handler
 @dp.callback_query(lambda c: c.data and c.data.startswith("ad_answer:"))
@@ -3238,6 +3206,37 @@ async def ad_reaction_handler(callback: CallbackQuery, state: FSMContext):
 
 
 
+@dp.callback_query(lambda c: c.data == "ad_ok")
+async def ad_ok_handler(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+
+    data = await state.get_data()
+    chat_id = callback.message.chat.id
+
+    ad_msg_id = data.get("current_ad_msg_id")
+    ok_msg_id = data.get("current_ad_ok_msg_id")
+
+    # 💬 чистим сообщения рекламы
+    for mid in (ad_msg_id, ok_msg_id):
+        if mid:
+            try:
+                await bot.delete_message(chat_id, mid)
+            except Exception:
+                pass
+
+    was_pending_phase = data.get("pending_phase", False)
+
+    await state.update_data(
+        pending_phase=False,
+        current_ad_msg_id=None,
+        current_ad_ok_msg_id=None,
+        current_ad_question_id=None
+    )
+
+    # 💬 возвращаемся в тот же поток, что и раньше
+    if was_pending_phase:
+        return await show_phase_menu(callback.message, state)
+    return await send_one_vocab(callback.message, state)
 
 
 
@@ -6118,6 +6117,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
