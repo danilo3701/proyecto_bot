@@ -2811,6 +2811,12 @@ async def send_one_vocab(message: Message, state: FSMContext):
 
         await asyncio.sleep(LINK_HINT_DELETE_S)  # 💬 ждём пока подсказка «подышит»
 
+        # 💬 чистим и валидируем ссылку, чтобы не падать на битом JSON
+        link = str(link or "").strip().strip('"')
+        if not (link.startswith("http://") or link.startswith("https://")):
+            await state.update_data(vocab_index=idx + 1)  # 💬 пропускаем битый link-блок
+            return await send_one_vocab(message, state)
+
 
         cta = random.choice(link_cta_phrases)
         link_kb = InlineKeyboardMarkup(
@@ -5856,6 +5862,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
