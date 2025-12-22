@@ -17,15 +17,17 @@ import json
 
 import os
 import logging
-import requests
-# 💬 нужно для удаления файла темы через GitHub API
+from urllib.request import Request, urlopen  # 💬 GitHub API без requests
+from urllib.error import HTTPError, URLError  # 💬 обработка ошибок HTTP
+from urllib.parse import urlencode            # 💬 ref=branch в query
+
 
 
 router = Router()
 
 def github_delete_file(repo_path: str, commit_message: str):
     """
-    # 💬 удаляет файл из GitHub, чтобы Railway увидел commit и обновился
+    # 💬 Удаляет файл из GitHub через urllib (без requests), чтобы Railway увидел commit и обновился
     """
     token  = os.environ.get("GITHUB_PAT")
     owner  = os.environ.get("GITHUB_OWNER")
@@ -36,30 +38,50 @@ def github_delete_file(repo_path: str, commit_message: str):
         return False, "no_github_env"
 
     api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{repo_path}"
-    headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "ProyectoBot",  # 💬 GitHub иногда требует User-Agent
+    }
 
+    # 1) Получаем sha
     try:
-        r_get = requests.get(api_url, headers=headers, params={"ref": branch}, timeout=20)
-        if r_get.status_code == 404:
-            return False, "not_found"
-        r_get.raise_for_status()
-        sha = (r_get.json() or {}).get("sha")
+        url = api_url + "?" + urlencode({"ref": branch})  # 💬 берём sha из нужной ветки
+        req = Request(url, headers=headers, method="GET")
+        with urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+        sha = (data or {}).get("sha")
         if not sha:
             return False, "no_sha"
-    except Exception as e:
+    except HTTPError as e:
+        if e.code == 404:
+            return False, "not_found"
+        logging.exception("github_delete_file: cannot get sha (HTTP %s)", e.code)
+        return False, f"sha_error_{e.code}"
+    except (URLError, Exception) as e:
         logging.exception("github_delete_file: cannot get sha: %s", e)
         return False, "sha_error"
 
-    payload = {"message": commit_message, "sha": sha, "branch": branch}
+    # 2) Удаляем файл
+    payload = json.dumps({"message": commit_message, "sha": sha, "branch": branch}).encode("utf-8")
+    del_headers = dict(headers)
+    del_headers["Content-Type"] = "application/json"
 
     try:
-        r_del = requests.delete(api_url, headers=headers, json=payload, timeout=20)
-        if r_del.status_code in (200, 201, 204):
+        req = Request(api_url, headers=del_headers, data=payload, method="DELETE")
+        with urlopen(req, timeout=20) as resp:
+            status = resp.getcode()
+        if status in (200, 201, 204):
             return True, "ok"
-        return False, f"status_{r_del.status_code}"
-    except Exception as e:
+        return False, f"status_{status}"
+    except HTTPError as e:
+        logging.exception("github_delete_file: delete failed (HTTP %s)", e.code)
+        return False, f"status_{e.code}"
+    except (URLError, Exception) as e:
         logging.exception("github_delete_file: delete failed: %s", e)
         return False, "delete_error"
+
+
 
 
 # 💬 Универсальное меню действий внутри выбранного раздела
@@ -1990,4 +2012,5 @@ async def save_add_vocab_photo_quiz_block(message: Message, state: FSMContext):
     kb = section_menu()
     await message.answer("✅ Quiz к фото сохранён.", reply_markup=kb)
     return await state.set_state(EditTopicStates.choose_action)
+
 
