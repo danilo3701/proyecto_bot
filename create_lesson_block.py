@@ -308,8 +308,9 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 
     if text == "ADD":
         await message.answer(
-            "📌 Перешлите мне сообщение из вашего *приватного канала*,\n"
-            "из которого нужно брать рекламу."
+            "📌 Перешли мне ПОСТ из любого канала (forward).\n"
+            "✅ Я сохраню его channel_id + message_id в ads_data.json.\n"
+            "ℹ️ В показе в боте будет именно FORWARD + одна кнопка OK."
         )
         return await state.set_state(NewTopicStates.waiting_ad_source)
 
@@ -1713,53 +1714,21 @@ async def edit_vocab_link(message: Message, state: FSMContext):
 
 @router.message(StateFilter(NewTopicStates.waiting_ad_source), F.forward_from_chat)
 async def receive_ad_source(message: Message, state: FSMContext):
-    # Сохраняем ID канала и ID сообщения
+    # 💬 сохраняем рекламу сразу из форварда: только channel_id + message_id
     ch = message.forward_from_chat.id
     mid = message.forward_from_message_id
+
+    if not mid:
+        # 💬 редкий кейс: если Telegram не дал message_id — просим переслать ещё раз
+        await message.answer("❌ Не вижу message_id у форварда. Перешли пост ещё раз.")
+        return
+
     logging.info(f"[receive_ad_source] ad_channel={ch}, ad_message_id={mid}")
 
-    await state.update_data(ad_channel=ch, ad_message_id=mid)
-    # Переходим к сбору текста вопроса и кнопок
-    await message.answer(
-        "➡️ Теперь введите через `|`:\n"
-        "вопрос|текст кнопки1|текст кнопки2|реакция1|реакция2"
-    )
-    await state.set_state(NewTopicStates.waiting_ad_buttons)
-    # ← переключаемся в состояние, где будем ждать текст с кнопками
-    await state.update_data(
-        ad_channel=ch,
-        ad_message_id=mid,
-        ad_fwd_chat_id=message.chat.id,
-        ad_fwd_message_id=message.message_id
-    )
-
-
-
-
-# 2) Обработка самого текста с вопросом и кнопками
-@router.message(NewTopicStates.waiting_ad_buttons)
-async def save_ad_block(message: Message, state: FSMContext):
-    parts = [p.strip() for p in message.text.split("|")]
-    if len(parts) != 5:
-        return await message.answer(
-            "❌ Неверный формат! Нужно ровно 5 частей через `|`: "
-            "`вопрос|кнопка1|кнопка2|реакция1|реакция2`",
-            parse_mode="Markdown"
-        )
-    q, bt1, bt2, r1, r2 = parts
-    data = await state.get_data()
     new_ad = {
-        "channel_id":    data["ad_channel"],
-        "message_id":    data["ad_message_id"],
-        "fwd_chat_id":   data["ad_fwd_chat_id"],
-        "fwd_message_id":data["ad_fwd_message_id"],
-        "question":      q,
-        "btns": [
-          {"text": bt1, "reaction": r1},
-          {"text": bt2, "reaction": r2},
-        ]
+        "channel_id": ch,
+        "message_id": mid
     }
-    logging.info(f"[save_ad_block] new_ad={new_ad}")
 
     ads = load_ads_data()
     ads.append(new_ad)
@@ -1767,28 +1736,46 @@ async def save_ad_block(message: Message, state: FSMContext):
 
     # 💬 Попытка загрузить обновлённый ads_data.json в GitHub (если настроено)
     try:
-        ok, info = github_put_file(ADS_DATA_PATH, "ads_data.json", "Add ad via CreateLessonBlock")
+        ok, info = github_put_file(ADS_DATA_PATH, "ads_data.json", "Add ad via CreateLessonBlock (forward only)")
         if ok:
-            logging.info("[save_ad_block] Ads uploaded to GitHub")
+            logging.info("[receive_ad_source] Ads uploaded to GitHub")
         else:
-            logging.info("[save_ad_block] GitHub upload skipped/failed: %s", info)
+            logging.info("[receive_ad_source] GitHub upload skipped/failed: %s", info)
     except Exception as e:
-        logging.exception("[save_ad_block] github_put_file raised: %s", e)
+        logging.exception("[receive_ad_source] github_put_file raised: %s", e)
 
-    # 4) Чистим временные поля FSM и возвращаемся в меню
-    await state.update_data(ad_channel=None, ad_message_id=None)
+    # 💬 чистим временные поля и возвращаемся в меню категорий
+    await state.update_data(
+        ad_channel=None,
+        ad_message_id=None,
+        ad_fwd_chat_id=None,
+        ad_fwd_message_id=None
+    )
+
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")],
             [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
-            [KeyboardButton(text="✏️ Редактировать темы")]  # 💬 единая точка входа в редактирование
+            [KeyboardButton(text="✏️ Редактировать темы")]
         ],
         resize_keyboard=True
     )
 
-    await message.answer("✅ Реклама добавлена!\n\n📂 Выбери КАТЕГОРИЮ темы:", reply_markup=keyboard)
+    await message.answer("✅ Реклама сохранена (forward → показ в боте с шапкой + кнопка OK).", reply_markup=keyboard)
     await state.set_state(NewTopicStates.waiting_category)
-    # 💬 После добавления рекламы — возвращаемся в главное меню тем
+
+
+
+
+
+
+@router.message(NewTopicStates.waiting_ad_buttons)
+async def save_ad_block(message: Message, state: FSMContext):
+    # 💬 режим вопрос/2 кнопки отключён — реклама добавляется только через форвард
+    await message.answer("ℹ️ Вопрос/кнопки отключены. Перешли пост из канала ещё раз (forward).")
+    await state.set_state(NewTopicStates.waiting_ad_source)
+
+
 
 
 
