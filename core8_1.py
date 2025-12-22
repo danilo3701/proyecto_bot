@@ -1745,8 +1745,8 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
     await blank.delete()
 
     await query.message.answer(
-        "🎁 🔒 Бесплатный доступ на 3 дня\n"
-        "👇🏼Подпишись на спонсорские каналы:",  # 💬 оффер 3-дневного доступа
+        "🔒 Для бесплатного доступа\n"
+        "👇🏼 Подпишись на спонсорские каналы:",  # 💬 оффер 3-дневного доступа
         reply_markup=check_subscription_kb(topic_key, required),
     )
 
@@ -5862,6 +5862,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
