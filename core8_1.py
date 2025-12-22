@@ -447,13 +447,54 @@ import os
 
 XP_DATA_PATH = "/data/xp_data.json"
 
+XP_DATA_PATH = "/data/xp_data.json"
+XP_DATA_BACKUP_PATH = "/data/xp_data_backup.json"  # 💬 резерв: спасает рейтинг, если основной файл сломался
+
+def _atomic_json_dump(path: str, data: dict):
+    # 💬 атомарная запись: сначала temp, потом replace (не будет "битого" JSON)
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
+
 def load_xp_data():
-    # 💬 Загружает XP-файл, если его нет — создаёт пустой
+    # 💬 грузим XP; если файл пропал/битый — восстанавливаем из backup, чтобы рейтинг не "обнулялся"
     if not os.path.exists(XP_DATA_PATH):
-        with open(XP_DATA_PATH, "w", encoding="utf-8") as f:
-            f.write("{}")
-    with open(XP_DATA_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+        # если основного нет, но есть backup — восстановим
+        if os.path.exists(XP_DATA_BACKUP_PATH):
+            try:
+                with open(XP_DATA_BACKUP_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                _atomic_json_dump(XP_DATA_PATH, data)
+                return data
+            except Exception:
+                logging.exception("load_xp_data: backup restore failed")
+        _atomic_json_dump(XP_DATA_PATH, {})
+        return {}
+
+    try:
+        with open(XP_DATA_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        # если JSON сломался — пробуем поднять из backup
+        try:
+            if os.path.exists(XP_DATA_BACKUP_PATH):
+                with open(XP_DATA_BACKUP_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                _atomic_json_dump(XP_DATA_PATH, data)
+                return data
+        except Exception:
+            logging.exception("load_xp_data: failed to restore from backup")
+        return {}
+
+def save_xp_data(xp_data):
+    # 💬 сохраняем атомарно + пишем backup (чтобы redeploy/сбой не "стёр" рейтинг)
+    _atomic_json_dump(XP_DATA_PATH, xp_data)
+    _atomic_json_dump(XP_DATA_BACKUP_PATH, xp_data)
+
+
+
+
 
 def reset_daily_words_if_needed(user_data):
     """
@@ -464,11 +505,6 @@ def reset_daily_words_if_needed(user_data):
         user_data["words_learned_today"] = 0
         user_data["words_today_date"] = today
 
-
-def save_xp_data(xp_data):
-    # 💬 Сохраняет изменения в XP-файл
-    with open(XP_DATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(xp_data, f, ensure_ascii=False, indent=2)
 
 
 def migrate_runtime_files_to_volume():
@@ -568,21 +604,41 @@ def analytics_set_last_context(user_id: str, handler_name: str, topic_key: str =
 
 
 # 💬 USER DATA: сохраняем, какие темы разблокированы, и подписки на каналы
-USER_DATA_PATH = "/data/user_data.json" # 💬 данные хранятся в Railway Volume и не теряются при redeploy
+USER_DATA_PATH = "/data/user_data.json"  # 💬 данные хранятся в Railway Volume и не теряются при redeploy
+USER_DATA_BACKUP_PATH = "/data/user_data_backup.json"  # 💬 резерв, чтобы настройки не "слетали"
 
 def load_user_data():
-    # Загружает файл user_data.json, если нет — создаёт пустой
+    # 💬 грузим user_data; если файл пропал/битый — восстанавливаем из backup
     if not os.path.exists(USER_DATA_PATH):
-        with open(USER_DATA_PATH, "w", encoding="utf-8") as f:
-            f.write("{}")
-    with open(USER_DATA_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+        if os.path.exists(USER_DATA_BACKUP_PATH):
+            try:
+                with open(USER_DATA_BACKUP_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                _atomic_json_dump(USER_DATA_PATH, data)
+                return data
+            except Exception:
+                logging.exception("load_user_data: backup restore failed")
+        _atomic_json_dump(USER_DATA_PATH, {})
+        return {}
 
+    try:
+        with open(USER_DATA_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        try:
+            if os.path.exists(USER_DATA_BACKUP_PATH):
+                with open(USER_DATA_BACKUP_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                _atomic_json_dump(USER_DATA_PATH, data)
+                return data
+        except Exception:
+            logging.exception("load_user_data: failed to restore from backup")
+        return {}
 
 def save_user_data(data):
-    # Сохраняет изменения в user_data.json
-    with open(USER_DATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    # 💬 сохраняем атомарно + backup
+    _atomic_json_dump(USER_DATA_PATH, data)
+    _atomic_json_dump(USER_DATA_BACKUP_PATH, data)
 
 
 
@@ -6117,6 +6173,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
