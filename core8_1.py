@@ -1847,6 +1847,21 @@ async def show_leaderboard(message: Message, state: FSMContext):
     week_text = render_block("🏆 Рейтинг недели", "words_learned_week", "🍪")
     month_text = render_block("🏆 Рейтинг месяца", "words_learned_month", "🍪")
 
+    # 💬 если висит последнее меню урока (inline) — удаляем, чтобы не мешало рейтингу
+    data = await state.get_data()
+    last_menu_msg_id = data.get("last_menu_msg_id")
+    if last_menu_msg_id:
+        try:
+            await bot.delete_message(message.chat.id, last_menu_msg_id)
+        except Exception:
+            pass
+
+    # 💬 убираем ReplyKeyboard (старые кнопки меню), и даём интро перед рейтингом
+    await message.answer(
+        "А теперь посмотрим, где ты среди толпы... 👀",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
 
     menu_kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -6240,6 +6255,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
