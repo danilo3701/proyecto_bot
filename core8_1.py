@@ -1783,29 +1783,70 @@ async def show_leaderboard(message: Message, state: FSMContext):
     xp_data = load_xp_data()
     users = []
     for uid, u in xp_data.items():
-        name = u.get("name", "")
-        week = u.get("words_learned_week", 0)
-        month = u.get("words_learned_month", 0)
+        name = (u.get("name", "") or "").strip()
+        week = int(u.get("words_learned_week", 0) or 0)
+        month = int(u.get("words_learned_month", 0) or 0)
+
         users.append({
-            "name": name,
+            "uid": str(uid),
+            "name": name or f"User {uid}",
             "words_learned_week": week,
             "words_learned_month": month
         })
 
-    # Топ недели
-    top_week = sorted(users, key=lambda u: u["words_learned_week"], reverse=True)[:10]
-    top_month = sorted(users, key=lambda u: u["words_learned_month"], reverse=True)[:10]
+    current_uid = str(message.from_user.id)
 
-    def render(title, top, key, emoji):
+    def render_block(title: str, key: str, emoji: str) -> str:
         medals = ["🥇", "🥈", "🥉"]
+        sorted_all = sorted(
+            users,
+            key=lambda u: (int(u.get(key, 0) or 0), u.get("name", "")),
+            reverse=True
+        )
+
         res = [f"<b>{title}</b>"]
-        for idx, u in enumerate(top, 1):
-            m = medals[idx-1] if idx <= 3 else str(idx)
-            res.append(f"{m} {u['name']} {emoji} {u[key]}")
+
+        if not sorted_all:
+            res.append("Пока пусто")  # 💬 нет данных — не ломаем вывод
+            res.append("⋯⋯⋯")         # 💬 разделитель
+            res.append(f"<b>Ты</b>: — {emoji} 0")  # 💬 позиция неизвестна, но 0 показываем
+            return "\n".join(res)
+
+        top5 = sorted_all[:5]
+        for idx, u in enumerate(top5, 1):
+            prefix = medals[idx - 1] if idx <= 3 else f"{idx}."  # 💬 4-5 без медалей
+            res.append(f"{prefix} {u['name']} {emoji} {int(u.get(key, 0) or 0)}")
+
+        # 💬 показываем место текущего пользователя
+        my_rank = None
+        my_score = 0
+        my_name = (message.from_user.full_name or "Ты").strip()
+
+        for idx, u in enumerate(sorted_all, 1):
+            if u.get("uid") == current_uid:
+                my_rank = idx
+                my_score = int(u.get(key, 0) or 0)
+                my_name = (u.get("name") or my_name).strip()
+                break
+
+        res.append("⋯⋯⋯")  # 💬 визуальный разделитель
+
+        if my_rank is None:
+            res.append(f"<b>Ты</b>: — {emoji} 0")  # 💬 если юзера нет в xp_data (крайний случай)
+        else:
+            res.append(f"{my_rank}. <b>Ты</b> {my_name} {emoji} {my_score}")  # 💬 сначала место, потом «Ты», потом имя
+
+
+        # 💬 честный хвост: сколько участников ещё (реальных)
+        rest = max(0, len(sorted_all) - 5)
+        if rest > 0:
+            res.append(f"…и ещё {rest} участников")  # 💬 не фейк, а реальный остаток
+
         return "\n".join(res)
 
-    week_text = render("🏆 Рейтинг недели", top_week, "words_learned_week", "🍪")
-    month_text = render("🏆 Рейтинг месяца", top_month, "words_learned_month", "🍪")
+    week_text = render_block("🏆 Рейтинг недели", "words_learned_week", "🍪")
+    month_text = render_block("🏆 Рейтинг месяца", "words_learned_month", "🍪")
+
 
     menu_kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -6199,6 +6240,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
