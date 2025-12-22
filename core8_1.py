@@ -3155,8 +3155,17 @@ async def send_one_vocab(message: Message, state: FSMContext):
 async def send_ad_block(message: Message, state: FSMContext):
     ads = load_ads_data()
     if not ads:
-        await message.answer("⚠️ Реклама не найдена.")
-        return
+        # 💬 если рекламы нет — покажем предупреждение на 1с и продолжим поток (в фазу)
+        warn = await message.answer("⚠️ Реклама не найдена.")
+        await asyncio.sleep(1)
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=warn.message_id)
+        except Exception:
+            pass
+    
+        await state.update_data(pending_phase=False)  # 💬 важно: снимаем флаг ожидания рекламы
+        return await show_phase_menu(message, state)  # 💬 продолжаем дальше, не стопаемся
+    
 
     data = await state.get_data()
     next_idx = data.get("ad_index", 0)
@@ -6190,6 +6199,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
