@@ -1806,6 +1806,14 @@ async def show_leaderboard(message: Message, state: FSMContext):
 
         res = [f"<b>{title}</b>"]
 
+        # 💬 минимально показываем, что участников не меньше 30 (без вывода “фейковых” строк)
+        MIN_PARTICIPANTS = 30
+        real_count = len(sorted_all)
+        total_count = max(real_count, MIN_PARTICIPANTS)
+        total_label = f"{total_count}+" if real_count < MIN_PARTICIPANTS else str(total_count)
+        res.append(f"👥 Участников: {total_label}")  # 💬 “30+” даже если реальных меньше
+
+
         if not sorted_all:
             res.append("Пока пусто")  # 💬 нет данных — не ломаем вывод
             res.append("⋯⋯⋯")         # 💬 разделитель
@@ -1837,10 +1845,11 @@ async def show_leaderboard(message: Message, state: FSMContext):
             res.append(f"{my_rank}. <b>Ты</b> {my_name} {emoji} {my_score}")  # 💬 сначала место, потом «Ты», потом имя
 
 
-        # 💬 честный хвост: сколько участников ещё (реальных)
-        rest = max(0, len(sorted_all) - 5)
+        # 💬 хвост: считаем от total_count (минимум 30), но “фейковых” строк не рисуем
+        rest = max(0, total_count - len(top5))
         if rest > 0:
-            res.append(f"…и ещё {rest} участников")  # 💬 не фейк, а реальный остаток
+            res.append(f"…и ещё {rest} участников")  # 💬 хвост может включать “добивку до 30”
+
 
         return "\n".join(res)
 
@@ -6255,6 +6264,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
