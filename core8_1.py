@@ -5553,8 +5553,8 @@ async def check_subscription(query: CallbackQuery, state: FSMContext):
             # показываем список каналов и inline-кнопку «Проверить подписку»
             channels_str = ", ".join(required)
             return await query.message.answer(
-                "🔒 Бесплатный доступ на 3 дня\n"
-                "👇🏼Подпишись на спонсорские каналы:",  # 💬 повторяем оффер при провале проверки
+                "🔒 Для бесплатного доступа\n"
+                "👇🏼 Подпишись на спонсорские каналы:",  # 💬 повторяем оффер при провале проверки
                 reply_markup=check_subscription_kb(topic_key, required)
             )
 
@@ -5862,6 +5862,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
