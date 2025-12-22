@@ -284,6 +284,39 @@ def track_handler(func):
         last_stack = traceback.extract_stack()[:-1]
         # 💬 сохраняем имя хендлера
         handler_history.append(func.__name__)
+
+
+        # 💬 аналитика: последний хендлер + (если есть) тема и state из FSM
+        try:
+            user_id = None
+
+            # пытаемся вытащить пользователя из args/kwargs
+            for v in list(kwargs.values()) + list(args):
+                if getattr(v, "from_user", None):
+                    user_id = str(v.from_user.id)
+                    break
+
+            if user_id:
+                st = kwargs.get("state")
+                topic_key = None
+                state_name = None
+                if st:
+                    try:
+                        st_data = await st.get_data()
+                        topic_key = st_data.get("selected_topic")
+                        state_name = await st.get_state()
+                    except Exception:
+                        pass
+
+                analytics_set_last_context(
+                    user_id=user_id,
+                    handler_name=func.__name__,
+                    topic_key=topic_key,
+                    state_name=state_name
+                )
+        except Exception:
+            logging.exception("track_handler: analytics last context failed")
+
         # 💬 убираем лишний аргумент 'dispatcher'
         kwargs.pop('dispatcher', None)
         # 💬 фильтруем kwargs по сигнатуре func
@@ -296,6 +329,20 @@ ADMIN_CHAT_ID = 930240763  # ваш Chat ID
 class LoggingMiddleware(BaseMiddleware):
     # 💬 Глобальный перехват голосовых + логирование ошибок для всех апдейтов
     async def __call__(self, handler, event, data):
+
+
+        # 💬 аналитика: фиксируем активность (first/last/clicks) на каждый апдейт
+        try:
+            if getattr(event, "from_user", None):
+                if isinstance(event, CallbackQuery):
+                    analytics_touch_daily(event.from_user, "callback")
+                elif isinstance(event, Message):
+                    analytics_touch_daily(event.from_user, "message")
+                else:
+                    analytics_touch_daily(event.from_user, event.__class__.__name__)
+        except Exception:
+            logging.exception("LoggingMiddleware: analytics touch failed")
+
         # ⚠️ Любой voice/не-текст останавливаем до хендлеров
         if isinstance(event, Message) and getattr(event, "voice", None):
             await event.answer("⚠️ Голосовые сообщения пока не поддерживаются. Пришли текст или нажми кнопку ниже.")
@@ -422,6 +469,87 @@ def save_xp_data(xp_data):
     with open(XP_DATA_PATH, "w", encoding="utf-8") as f:
         json.dump(xp_data, f, ensure_ascii=False, indent=2)
 
+# ➕ ВСТАВЬ вот это после строки: json.dump(xp_data, f, ensure_ascii=False, indent=2)
+
+def _analytics_purge_days(days: dict, keep_days: int = 30) -> dict:
+    # 💬 оставляем только последние keep_days дат формата YYYY-MM-DD
+    if not isinstance(days, dict):
+        return {}
+    keys = sorted(days.keys())
+    if len(keys) <= keep_days:
+        return days
+    to_drop = keys[:-keep_days]
+    for k in to_drop:
+        days.pop(k, None)
+    return days
+
+
+def analytics_touch_daily(from_user: User, event_type: str):
+    # 💬 фиксируем first/last/clicks за день + обновляем имя/username в xp_data.json
+    try:
+        uid = str(from_user.id)
+        ts = int(time.time())
+        today = datetime.date.today().isoformat()
+
+        xp_data = load_xp_data()
+        user = xp_data.get(uid, {})
+
+        # базовые поля (на случай если /start не проходили)
+        if not user.get("first_join"):
+            user["first_join"] = ts
+        user["last_active"] = ts
+
+        if not user.get("name"):
+            user["name"] = from_user.full_name or ""
+
+        tg_username = ("@" + from_user.username) if getattr(from_user, "username", None) else ""
+        if tg_username and user.get("tg_username") != tg_username:
+            user["tg_username"] = tg_username
+
+        analytics = user.get("analytics", {})
+        days = analytics.get("days", {})
+
+        dayrec = days.get(today, {})
+        if "first_ts" not in dayrec:
+            dayrec["first_ts"] = ts
+        dayrec["last_ts"] = ts
+        dayrec["clicks"] = dayrec.get("clicks", 0) + 1
+        dayrec["last_event_type"] = event_type
+
+        days[today] = dayrec
+        analytics["days"] = _analytics_purge_days(days, keep_days=30)
+        user["analytics"] = analytics
+
+        xp_data[uid] = user
+        save_xp_data(xp_data)
+
+    except Exception:
+        logging.exception("analytics_touch_daily: failed")
+
+
+def analytics_set_last_context(user_id: str, handler_name: str, topic_key: str = None, state_name: str = None):
+    # 💬 сохраняем где пользователь был последний раз (хендлер/тема/state)
+    try:
+        ts = int(time.time())
+        xp_data = load_xp_data()
+        user = xp_data.get(user_id, {})
+        analytics = user.get("analytics", {})
+        last = analytics.get("last", {})
+
+        last["ts"] = ts
+        last["handler"] = handler_name
+        if topic_key:
+            last["topic_key"] = topic_key
+        if state_name:
+            last["state"] = state_name
+
+        analytics["last"] = last
+        user["analytics"] = analytics
+        xp_data[user_id] = user
+        save_xp_data(xp_data)
+
+    except Exception:
+        logging.exception("analytics_set_last_context: failed")
 
 
 
@@ -602,6 +730,15 @@ async def add_xp(user_id: int, topic: str, amount: int, action: str = None):
         if "stats" not in user:
             user["stats"] = {"words_learned": 0, "exercises_done": 0}
         user["stats"]["words_learned"] = user["stats"].get("words_learned", 0) + 1  # 🍪 +1
+
+        # 💬 аналитика: слова по темам (чтобы понимать, какие темы реально учат)
+        analytics = user.get("analytics", {})
+        topics_words = analytics.get("topics_words", {})
+        if isinstance(topics_words, dict):
+            topics_words[topic] = topics_words.get(topic, 0) + 1
+        analytics["topics_words"] = topics_words
+        user["analytics"] = analytics
+
 
 
 
@@ -1616,6 +1753,109 @@ async def show_leaderboard(message: Message, state: FSMContext):
 async def menu_handler(message: Message, state: FSMContext):
     # 💬 Возвращает пользователя к выбору категории
     await start_handler(message, state)
+
+
+
+@dp.message(Command("stats"))
+@track_handler
+async def stats_handler(message: Message, state: FSMContext):
+    # 💬 статистика только для админа
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+
+    xp_data = load_xp_data()
+    total_users = len(xp_data)
+
+    now_ts = int(time.time())
+    today = datetime.date.today().isoformat()
+    since_24h = now_ts - 86400
+
+    new_24h = 0
+    active_today = 0
+    durations = []
+
+    words_total = 0
+    words_today = 0
+
+    from collections import Counter
+    last_handlers = Counter()
+    last_topics = Counter()
+    topics_words_total = Counter()
+
+    for uid, u in xp_data.items():
+        if not isinstance(u, dict):
+            continue
+
+        if u.get("first_join", 0) >= since_24h:
+            new_24h += 1
+
+        stats = u.get("stats", {})
+        words_total += int(stats.get("words_learned", 0) or 0)
+        words_today += int(u.get("words_learned_today", 0) or 0)
+
+        analytics = u.get("analytics", {})
+        days = analytics.get("days", {})
+        dayrec = days.get(today) if isinstance(days, dict) else None
+        if isinstance(dayrec, dict):
+            active_today += 1
+            ft = int(dayrec.get("first_ts", 0) or 0)
+            lt = int(dayrec.get("last_ts", 0) or 0)
+            if ft and lt and lt >= ft:
+                durations.append(lt - ft)
+
+        last = analytics.get("last", {})
+        if isinstance(last, dict):
+            h = last.get("handler")
+            if h:
+                last_handlers[h] += 1
+            tk = last.get("topic_key")
+            if tk:
+                last_topics[tk] += 1
+
+        tw = analytics.get("topics_words", {})
+        if isinstance(tw, dict):
+            for tk, cnt in tw.items():
+                try:
+                    topics_words_total[tk] += int(cnt or 0)
+                except Exception:
+                    pass
+
+    avg_min = (sum(durations) / len(durations) / 60) if durations else 0.0
+
+    def title_for_topic(key: str) -> str:
+        info = topics.get(key, {}) if isinstance(topics, dict) else {}
+        t = (info.get("title") or info.get("name") or key)
+        return t
+
+    top_handlers = last_handlers.most_common(7)
+    top_topics_words = topics_words_total.most_common(7)
+
+    lines = []
+    lines.append("<b>📊 Статистика бота</b>")
+    lines.append(f"👥 Всего пользователей: <b>{total_users}</b>")
+    lines.append(f"🆕 Новые за 24ч: <b>{new_24h}</b>")
+    lines.append(f"✅ Активные сегодня: <b>{active_today}</b>")
+    lines.append(f"⏱ Среднее время сегодня (first→last): <b>{avg_min:.1f} мин</b>")
+    lines.append(f"🍪 Слов выучено всего: <b>{words_total}</b>")
+    lines.append(f"🍪 Слов сегодня: <b>{words_today}</b>")
+
+    lines.append("")
+    lines.append("<b>🔝 Где “застревают” (последний хендлер)</b>")
+    if top_handlers:
+        for i, (h, c) in enumerate(top_handlers, 1):
+            lines.append(f"{i}) <code>{h}</code> — {c}")
+    else:
+        lines.append("— пока нет данных —")
+
+    lines.append("")
+    lines.append("<b>🔝 Темы по словам (всего)</b>")
+    if top_topics_words:
+        for i, (tk, c) in enumerate(top_topics_words, 1):
+            lines.append(f"{i}) {title_for_topic(tk)} — <b>{c}</b> 🍪")
+    else:
+        lines.append("— пока нет данных —")
+
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 @dp.callback_query(lambda c: c.data == "back_to_menu")
@@ -5862,6 +6102,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
