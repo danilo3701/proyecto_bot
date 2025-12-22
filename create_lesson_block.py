@@ -49,19 +49,17 @@ def save_ads_data(data):
     with open(ADS_DATA_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-try:
-    import requests
-except Exception:
-    requests = None
-    logging.warning("requests not installed — github_put_file will be disabled")
-
-# 💬 Базовые импорты: безопасный импорт requests (если нет — отключаем функционал GitHub)
 import base64
 import logging
 
+from urllib.request import Request, urlopen  # 💬 GitHub API без requests
+from urllib.error import HTTPError, URLError  # 💬 обработка ошибок HTTP
+from urllib.parse import urlencode            # 💬 ref=branch в query
+
+
 def github_put_file(local_path: str, repo_path: str, commit_message: str):
     """
-    💬 Upload or update a file to GitHub via REST API.
+    💬 Upload or update a file to GitHub via REST API (urllib, без requests).
     Uses env: GITHUB_PAT, GITHUB_OWNER, GITHUB_REPO, GITHUB_BRANCH (optional)
     If GITHUB_PAT is not set — функция тихо возвращает (не ломает основной flow).
     """
@@ -78,7 +76,7 @@ def github_put_file(local_path: str, repo_path: str, commit_message: str):
         logging.error("github_put_file: GITHUB_OWNER or GITHUB_REPO not set in env")
         return False, "no_owner_repo"
 
-    # читаем локальный файл и кодируем в base64
+    # 💬 читаем локальный файл и кодируем в base64
     try:
         with open(local_path, "rb") as f:
             content_b64 = base64.b64encode(f.read()).decode()
@@ -89,20 +87,24 @@ def github_put_file(local_path: str, repo_path: str, commit_message: str):
     api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{repo_path}"
     headers = {
         "Authorization": f"token {token}",
-        "Accept": "application/vnd.github+json"
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "ProyectoBot",  # 💬 GitHub иногда требует User-Agent
     }
 
-    # пытаемся получить существующий файл, чтобы взять sha (если есть)
+    # 1) 💬 пытаемся получить существующий файл, чтобы взять sha (если есть)
+    sha = None
     try:
-        r_get = requests.get(api_url, headers=headers, params={"ref": branch}, timeout=15)
-        if r_get.status_code == 200:
-            sha = r_get.json().get("sha")
-        else:
-            sha = None
-    except Exception as e:
+        url = api_url + "?" + urlencode({"ref": branch})
+        req = Request(url, headers=headers, method="GET")
+        with urlopen(req, timeout=15) as resp:
+            if resp.getcode() == 200:
+                data = json.loads(resp.read().decode("utf-8") or "{}")
+                sha = (data or {}).get("sha")
+    except HTTPError as e:
+        if e.code != 404:
+            logging.exception("github_put_file: GET failed (HTTP %s)", e.code)
+    except (URLError, Exception) as e:
         logging.exception("github_put_file: GET request failed: %s", e)
-        sha = None
-
 
     payload = {
         "message": commit_message,
@@ -112,15 +114,29 @@ def github_put_file(local_path: str, repo_path: str, commit_message: str):
     if sha:
         payload["sha"] = sha
 
+    # 2) 💬 PUT (создать/обновить)
+    put_headers = dict(headers)
+    put_headers["Content-Type"] = "application/json"
+    body = json.dumps(payload).encode("utf-8")
+
     try:
-        r_put = requests.put(api_url, headers=headers, json=payload, timeout=30)
-        if r_put.status_code in (200, 201):
-            logging.info("github_put_file: uploaded %s -> %s (status=%s)", local_path, repo_path, r_put.status_code)
-            return True, r_put.json()
-        else:
-            logging.error("github_put_file: upload failed status=%s text=%s", r_put.status_code, r_put.text)
-            return False, {"status": r_put.status_code, "text": r_put.text}
-    except Exception as e:
+        req = Request(api_url, headers=put_headers, data=body, method="PUT")
+        with urlopen(req, timeout=30) as resp:
+            status = resp.getcode()
+            text = resp.read().decode("utf-8") or ""
+        if status in (200, 201):
+            logging.info("github_put_file: uploaded %s -> %s (status=%s)", local_path, repo_path, status)
+            return True, (json.loads(text) if text else {"status": status})
+        logging.error("github_put_file: upload failed status=%s text=%s", status, text)
+        return False, {"status": status, "text": text}
+    except HTTPError as e:
+        try:
+            err_text = e.read().decode("utf-8")
+        except Exception:
+            err_text = ""
+        logging.error("github_put_file: upload failed HTTP=%s text=%s", e.code, err_text)
+        return False, {"status": e.code, "text": err_text}
+    except (URLError, Exception) as e:
         logging.exception("github_put_file: PUT request exception: %s", e)
         return False, str(e)
 
@@ -1773,6 +1789,7 @@ async def save_ad_block(message: Message, state: FSMContext):
     await message.answer("✅ Реклама добавлена!\n\n📂 Выбери КАТЕГОРИЮ темы:", reply_markup=keyboard)
     await state.set_state(NewTopicStates.waiting_category)
     # 💬 После добавления рекламы — возвращаемся в главное меню тем
+
 
 
 
