@@ -15,7 +15,52 @@ from aiogram import Bot
 from pathlib import Path
 import json
 
+import os
+import logging
+import requests
+# 💬 нужно для удаления файла темы через GitHub API
+
+
 router = Router()
+
+def github_delete_file(repo_path: str, commit_message: str):
+    """
+    # 💬 удаляет файл из GitHub, чтобы Railway увидел commit и обновился
+    """
+    token  = os.environ.get("GITHUB_PAT")
+    owner  = os.environ.get("GITHUB_OWNER")
+    repo   = os.environ.get("GITHUB_REPO")
+    branch = os.environ.get("GITHUB_BRANCH", "main")
+
+    if not token or not owner or not repo:
+        return False, "no_github_env"
+
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{repo_path}"
+    headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
+
+    try:
+        r_get = requests.get(api_url, headers=headers, params={"ref": branch}, timeout=20)
+        if r_get.status_code == 404:
+            return False, "not_found"
+        r_get.raise_for_status()
+        sha = (r_get.json() or {}).get("sha")
+        if not sha:
+            return False, "no_sha"
+    except Exception as e:
+        logging.exception("github_delete_file: cannot get sha: %s", e)
+        return False, "sha_error"
+
+    payload = {"message": commit_message, "sha": sha, "branch": branch}
+
+    try:
+        r_del = requests.delete(api_url, headers=headers, json=payload, timeout=20)
+        if r_del.status_code in (200, 201, 204):
+            return True, "ok"
+        return False, f"status_{r_del.status_code}"
+    except Exception as e:
+        logging.exception("github_delete_file: delete failed: %s", e)
+        return False, "delete_error"
+
 
 # 💬 Универсальное меню действий внутри выбранного раздела
 def section_menu() -> ReplyKeyboardMarkup:
@@ -263,9 +308,23 @@ async def handle_waiting_section(message: Message, state: FSMContext):
     text = message.text.strip()
     if text == "Удалить":
         data = await state.get_data()
-        # 💬 Удаляем JSON-файл темы
+
+        # 💬 Удаляем JSON-файл темы локально (в контейнере)
         Path(data["topic_path"]).unlink(missing_ok=True)
-        await message.answer("✅ Тема удалена.", reply_markup=ReplyKeyboardRemove())
+
+        # 💬 Удаляем этот же файл в GitHub (topics/<topic>.json), чтобы Railway обновился
+        selected = data.get("selected_topic") or Path(data["topic_path"]).stem
+        repo_path = f"topics/{selected}.json"
+        ok, status = github_delete_file(repo_path, f"Delete topic {selected} via bot")
+
+        if ok:
+            await message.answer("✅ Тема удалена и обновлена в GitHub.", reply_markup=ReplyKeyboardRemove())
+        else:
+            await message.answer(
+                f"✅ Тема удалена локально, но GitHub не обновлён ({status}).",
+                reply_markup=ReplyKeyboardRemove()
+            )
+
         # 💬 Показываем список тем заново
         topics_dir = Path(__file__).parent / "topics"
         files = [p.stem for p in topics_dir.glob("*.json")]
@@ -1931,3 +1990,4 @@ async def save_add_vocab_photo_quiz_block(message: Message, state: FSMContext):
     kb = section_menu()
     await message.answer("✅ Quiz к фото сохранён.", reply_markup=kb)
     return await state.set_state(EditTopicStates.choose_action)
+
