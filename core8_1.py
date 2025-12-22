@@ -3272,7 +3272,15 @@ async def ad_ok_handler(callback: CallbackQuery, state: FSMContext):
     ad_msg_id = data.get("current_ad_msg_id")
     ok_msg_id = data.get("current_ad_ok_msg_id")
 
-    # 💬 чистим сообщения рекламы
+    # 💬 сначала пробуем убрать inline-кнопку (если удаление вдруг не сработает)
+    for mid in (ad_msg_id, ok_msg_id):
+        if mid:
+            try:
+                await bot.edit_message_reply_markup(chat_id=chat_id, message_id=mid, reply_markup=None)
+            except Exception:
+                pass
+
+    # 💬 удаляем сообщения рекламы (сам пост + отдельная кнопка, если была fallback)
     for mid in (ad_msg_id, ok_msg_id):
         if mid:
             try:
@@ -3282,12 +3290,21 @@ async def ad_ok_handler(callback: CallbackQuery, state: FSMContext):
 
     was_pending_phase = data.get("pending_phase", False)
 
+    # 💬 чистим state сразу, чтобы повторный тап не ломал логику
     await state.update_data(
         pending_phase=False,
         current_ad_msg_id=None,
         current_ad_ok_msg_id=None,
         current_ad_question_id=None
     )
+
+    # 💬 имитация “гружу материал…” на 2 секунды и авто-удаление
+    loading_msg = await bot.send_message(chat_id, "⏳ Гружу материал…")
+    await asyncio.sleep(2)
+    try:
+        await bot.delete_message(chat_id, loading_msg.message_id)
+    except Exception:
+        pass
 
     # 💬 возвращаемся в тот же поток, что и раньше
     if was_pending_phase:
@@ -6173,6 +6190,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
