@@ -1815,7 +1815,13 @@ async def show_leaderboard(message: Message, state: FSMContext):
 
         if not sorted_all:
             res.append("Пока пусто")  # 💬 нет данных — не ломаем вывод
-            res.append("⋯⋯⋯")         # 💬 разделитель
+        total = len(sorted_all)  # 💬 реальное число участников
+        hidden_from = len(top5) + 1
+        if total > len(top5):
+            res.append(f"{hidden_from}…{total}")  # 💬 как ты хотел: 6…35
+        else:
+            res.append("⋯")  # 💬 если участников <= 5
+
             res.append(f"<b>Ты</b>: — {emoji} 0")  # 💬 позиция неизвестна, но 0 показываем
             return "\n".join(res)
 
@@ -6265,6 +6271,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
