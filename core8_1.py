@@ -1833,7 +1833,6 @@ async def show_leaderboard(message: Message, state: FSMContext):
         if not sorted_all:
             # 💬 даже если данных нет — не падаем и показываем красивый диапазон
             res.append("Пока пусто")
-            res.append("⋯⋯⋯")
             res.append(f"1…{total_count}")  # 💬 визуальный “хвост”
             res.append(f"1. <b>Ты</b> {my_name} {emoji} 0")
             return "\n".join(res)
@@ -1864,7 +1863,6 @@ async def show_leaderboard(message: Message, state: FSMContext):
         # 💬 красивый “хвост” типа 6…35
         hidden_from = len(top5) + 1
         if total_count >= hidden_from:
-            res.append("⋯⋯⋯")
             res.append(f"{hidden_from}…{total_count}")  # 💬 вместо “ещё 25 участников”
     
         # 💬 строка “ты” (цифра → Ты → имя), только если ты не в топ-5
@@ -6284,6 +6282,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
