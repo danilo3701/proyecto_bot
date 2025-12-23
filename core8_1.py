@@ -1820,8 +1820,7 @@ async def show_leaderboard(message: Message, state: FSMContext):
         real_count = len(sorted_all)
         total_count = real_count + FAKE_ADD
     
-        # 💬 кто “ты” (если рейтинг вызван из callback — берём из state)
-        data = await state.get_data()
+
         actor_uid = (data.get("leaderboard_actor_uid") or "").strip()
         actor_name = (data.get("leaderboard_actor_name") or "").strip()
     
@@ -6288,6 +6287,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
