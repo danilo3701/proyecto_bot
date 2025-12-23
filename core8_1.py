@@ -1803,6 +1803,8 @@ async def show_leaderboard(message: Message, state: FSMContext):
         })
 
     current_uid = str(message.from_user.id)
+    data = await state.get_data()  # 💬 берём FSM-data один раз, чтобы render_block мог читать actor_uid/actor_name и last_menu_msg_id
+
 
     def render_block(title: str, key: str, emoji: str) -> str:
         medals = ["🥇", "🥈", "🥉"]
@@ -6282,6 +6284,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
