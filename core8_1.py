@@ -1806,12 +1806,11 @@ async def show_leaderboard(message: Message, state: FSMContext):
 
         res = [f"<b>{title}</b>"]
 
-        # 💬 минимально показываем, что участников не меньше 30 (без вывода “фейковых” строк)
+        # 💬 минимум участников (для красивого диапазона типа 6…30), но строку “участников” НЕ показываем
         MIN_PARTICIPANTS = 30
         real_count = len(sorted_all)
         total_count = max(real_count, MIN_PARTICIPANTS)
-        total_label = f"{total_count}+" if real_count < MIN_PARTICIPANTS else str(total_count)
-        res.append(f"👥 Участников: {total_label}")  # 💬 “30+” даже если реальных меньше
+
 
 
         if not sorted_all:
@@ -1824,6 +1823,12 @@ async def show_leaderboard(message: Message, state: FSMContext):
         for idx, u in enumerate(top5, 1):
             prefix = medals[idx - 1] if idx <= 3 else f"{idx}."  # 💬 4-5 без медалей
             res.append(f"{prefix} {u['name']} {emoji} {int(u.get(key, 0) or 0)}")
+
+        # 💬 компактно показываем, что дальше есть места до total_count (без слов “участников”)
+        hidden_from = len(top5) + 1
+        if total_count > len(top5):
+            res.append(f"{hidden_from}…{total_count}")   # пример: 6…30
+
 
         # 💬 показываем место текущего пользователя
         my_rank = None
@@ -1842,13 +1847,9 @@ async def show_leaderboard(message: Message, state: FSMContext):
         if my_rank is None:
             res.append(f"<b>Ты</b>: — {emoji} 0")  # 💬 если юзера нет в xp_data (крайний случай)
         else:
-            res.append(f"{my_rank}. <b>Ты</b> {my_name} {emoji} {my_score}")  # 💬 сначала место, потом «Ты», потом имя
+            res.append(f"{my_rank}. {my_name} {emoji} {my_score}")  # 💬 сначала место, потом «Ты», потом имя
 
 
-        # 💬 хвост: считаем от total_count (минимум 30), но “фейковых” строк не рисуем
-        rest = max(0, total_count - len(top5))
-        if rest > 0:
-            res.append(f"…и ещё {rest} участников")  # 💬 хвост может включать “добивку до 30”
 
 
         return "\n".join(res)
@@ -6264,6 +6265,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
