@@ -1827,11 +1827,6 @@ async def show_leaderboard(message: Message, state: FSMContext):
         current_uid = actor_uid or str(message.from_user.id)
         my_name = actor_name or "Ты"
     
-        # 💬 если бот-сообщение с инлайн-кнопками — убираем кнопки, чтобы “не висели”
-        try:
-            await message.edit_reply_markup(reply_markup=None)
-        except Exception:
-            pass
     
         if not sorted_all:
             # 💬 даже если данных нет — не падаем и показываем красивый диапазон
@@ -6287,6 +6282,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
