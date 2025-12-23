@@ -1881,8 +1881,7 @@ async def show_leaderboard(message: Message, state: FSMContext):
     week_text = render_block("🏆 Рейтинг недели", "words_learned_week", "🍪")
     month_text = render_block("🏆 Рейтинг месяца", "words_learned_month", "🍪")
 
-    # 💬 если висит последнее меню урока (inline) — удаляем, чтобы не мешало рейтингу
-    data = await state.get_data()
+
     last_menu_msg_id = data.get("last_menu_msg_id")
     if last_menu_msg_id:
         try:
@@ -6289,6 +6288,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
