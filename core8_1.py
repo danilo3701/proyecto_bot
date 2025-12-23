@@ -1853,7 +1853,8 @@ async def show_leaderboard(message: Message, state: FSMContext):
         if my_rank is None:
             res.append(f"<b>Ты</b>: — {emoji} 0")  # 💬 если юзера нет в xp_data (крайний случай)
         else:
-            res.append(f"{my_rank}. {my_name} {emoji} {my_score}")  # 💬 сначала место, потом «ты», потом имя
+            res.append(f"{my_rank}. <b>Ты</b> {my_name} {emoji} {my_score}")  # 💬 место → «Ты» → имя
+
 
 
 
@@ -6271,6 +6272,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
