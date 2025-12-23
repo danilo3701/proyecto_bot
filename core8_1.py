@@ -1407,7 +1407,15 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
     # 🏆/⚙️ — сразу открываем соответствующие разделы
     if action == "rating":
         await callback.answer()
+    
+        # 💬 сохраняем “кто нажал рейтинг”, потому что callback.message.from_user = бот
+        await state.update_data(
+            leaderboard_actor_uid=str(callback.from_user.id),
+            leaderboard_actor_name=((callback.from_user.full_name or callback.from_user.username) or "").strip()
+        )
+    
         return await show_leaderboard(callback.message, state)
+
 
     if action == "settings":
         await callback.answer()
@@ -1798,68 +1806,77 @@ async def show_leaderboard(message: Message, state: FSMContext):
 
     def render_block(title: str, key: str, emoji: str) -> str:
         medals = ["🥇", "🥈", "🥉"]
+    
         sorted_all = sorted(
             users,
             key=lambda u: (int(u.get(key, 0) or 0), u.get("name", "")),
             reverse=True
         )
-
+    
         res = [f"<b>{title}</b>"]
-
-        # 💬 минимум участников (для красивого диапазона типа 6…30), но строку “участников” НЕ показываем
-        MIN_PARTICIPANTS = 30
+    
+        # 💬 “реальные + 30 фейковых” (без вывода строки “участников”)
+        FAKE_ADD = 30
         real_count = len(sorted_all)
-        total_count = max(real_count, MIN_PARTICIPANTS)
-
-
-
+        total_count = real_count + FAKE_ADD
+    
+        # 💬 кто “ты” (если рейтинг вызван из callback — берём из state)
+        data = await state.get_data()
+        actor_uid = (data.get("leaderboard_actor_uid") or "").strip()
+        actor_name = (data.get("leaderboard_actor_name") or "").strip()
+    
+        current_uid = actor_uid or str(message.from_user.id)
+        my_name = actor_name or "Ты"
+    
+        # 💬 если бот-сообщение с инлайн-кнопками — убираем кнопки, чтобы “не висели”
+        try:
+            await message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+    
         if not sorted_all:
-            res.append("Пока пусто")  # 💬 нет данных — не ломаем вывод
-        total = len(sorted_all)  # 💬 реальное число участников
-        hidden_from = len(top5) + 1
-        if total > len(top5):
-            res.append(f"{hidden_from}…{total}")  # 💬 как ты хотел: 6…35
-        else:
-            res.append("⋯")  # 💬 если участников <= 5
-
-            res.append(f"<b>Ты</b>: — {emoji} 0")  # 💬 позиция неизвестна, но 0 показываем
+            # 💬 даже если данных нет — не падаем и показываем красивый диапазон
+            res.append("Пока пусто")
+            res.append("⋯⋯⋯")
+            res.append(f"1…{total_count}")  # 💬 визуальный “хвост”
+            res.append(f"1. <b>Ты</b> {my_name} {emoji} 0")
             return "\n".join(res)
-
+    
+        # 💬 ищем позицию “тебя”
+        my_rank = None
+        my_val = 0
+        for idx, u in enumerate(sorted_all, 1):
+            if str(u.get("uid", "")) == str(current_uid):
+                my_rank = idx
+                my_val = int(u.get(key, 0) or 0)
+                if not my_name or my_name == "Ты":
+                    my_name = u.get("name", my_name)
+                break
+    
+        if my_rank is None:
+            # 💬 если вдруг юзера нет в xp_data — ставим его “после реальных”
+            my_rank = min(real_count + 1, total_count)
+            my_val = 0
+    
+        # 💬 топ-5 (4 и 5 без медалек)
         top5 = sorted_all[:5]
         for idx, u in enumerate(top5, 1):
-            prefix = medals[idx - 1] if idx <= 3 else f"{idx}."  # 💬 4-5 без медалей
-            res.append(f"{prefix} {u['name']} {emoji} {int(u.get(key, 0) or 0)}")
-
-        # 💬 компактно показываем, что дальше есть места до total_count (без слов “участников”)
+            prefix = medals[idx - 1] if idx <= 3 else f"{idx}."
+            val = int(u.get(key, 0) or 0)
+            res.append(f"{prefix} {u.get('name','')} {emoji} {val}")
+    
+        # 💬 красивый “хвост” типа 6…35
         hidden_from = len(top5) + 1
-        if total_count > len(top5):
-            res.append(f"{hidden_from}…{total_count}")   # пример: 6…30
-
-
-        # 💬 показываем место текущего пользователя
-        my_rank = None
-        my_score = 0
-        my_name = (message.from_user.full_name or "Ты").strip()
-
-        for idx, u in enumerate(sorted_all, 1):
-            if u.get("uid") == current_uid:
-                my_rank = idx
-                my_score = int(u.get(key, 0) or 0)
-                my_name = (u.get("name") or my_name).strip()
-                break
-
-        res.append("⋯⋯⋯")  # 💬 визуальный разделитель
-
-        if my_rank is None:
-            res.append(f"<b>Ты</b>: — {emoji} 0")  # 💬 если юзера нет в xp_data (крайний случай)
-        else:
-            res.append(f"{my_rank}. <b>Ты</b> {my_name} {emoji} {my_score}")  # 💬 место → «Ты» → имя
-
-
-
-
-
+        if total_count >= hidden_from:
+            res.append("⋯⋯⋯")
+            res.append(f"{hidden_from}…{total_count}")  # 💬 вместо “ещё 25 участников”
+    
+        # 💬 строка “ты” (цифра → Ты → имя), только если ты не в топ-5
+        if my_rank > len(top5):
+            res.append(f"{my_rank}. <b>Ты</b> {my_name} {emoji} {my_val}")
+    
         return "\n".join(res)
+
 
     week_text = render_block("🏆 Рейтинг недели", "words_learned_week", "🍪")
     month_text = render_block("🏆 Рейтинг месяца", "words_learned_month", "🍪")
@@ -6272,6 +6289,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
