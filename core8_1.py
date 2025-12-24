@@ -1350,29 +1350,29 @@ async def start_handler(message: Message, state: FSMContext):
     # 💬 Промо-блок: картинка + текст + кнопки (все ведут в бота)
     promo_text = (
         "ТРЕНАЖЁР ПО ИСПАНСКОМУ 🇪🇸\n\n"
-        "Подпишись и заходи в бот — уроки и тренировки будут доступны в один клик.\n\n"
-        "Что выбираешь?"
+        "🍷 Залетай! Тренажер запустится автоматически\n\n"
+        "Что сейчас для тебя сложнее?"
     )
 
     promo_url = "https://t.me/espanoljuega_bot?start=channel"  # 💬 одна ссылка для всех кнопок
 
     promo_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="Лексика", url=promo_url),
-            InlineKeyboardButton(text="Грамматика", url=promo_url),
+            InlineKeyboardButton(text="💼 Лексика", url=promo_url),
+            InlineKeyboardButton(text="🧠 Грамматика", url=promo_url),
         ],
         [
-            InlineKeyboardButton(text="Книги", url=promo_url),
-            InlineKeyboardButton(text="Говорение", url=promo_url),
+            InlineKeyboardButton(text="📖 Книги", url=promo_url),
+            InlineKeyboardButton(text="🙊 Говорение", url=promo_url),
         ],
         [
-            InlineKeyboardButton(text="Глаголы", url=promo_url),
-            InlineKeyboardButton(text="Предлоги", url=promo_url),
+            InlineKeyboardButton(text="🤌 Глаголы", url=promo_url),
+            InlineKeyboardButton(text="🔗 Предлоги", url=promo_url),
         ],
     ])
 
     # 💬 Фото берём из репозитория (GitHub) как локальный файл после deploy
-    promo_photo_path = "proyecto_bot/promo.jpg"  # 💬 положи файл сюда в GitHub
+    promo_photo_path = "proyecto_bot/promo foto.png"  # 💬 положи файл сюда в GitHub
 
     if promo_photo_path and os.path.exists(promo_photo_path):
         await bot.send_photo(
@@ -6327,6 +6327,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
