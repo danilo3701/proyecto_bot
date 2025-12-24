@@ -1363,8 +1363,8 @@ async def start_handler(message: Message, state: FSMContext):
             InlineKeyboardButton(text="🧠 Грамматика", url=promo_url),
         ],
         [
-            InlineKeyboardButton(text="📖 Книги", url=promo_url),
-            InlineKeyboardButton(text="🙊 Говорение", url=promo_url),
+            InlineKeyboardButton(text="📖 Читать", url=promo_url),
+            InlineKeyboardButton(text="🙊 Говорить", url=promo_url),
         ],
         [
             InlineKeyboardButton(text="🤌 Глаголы", url=promo_url),
@@ -6329,6 +6329,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
