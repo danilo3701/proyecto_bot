@@ -34,7 +34,9 @@ LEVEL_FROM_BUTTON = {
 
 #from core8_1 import load_ads_data, save_ads_data
 
-ADS_DATA_PATH = "ads_data.json"
+ADS_DATA_PATH = "/data/ads_data.json"  # 💬 хранение в Railway Volume (не теряется при redeploy)
+os.makedirs("/data", exist_ok=True)    # 💬 гарантируем папку Volume
+
 SUBSCRIPTION_CHANNELS_PATH = "subscription_channels.json"  # 💬 общий список каналов для рекламной подписки
 
 
@@ -206,6 +208,10 @@ class NewTopicStates(StatesGroup):
     waiting_ad_source = State()  # ждем пересланного сообщения из канала
     waiting_ad_buttons = State()   # ждем: вопрос|кнопка1|кнопка2|реакция1|реакция2
 
+    waiting_ad_action = State()        # 💬 выбор: добавить рекламу / удалить по индексу
+    waiting_ad_delete_index = State()  # 💬 ждём номер индекса для удаления
+
+
 
 
 
@@ -307,12 +313,16 @@ async def get_category_or_ads(message: Message, state: FSMContext):
         return
 
     if text == "ADD":
-        await message.answer(
-            "📌 Перешли мне ПОСТ из любого канала (forward).\n"
-            "✅ Я сохраню его channel_id + message_id в ads_data.json.\n"
-            "ℹ️ В показе в боте будет именно FORWARD + одна кнопка OK."
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➕ Добавить рекламу"), KeyboardButton(text="🗑 Удалить по индексу")],
+                [KeyboardButton(text="⬅️ Назад")]
+            ],
+            resize_keyboard=True
         )
-        return await state.set_state(NewTopicStates.waiting_ad_source)
+        await message.answer("Выбери действие с рекламой:", reply_markup=keyboard)
+        return await state.set_state(NewTopicStates.waiting_ad_action)
+
 
     if text == "CHANALS":
         await message.answer(
@@ -1707,8 +1717,48 @@ async def edit_vocab_link(message: Message, state: FSMContext):
 
 
 # ——— Новый поток: Добавление рекламы ———
+@router.message(StateFilter(NewTopicStates.waiting_ad_action))
+async def ad_action_menu(message: Message, state: FSMContext):
+    # 💬 меню действий по рекламе после кнопки ADD
+    text = (message.text or "").strip()
 
-# … ваш импорт load_ads_data, save_ads_data из core8_1.py
+    if text == "➕ Добавить рекламу":
+        await message.answer(
+            "📌 Перешли мне ПОСТ из любого канала (forward).\n"
+            "✅ Я сохраню его channel_id + message_id в ads_data.json.\n"
+            "ℹ️ В показе в боте будет именно FORWARD + одна кнопка OK."
+        )
+        return await state.set_state(NewTopicStates.waiting_ad_source)
+
+    if text == "🗑 Удалить по индексу":
+        ads = load_ads_data()
+        if not ads:
+            await message.answer("Список рекламы пуст.")
+            return await state.set_state(NewTopicStates.waiting_category)
+
+        # 💬 показываем список 1..N без превью
+        lines = ["🗑 Выбери индекс для удаления (напиши номер):"]
+        for i, ad in enumerate(ads, 1):
+            ch = ad.get("channel_id")
+            mid = ad.get("message_id")
+            lines.append(f"{i}) channel_id={ch} msg_id={mid}")
+
+        await message.answer("\n".join(lines))
+        return await state.set_state(NewTopicStates.waiting_ad_delete_index)
+
+    if text == "⬅️ Назад":
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")],
+                [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
+                [KeyboardButton(text="✏️ Редактировать темы")]
+            ],
+            resize_keyboard=True
+        )
+        await message.answer("📂 Выберите раздел:", reply_markup=keyboard)
+        return await state.set_state(NewTopicStates.waiting_category)
+
+    await message.answer("❗ Нажми одну из кнопок.")
 
 # 1) После того, как получили forwarded from_chat + message_id:
 
@@ -1776,6 +1826,50 @@ async def save_ad_block(message: Message, state: FSMContext):
     await state.set_state(NewTopicStates.waiting_ad_source)
 
 
+
+@router.message(StateFilter(NewTopicStates.waiting_ad_delete_index))
+async def delete_ad_by_index(message: Message, state: FSMContext):
+    # 💬 удаляем рекламу по индексу (1..N)
+    text = (message.text or "").strip()
+
+    if not text.isdigit():
+        await message.answer("❗ Напиши номер индекса (например: 1).")
+        return
+
+    idx = int(text)
+    ads = load_ads_data()
+
+    if idx < 1 or idx > len(ads):
+        await message.answer(f"❗ Индекс должен быть от 1 до {len(ads)}.")
+        return
+
+    deleted = ads.pop(idx - 1)
+    save_ads_data(ads)
+
+    # 💬 пытаемся обновить файл в GitHub (если настроено)
+    try:
+        ok, info = github_put_file(ADS_DATA_PATH, "ads_data.json", f"Delete ad index {idx} via CreateLessonBlock")
+        if ok:
+            logging.info("[delete_ad_by_index] Ads uploaded to GitHub")
+        else:
+            logging.info("[delete_ad_by_index] GitHub upload skipped/failed: %s", info)
+    except Exception as e:
+        logging.exception("[delete_ad_by_index] github_put_file raised: %s", e)
+
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")],
+            [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
+            [KeyboardButton(text="✏️ Редактировать темы")]
+        ],
+        resize_keyboard=True
+    )
+
+    await message.answer(
+        f"✅ Удалено: channel_id={deleted.get('channel_id')} msg_id={deleted.get('message_id')}",
+        reply_markup=keyboard
+    )
+    await state.set_state(NewTopicStates.waiting_category)
 
 
 
