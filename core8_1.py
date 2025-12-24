@@ -12,6 +12,7 @@ if os.getenv("DISABLED") == "true":
     print("🚫 Бот временно отключён.")
     exit()
 os.makedirs("/data", exist_ok=True)  # 💬 создаём папку Volume, если ещё не создана
+from pathlib import Path  # 💬 чтобы строить путь к файлу надёжно
 
 import json                         # Чтение/запись JSON-топиков
 import random                       # Рандомизация (CTA-фразы, сценарии, стикеры)
@@ -1372,7 +1373,8 @@ async def start_handler(message: Message, state: FSMContext):
     ])
 
     # 💬 Фото берём из репозитория (GitHub) как локальный файл после deploy
-    promo_photo_path = "proyecto_bot/promo foto.png"  # 💬 положи файл сюда в GitHub
+    promo_photo_path = str(Path(__file__).resolve().parent / "promo_foto.png")  # 💬 фото рядом с core8_1.py
+ 
 
     if promo_photo_path and os.path.exists(promo_photo_path):
         await bot.send_photo(
@@ -6327,6 +6329,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
