@@ -1345,6 +1345,66 @@ async def start_handler(message: Message, state: FSMContext):
     ])
 
 
+
+    
+    # 💬 Промо-блок: картинка + текст + кнопки (все ведут в бота)
+    promo_text = (
+        "ТРЕНАЖЁР ПО ИСПАНСКОМУ 🇪🇸\n\n"
+        "Подпишись и заходи в бот — уроки и тренировки будут доступны в один клик.\n\n"
+        "Что выбираешь?"
+    )
+
+    promo_url = "https://t.me/espanoljuega_bot?start=channel"  # 💬 одна ссылка для всех кнопок
+
+    promo_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Лексика", url=promo_url),
+            InlineKeyboardButton(text="Грамматика", url=promo_url),
+        ],
+        [
+            InlineKeyboardButton(text="Книги", url=promo_url),
+            InlineKeyboardButton(text="Говорение", url=promo_url),
+        ],
+        [
+            InlineKeyboardButton(text="Глаголы", url=promo_url),
+            InlineKeyboardButton(text="Предлоги", url=promo_url),
+        ],
+    ])
+
+    # 💬 Фото (опционально). Если promo_photo пустой — отправим просто текст
+    promo_photo = None  # 💬 сюда вставишь file_id фото (или оставь None)
+
+    if promo_photo:
+        await bot.send_photo(
+            chat_id=message.chat.id,
+            photo=promo_photo,
+            caption=promo_text,
+            reply_markup=promo_kb
+        )
+    else:
+        await bot.send_message(
+            chat_id=message.chat.id,
+            text=promo_text,
+            reply_markup=promo_kb
+        )
+
+# 📸 Получение file_id фото (ТОЛЬКО ДЛЯ АДМИНА)
+@router.message(F.photo)
+async def get_photo_file_id(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return  # 💬 чужие фото игнорируем
+
+    file_id = message.photo[-1].file_id  # 💬 берём самое большое фото
+
+    await message.answer(
+        f"📸 File ID:\n<code>{file_id}</code>",
+        parse_mode="HTML"
+    )
+
+
+
+    
+
     # 💬 Рандомная фраза «Что изучаем?» из сценариев (fallback — старая фраза)
     menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Что изучаем?⭐"
 
@@ -6282,6 +6342,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
