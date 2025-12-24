@@ -2101,7 +2101,7 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
     required: list[str] = []
 
     if channels_list:
-        pack_size = min(3, len(channels_list))  # 💬 максимум 3 канала за раз
+        pack_size = min(2, len(channels_list))  # 💬 максимум 3 канала за раз
         idx = last_idx
         for _ in range(pack_size):
             idx = (idx + 1) % len(channels_list)
@@ -6283,6 +6283,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
