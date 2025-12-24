@@ -1350,7 +1350,6 @@ async def start_handler(message: Message, state: FSMContext):
     
     # 💬 Промо-блок: картинка + текст + кнопки (все ведут в бота)
     promo_text = (
-        "ТРЕНАЖЁР ПО ИСПАНСКОМУ 🇪🇸\n\n"
         "🍷 Залетай! Тренажер запустится автоматически\n\n"
         "Что сейчас для тебя сложнее?"
     )
@@ -1374,8 +1373,10 @@ async def start_handler(message: Message, state: FSMContext):
 
     # 💬 Фото берём из репозитория (GitHub) как локальный файл после deploy
     promo_photo_path = str(Path(__file__).resolve().parent / "promo_foto.png")  # 💬 фото рядом с core8_1.py
- 
 
+    logging.info(f"[PROMO] promo_photo_path={promo_photo_path} exists={os.path.exists(promo_photo_path)}")  # 💬 проверка файла
+
+    
     if promo_photo_path and os.path.exists(promo_photo_path):
         await bot.send_photo(
             chat_id=message.chat.id,
@@ -6329,6 +6330,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
