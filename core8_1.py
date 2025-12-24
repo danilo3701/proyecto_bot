@@ -1346,53 +1346,6 @@ async def start_handler(message: Message, state: FSMContext):
     ])
 
 
-
-    
-    # 💬 Промо-блок: картинка + текст + кнопки (все ведут в бота)
-    promo_text = (
-        "🍷 Залетай! Тренажер запустится автоматически\n\n"
-        "Что сейчас для тебя сложнее?"
-    )
-
-    promo_url = "https://t.me/espanoljuega_bot?start=channel"  # 💬 одна ссылка для всех кнопок
-
-    promo_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="💼 Лексика", url=promo_url),
-            InlineKeyboardButton(text="🧠 Грамматика", url=promo_url),
-        ],
-        [
-            InlineKeyboardButton(text="📖 Читать", url=promo_url),
-            InlineKeyboardButton(text="🙊 Говорить", url=promo_url),
-        ],
-        [
-            InlineKeyboardButton(text="🤌 Глаголы", url=promo_url),
-            InlineKeyboardButton(text="🔗 Предлоги", url=promo_url),
-        ],
-    ])
-
-    # 💬 Фото берём из репозитория (GitHub) как локальный файл после deploy
-    promo_photo_path = str(Path(__file__).resolve().parent / "promo_foto.png")  # 💬 фото рядом с core8_1.py
-
-    logging.info(f"[PROMO] promo_photo_path={promo_photo_path} exists={os.path.exists(promo_photo_path)}")  # 💬 проверка файла
-
-    
-    if promo_photo_path and os.path.exists(promo_photo_path):
-        await bot.send_photo(
-            chat_id=message.chat.id,
-            photo=FSInputFile(promo_photo_path),
-            caption=promo_text,
-            reply_markup=promo_kb
-        )
-    else:
-        await bot.send_message(
-            chat_id=message.chat.id,
-            text=promo_text,
-            reply_markup=promo_kb
-        )
-
-    
-
     # 💬 Рандомная фраза «Что изучаем?» из сценариев (fallback — старая фраза)
     menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Что изучаем?⭐"
 
@@ -6330,6 +6283,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
