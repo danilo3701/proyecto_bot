@@ -1371,13 +1371,13 @@ async def start_handler(message: Message, state: FSMContext):
         ],
     ])
 
-    # 💬 Фото (опционально). Если promo_photo пустой — отправим просто текст
-    promo_photo = None  # 💬 сюда вставишь file_id фото (или оставь None)
+    # 💬 Фото берём из репозитория (GitHub) как локальный файл после deploy
+    promo_photo_path = "proyecto_bot/promo.jpg"  # 💬 положи файл сюда в GitHub
 
-    if promo_photo:
+    if promo_photo_path and os.path.exists(promo_photo_path):
         await bot.send_photo(
             chat_id=message.chat.id,
-            photo=promo_photo,
+            photo=FSInputFile(promo_photo_path),
             caption=promo_text,
             reply_markup=promo_kb
         )
@@ -1387,21 +1387,6 @@ async def start_handler(message: Message, state: FSMContext):
             text=promo_text,
             reply_markup=promo_kb
         )
-
-# 📸 Получение file_id фото (ТОЛЬКО ДЛЯ АДМИНА)
-@router.message(F.photo)
-async def get_photo_file_id(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return  # 💬 чужие фото игнорируем
-
-    file_id = message.photo[-1].file_id  # 💬 берём самое большое фото
-
-    await message.answer(
-        f"📸 File ID:\n<code>{file_id}</code>",
-        parse_mode="HTML"
-    )
-
-
 
     
 
@@ -6342,6 +6327,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
