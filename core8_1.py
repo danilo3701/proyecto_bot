@@ -2108,7 +2108,8 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
     u = data.setdefault(user_id_str, {})
     ad = u.get("ad_subscription") or {}
     now = int(time.time())
-    #active = ad.get("active_until", 0) > now
+    active = False  # 💬 отключаем проверку по времени = всегда показываем окно подписки
+
 
     if active and ad.get("channels"):
         all_ok = True
@@ -6326,6 +6327,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
