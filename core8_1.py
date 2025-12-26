@@ -507,9 +507,8 @@ def reset_daily_words_if_needed(user_data):
         user_data["words_today_date"] = today
 
 
-
 def migrate_runtime_files_to_volume():
-    # 💬 переносим данные из контейнера в Volume (один раз)
+    # 💬 переносим данные из контейнера в Volume (один раз) + синхронизируем topics
     try:
         if not os.path.exists(XP_DATA_PATH) and os.path.exists("xp_data.json"):
             with open("xp_data.json", "rb") as src, open(XP_DATA_PATH, "wb") as dst:
@@ -518,8 +517,38 @@ def migrate_runtime_files_to_volume():
         if not os.path.exists(USER_DATA_PATH) and os.path.exists("user_data.json"):
             with open("user_data.json", "rb") as src, open(USER_DATA_PATH, "wb") as dst:
                 dst.write(src.read())
+
+        # --- TOPICS sync ---
+        volume_topics_dir = "/data/topics"
+        local_topics_dir = "topics"
+
+        os.makedirs(volume_topics_dir, exist_ok=True)
+        os.makedirs(local_topics_dir, exist_ok=True)
+
+        # 1) если в Volume нет файла, но он есть локально = копируем в Volume
+        for fname in os.listdir(local_topics_dir):
+            if not fname.endswith(".json"):
+                continue
+            src = os.path.join(local_topics_dir, fname)
+            dst = os.path.join(volume_topics_dir, fname)
+            if os.path.exists(src) and not os.path.exists(dst):
+                with open(src, "rb") as s, open(dst, "wb") as d:
+                    d.write(s.read())
+
+        # 2) если в локале нет файла, но он есть в Volume = копируем в локал
+        # 💬 что делает эта часть: даже если load_topics() читает ./topics, он увидит темы из Volume
+        for fname in os.listdir(volume_topics_dir):
+            if not fname.endswith(".json"):
+                continue
+            src = os.path.join(volume_topics_dir, fname)
+            dst = os.path.join(local_topics_dir, fname)
+            if os.path.exists(src) and not os.path.exists(dst):
+                with open(src, "rb") as s, open(dst, "wb") as d:
+                    d.write(s.read())
+
     except Exception:
         logging.exception("migrate_runtime_files_to_volume failed")
+
 
 
 def _analytics_purge_days(days: dict, keep_days: int = 30) -> dict:
@@ -6283,6 +6312,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
