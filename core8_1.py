@@ -2108,7 +2108,7 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
     u = data.setdefault(user_id_str, {})
     ad = u.get("ad_subscription") or {}
     now = int(time.time())
-    active = ad.get("active_until", 0) > now
+    #active = ad.get("active_until", 0) > now
 
     if active and ad.get("channels"):
         all_ok = True
@@ -2152,17 +2152,13 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
     required: list[str] = []
 
     if channels_list:
-        pack_size = min(2, len(channels_list))  # 💬 максимум 3 канала за раз
-        idx = last_idx
-        for _ in range(pack_size):
-            idx = (idx + 1) % len(channels_list)
-            ch = channels_list[idx]
-            if ch not in required:
-                required.append(ch)
-        u["last_subscription_channel_index"] = idx
+        # 💬 всегда показываем только 1 канал = первый в subscription_channels.json
+        required = [channels_list[0]]
+        u["last_subscription_channel_index"] = 0
     else:
-        # 💬 Каналов нет — индекс не двигаем
+        # 💬 Каналов нет = индекс не двигаем
         u["last_subscription_channel_index"] = last_idx
+
 
     save_user_data(all_user_data)
 
@@ -6050,13 +6046,9 @@ async def check_subscription(query: CallbackQuery, state: FSMContext):
         if not sessions or sessions[-1].get("unsubscribed_at") is not None:
             sessions.append({"subscribed_at": now, "unsubscribed_at": None})
 
-    # 💬 Записываем/обновляем рекламную подписку на 3 дня от момента успешной проверки
-    if required:
-        u["ad_subscription"] = {
-            "start": now,
-            "active_until": now + AD_SUBSCRIPTION_DAYS * 24 * 60 * 60,
-            "channels": required,
-        }
+    # 💬 отключаем таймерный доступ = подписку проверяем каждый раз при входе в тему
+    u.pop("ad_subscription", None)
+    
 
     save_user_data(data)
 
@@ -6334,6 +6326,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
