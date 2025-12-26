@@ -263,6 +263,28 @@ dp         = Dispatcher(storage=MemoryStorage())
 dp.include_router(edit_topic_router)
 dp.include_router(create_topic_router)
 
+# 💬 что делает эта часть: копируем темы из Railway Volume (/data/topics) в локальную ./topics,
+# чтобы load_topics() увидел новые темы без redeploy
+def sync_topics_volume_to_local():
+    volume_topics_dir = "/data/topics"
+    local_topics_dir = "topics"
+    try:
+        os.makedirs(volume_topics_dir, exist_ok=True)
+        os.makedirs(local_topics_dir, exist_ok=True)
+
+        for fname in os.listdir(volume_topics_dir):
+            if not fname.endswith(".json"):
+                continue
+            src = os.path.join(volume_topics_dir, fname)
+            dst = os.path.join(local_topics_dir, fname)
+            if os.path.exists(src) and not os.path.exists(dst):
+                with open(src, "rb") as s, open(dst, "wb") as d:
+                    d.write(s.read())
+    except Exception:
+        logging.exception("sync_topics_volume_to_local failed")
+
+
+sync_topics_volume_to_local()  # 💬 подтягиваем темы из Volume перед чтением
 
 # ——— Загружаем уроки ——————————————————————————————————————————
 topics = load_topics()
@@ -6312,6 +6334,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
