@@ -8,6 +8,25 @@ import logging  # 💬 для логирования в receive_ad_source
 
 from pathlib import Path
 
+def get_topics_dir() -> Path:
+    # 💬 что делает эта часть: выбираем папку topics в Railway Volume (/data/topics); если нельзя = падаем обратно на локальную
+    candidates = [Path("/data/topics"), Path(__file__).parent / "topics", Path("topics")]
+    for d in candidates:
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            # тест записи, чтобы понять что директория реально writable
+            test = d / ".write_test"
+            test.write_text("ok", encoding="utf-8")
+            try:
+                test.unlink()
+            except Exception:
+                pass
+            return d
+        except Exception:
+            continue
+    return Path("topics")
+
+
 from aiogram import Router, Bot
 from aiogram import F
 from aiogram.filters import StateFilter
@@ -295,9 +314,9 @@ async def get_category_or_ads(message: Message, state: FSMContext):
         await state.clear()
 
         from edit_topic_flow import EditTopicStates  # 💬 импортируем только STATES, без router
-        topics_dir = Path(__file__).parent / "topics"
-        topics_dir.mkdir(parents=True, exist_ok=True)
+        topics_dir = get_topics_dir()  # 💬 что делает эта часть: читаем темы из Volume (/data/topics)
         files = [p.stem for p in topics_dir.glob("*.json")]
+
 
         if not files:
             await message.answer("⚠️ Нет доступных тем для редактирования.")
@@ -391,8 +410,10 @@ async def get_topic_name(message: Message, state: FSMContext):
 
     raw = message.text.strip()
     clean = re.sub(r"[^\w\s]", "", raw).lower().replace(" ", "_")
-    filename = f"topics/{clean}.json"
-
+    
+    topics_dir = get_topics_dir()
+    filename = str(topics_dir / f"{clean}.json")  # 💬 что делает эта часть: сохраняем путь темы в Volume (/data/topics)
+    
     # 💬 Собираем базовую структуру темы
     data = await state.get_data()
     category = data["topic"]["category"]
@@ -406,14 +427,14 @@ async def get_topic_name(message: Message, state: FSMContext):
         "videos": [],
         "dialogs": []
     }
-
-    # 💾 Сохраняем в файл
-    os.makedirs("topics", exist_ok=True)
+    
+    # 💾 Сохраняем в файл (уже в Volume)
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(topic, f, ensure_ascii=False, indent=2)
-
+    
     # 💬 Обновляем состояние
     await state.update_data(topic=topic, topic_path=filename)
+
 
     # 💬 Запрос описания темы
     await message.answer("Теперь введи ОПИСАНИЕ темы:", reply_markup=ReplyKeyboardRemove())
@@ -1870,6 +1891,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
