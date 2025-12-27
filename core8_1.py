@@ -166,6 +166,10 @@ SUBSCRIPTION_CHANNELS_PATH = "subscription_channels.json"
 
 AD_SUBSCRIPTION_DAYS = 3  # 💬 срок действия рекламной подписки (в днях)
 
+# 💬 ссылки для кнопок в главном меню
+MATERIALS_POST_URL = "https://t.me/espanolingooo_books/93"  # 💬 ссылка на конкретный пост с материалами
+CONTACT_URL = "https://t.me/Drancherrro"            # 💬 ссылка на твой личный контакт
+
 
 def is_ad_subscription_active(user_id: int) -> bool:
     # 💬 Проверяем, есть ли у пользователя активная рекламная подписка
@@ -1392,8 +1396,14 @@ async def start_handler(message: Message, state: FSMContext):
     # 💬 Главное меню теперь ИНЛАЙН — без ReplyKeyboard (ничего не «висит» внизу)
     inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📚 УЧИТЬСЯ",    callback_data="menu:learn")],
+        [
+            InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
+            InlineKeyboardButton(text="💬 Связь", url=CONTACT_URL)
+        ],
+
         [InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating"),
-         InlineKeyboardButton(text="⚙️ Настройки",  callback_data="menu:settings")]
+         InlineKeyboardButton(text="⚙️ Настройки",  callback_data="menu:settings")],
+
     ])
 
 
@@ -6443,6 +6453,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
