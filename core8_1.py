@@ -1976,16 +1976,14 @@ async def stats_handler(message: Message, state: FSMContext):
     since_24h = now_ts - 86400
 
     new_24h = 0
-    active_today = 0
-    durations = []
-
     words_total = 0
     words_today = 0
 
     from collections import Counter
-    last_handlers = Counter()
-    last_topics = Counter()
     topics_words_total = Counter()
+
+    # 💬 собираем по каждому пользователю: клики сегодня + слова по темам
+    per_user_rows = []
 
     for uid, u in xp_data.items():
         if not isinstance(u, dict):
@@ -2001,66 +1999,85 @@ async def stats_handler(message: Message, state: FSMContext):
         analytics = u.get("analytics", {})
         days = analytics.get("days", {})
         dayrec = days.get(today) if isinstance(days, dict) else None
-        if isinstance(dayrec, dict):
-            active_today += 1
-            ft = int(dayrec.get("first_ts", 0) or 0)
-            lt = int(dayrec.get("last_ts", 0) or 0)
-            if ft and lt and lt >= ft:
-                durations.append(lt - ft)
-
-        last = analytics.get("last", {})
-        if isinstance(last, dict):
-            h = last.get("handler")
-            if h:
-                last_handlers[h] += 1
-            tk = last.get("topic_key")
-            if tk:
-                last_topics[tk] += 1
+        clicks_today = int(dayrec.get("clicks", 0) or 0) if isinstance(dayrec, dict) else 0
 
         tw = analytics.get("topics_words", {})
+        user_topics = {}
         if isinstance(tw, dict):
             for tk, cnt in tw.items():
                 try:
-                    topics_words_total[tk] += int(cnt or 0)
+                    c_int = int(cnt or 0)
                 except Exception:
-                    pass
+                    continue
+                if c_int > 0:
+                    user_topics[tk] = c_int
+                    topics_words_total[tk] += c_int
 
-    avg_min = (sum(durations) / len(durations) / 60) if durations else 0.0
+        per_user_rows.append({
+            "uid": uid,
+            "name": (u.get("name") or "").strip() or "Без имени",
+            "tg_username": (u.get("tg_username") or "").strip(),
+            "clicks_today": clicks_today,
+            "topics": user_topics
+        })
 
     def title_for_topic(key: str) -> str:
+        # 💬 показываем название темы в статистике
         info = topics.get(key, {}) if isinstance(topics, dict) else {}
         t = (info.get("title") or info.get("name") or key)
         return t
 
-    top_handlers = last_handlers.most_common(7)
     top_topics_words = topics_words_total.most_common(7)
 
     lines = []
     lines.append("<b>📊 Статистика бота</b>")
-    lines.append(f"👥 Всего пользователей: <b>{total_users}</b>")
-    lines.append(f"🆕 Новые за 24ч: <b>{new_24h}</b>")
-    lines.append(f"✅ Активные сегодня: <b>{active_today}</b>")
-    lines.append(f"⏱ Среднее время сегодня (first→last): <b>{avg_min:.1f} мин</b>")
-    lines.append(f"🍪 Слов выучено всего: <b>{words_total}</b>")
-    lines.append(f"🍪 Слов сегодня: <b>{words_today}</b>")
+    lines.append(f"👥 Всего пользователей = <b>{total_users}</b>")
+    lines.append(f"🆕 Новые за 24ч = <b>{new_24h}</b>")
+    lines.append(f"🍪 Слов выучено всего = <b>{words_total}</b>")
+    lines.append(f"🍪 Слов сегодня = <b>{words_today}</b>")
 
     lines.append("")
-    lines.append("<b>🔝 Где “застревают” (последний хендлер)</b>")
-    if top_handlers:
-        for i, (h, c) in enumerate(top_handlers, 1):
-            lines.append(f"{i}) <code>{h}</code> — {c}")
+    lines.append("<b>👤 По пользователям</b>")
+    lines.append("🖱 клики сегодня + 🍪 слова по темам")
+
+    if per_user_rows:
+        # 💬 выводим всех, сортировка по кликам сегодня (desc)
+        per_user_rows.sort(key=lambda r: (r.get("clicks_today", 0), r.get("uid", "")), reverse=True)
+
+        for r in per_user_rows:
+            uname = f" {r['tg_username']}" if r.get("tg_username") else ""
+            lines.append(f"• <b>{r['name']}</b>{uname} <code>{r['uid']}</code> = 🖱 <b>{r['clicks_today']}</b>")
+
+            tdict = r.get("topics", {}) or {}
+            if tdict:
+                for tk, cnt in sorted(tdict.items(), key=lambda x: int(x[1] or 0), reverse=True):
+                    lines.append(f"↳ {title_for_topic(tk)} = <b>{cnt}</b> 🍪")
+            else:
+                lines.append("↳ тем пока нет")
+
     else:
-        lines.append("— пока нет данных —")
+        lines.append("— пользователей нет —")
 
     lines.append("")
     lines.append("<b>🔝 Темы по словам (всего)</b>")
     if top_topics_words:
         for i, (tk, c) in enumerate(top_topics_words, 1):
-            lines.append(f"{i}) {title_for_topic(tk)} — <b>{c}</b> 🍪")
+            lines.append(f"{i}) {title_for_topic(tk)} = <b>{c}</b> 🍪")
     else:
         lines.append("— пока нет данных —")
 
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    # 💬 режем на несколько сообщений, если слишком длинно
+    chunk = ""
+    for line in lines:
+        add = line + "\n"
+        if len(chunk) + len(add) > 3800:
+            await message.answer(chunk, parse_mode="HTML")
+            chunk = ""
+        chunk += add
+
+    if chunk.strip():
+        await message.answer(chunk, parse_mode="HTML")
+
 
 
 @dp.callback_query(lambda c: c.data == "back_to_menu")
@@ -6327,6 +6344,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
