@@ -2078,6 +2078,105 @@ async def stats_handler(message: Message, state: FSMContext):
     if chunk.strip():
         await message.answer(chunk, parse_mode="HTML")
 
+@dp.message(Command("stats_export"))
+@track_handler
+async def stats_export_handler(message: Message, state: FSMContext):
+    # 💬 экспорт статистики файлом, только для админа
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+
+    xp_data = load_xp_data()
+    user_data = load_user_data()
+
+    now_ts = int(time.time())
+    today = datetime.date.today().isoformat()
+    since_24h = now_ts - 86400
+
+    total_users = len(xp_data)
+    new_24h = 0
+    words_total = 0
+    words_today = 0
+
+    from collections import Counter
+    topics_words_total = Counter()
+    users_out = []
+
+    # 💬 готовим данные по каждому юзеру
+    for uid, u in xp_data.items():
+        if not isinstance(u, dict):
+            continue
+
+        if u.get("first_join", 0) >= since_24h:
+            new_24h += 1
+
+        stats = u.get("stats", {})
+        words_total += int(stats.get("words_learned", 0) or 0)
+        words_today += int(u.get("words_learned_today", 0) or 0)
+
+        analytics = u.get("analytics", {})
+        days = analytics.get("days", {})
+        dayrec = days.get(today) if isinstance(days, dict) else None
+        clicks_today = int(dayrec.get("clicks", 0) or 0) if isinstance(dayrec, dict) else 0
+
+        tw = analytics.get("topics_words", {})
+        topics_map = {}
+        if isinstance(tw, dict):
+            for tk, cnt in tw.items():
+                try:
+                    c_int = int(cnt or 0)
+                except Exception:
+                    continue
+                if c_int > 0:
+                    topics_map[tk] = c_int
+                    topics_words_total[tk] += c_int
+
+        users_out.append({
+            "uid": uid,
+            "name": (u.get("name") or "").strip() or "Без имени",
+            "tg_username": (u.get("tg_username") or "").strip(),
+            "first_join": int(u.get("first_join", 0) or 0),
+            "clicks_today": clicks_today,
+            "words_learned_total": int(stats.get("words_learned", 0) or 0),
+            "words_learned_today": int(u.get("words_learned_today", 0) or 0),
+            "topics_words": topics_map
+        })
+
+    export_payload = {
+        "generated_at_ts": now_ts,
+        "generated_at_date": today,
+        "summary": {
+            "total_users": total_users,
+            "new_24h": new_24h,
+            "words_total": words_total,
+            "words_today": words_today
+        },
+        "topics_words_total": dict(topics_words_total),
+        "users": users_out,
+
+        # 💬 полный дамп, чтобы ты видел вообще всё
+        "raw": {
+            "xp_data": xp_data,
+            "user_data": user_data
+        }
+    }
+
+    export_path = f"/tmp/stats_export_{today}_{now_ts}.json"
+
+    # 💬 пишем файл на диск и отправляем документом
+    with open(export_path, "w", encoding="utf-8") as f:
+        json.dump(export_payload, f, ensure_ascii=False, indent=2)
+
+    try:
+        await message.answer_document(
+            document=FSInputFile(export_path),
+            caption=f"📎 stats_export = {today} = users {total_users}"
+        )
+    finally:
+        # 💬 чистим временный файл, чтобы не копился
+        try:
+            os.remove(export_path)
+        except Exception:
+            pass
 
 
 @dp.callback_query(lambda c: c.data == "back_to_menu")
@@ -6344,6 +6443,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
