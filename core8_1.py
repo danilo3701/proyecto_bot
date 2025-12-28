@@ -2305,6 +2305,34 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
             save_user_data(data)
         return await lesson_menu_handler(query.message, state)
 
+    # 💬 Если юзер уже подписан на обязательный канал — не показываем окно подписки
+    try:
+        member = await bot.get_chat_member(chat_id=required[0], user_id=query.from_user.id)
+        is_member = member.status in ("member", "administrator", "creator")
+    except TelegramBadRequest:
+        is_member = False
+
+    if is_member:
+        data = load_user_data()
+        u = data.setdefault(user_id_str, {})
+
+        unlocked = u.setdefault("unlocked_topics", [])
+        if topic_key not in unlocked:
+            unlocked.append(topic_key)
+
+        # 💬 фиксируем сессию подписки (чтобы stats/история не были пустыми)
+        ch = required[0]
+        sessions = u.setdefault("channels", {}).setdefault(ch, [])
+        if not sessions or sessions[-1].get("unsubscribed_at") is not None:
+            sessions.append({"subscribed_at": now, "unsubscribed_at": None})
+
+        # 💬 отключаем таймерный доступ = подписку проверяем каждый раз при входе в тему
+        u.pop("ad_subscription", None)
+
+        save_user_data(data)
+        return await lesson_menu_handler(query.message, state)
+
+
     # 3) Каналы есть — показываем окно подписки с inline-кнопками
     channels_str = ", ".join(required)
 
@@ -6453,6 +6481,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
