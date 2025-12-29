@@ -481,6 +481,40 @@ async def start_battle_from_lex_menu(message: Message, state: FSMContext) -> Non
         reply_markup=_topics_kb(keys),
     )
 
+async def _start_battle_with_topic(message: Message, state: FSMContext, bot: Bot, user_id: int, topic_key: str) -> None:
+    # 💬 что делает эта часть: единый запуск боя по topic_key (и для выбора темы, и для реванша)
+    info = _get_battle_source().get(topic_key, {}) or {}
+    title = info.get("title") or topic_key
+
+    await state.set_state(Battle.Match)
+    await state.update_data(battle_last_topic=topic_key)
+
+    loading = await message.answer("🔎 Загружаем соперника…")
+    await asyncio.sleep(1)
+
+    opponent = random.choice([
+        "Rival_Pro", "ElJefe", "TurboJuan", "Sombra", "Lobo", "MisterX",
+        f"User{random.randint(1000, 9999)}"
+    ])
+
+    try:
+        await loading.edit_text(
+            f"✅ Соперник найден: <b>{opponent}</b>\n⏱ Бой = {BATTLE_DURATION_S} сек",
+            parse_mode="HTML"
+        )
+    except TelegramBadRequest:
+        pass
+
+    rt = BattleRuntime()
+    rt.opponent_name = opponent
+    rt.topic_key = topic_key
+    rt.topic_title = title
+    BATTLES[user_id] = rt
+
+    await state.set_state(Battle.Running)
+
+    rt.task_tick = asyncio.create_task(_tick_loop(bot, message.chat.id, user_id, state))
+    rt.task_main = asyncio.create_task(_battle_loop(bot, message.chat.id, user_id, state))
 
 # ─────────────────────────────────────────────────────────
 # 🎯 Выбор темы
@@ -496,38 +530,7 @@ async def battle_choose_topic(callback: CallbackQuery, state: FSMContext, bot: B
         pass
 
     topic_key = callback.data.split("battle:topic:", 1)[1]
-    info = _get_battle_source().get(topic_key, {}) or {}  # 💬 берём данные battle темы
-    title = info.get("title") or topic_key
-
-    await state.set_state(Battle.Match)
-    await state.update_data(battle_last_topic=topic_key)
-
-    # 💬 “загружаем соперника”
-    loading = await callback.message.answer("🔎 Загружаем соперника…")
-    await asyncio.sleep(1)
-
-    opponent = random.choice([
-        "Rival_Pro", "ElJefe", "TurboJuan", "Sombra", "Lobo", "MisterX",
-        f"User{random.randint(1000, 9999)}"
-    ])
-
-    try:
-        await loading.edit_text(f"✅ Соперник найден: <b>{opponent}</b>\n⏱ Бой = {BATTLE_DURATION_S} сек", parse_mode="HTML")
-    except TelegramBadRequest:
-        pass
-
-    # 💬 создаём runtime и запускаем задачи
-    user_id = callback.from_user.id
-    rt = BattleRuntime()
-    rt.opponent_name = opponent
-    rt.topic_key = topic_key
-    rt.topic_title = title
-    BATTLES[user_id] = rt
-
-    await state.set_state(Battle.Running)
-
-    rt.task_tick = asyncio.create_task(_tick_loop(bot, callback.message.chat.id, user_id, state))
-    rt.task_main = asyncio.create_task(_battle_loop(bot, callback.message.chat.id, user_id, state))
+    await _start_battle_with_topic(callback.message, state, bot, callback.from_user.id, topic_key)  # 💬 старт боя по выбранной теме
 
 
 # ─────────────────────────────────────────────────────────
@@ -591,10 +594,8 @@ async def battle_rematch(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer("Не нашёл тему для реванша 🙈")
         return
 
-    # 💬 запускаем матчмейкинг тем же путём
-    fake_cb = callback
-    fake_cb.data = f"battle:topic:{topic_key}"
-    await battle_choose_topic(fake_cb, state, bot=callback.bot)
+    await _start_battle_with_topic(callback.message, state, callback.bot, callback.from_user.id, topic_key)  # 💬 реванш без мутаций callback
+
 
 
 # ─────────────────────────────────────────────────────────
