@@ -1876,13 +1876,12 @@ async def show_leaderboard(message: Message, state: FSMContext):
             4: "🎓",
             5: "🍀",
         }
-        nbsp = "\u00A0"          # 💬 неразрывный пробел для стабильных отступов
-        indent = nbsp * 2        # 💬 отступ перед 1) 2) 3) как на скриншоте
+        nbsp = " "               # 💬 обычный пробел = будет ровно работать внутри <pre> (моноширинный блок)
+        indent = nbsp * 2        # 💬 2 пробела отступа перед 1) 2) 3)
 
-        NAME_COL = 20  # 💬 фикс ширина имени = 🍪 всегда в одной колонке (длинные имена режем)
+        NAME_COL = 20            # 💬 ширина колонки имени
+        RANK_COL = 4             # 💬 ширина колонки ранга (1) / 10) / 223)
 
-        RANK_COL = 4   # 💬 фикс ширина "223)" (без маркера ">"), чтобы 🍪 не съезжала
-        
         def _name_cell(raw: str) -> str:
             # 💬 делает ячейку имени фикс длины: режем до 20 и ставим "..."
             raw = (raw or "").strip()
@@ -1890,23 +1889,22 @@ async def show_leaderboard(message: Message, state: FSMContext):
                 raw = raw[:max(0, NAME_COL - 3)] + "..."  # 💬 длинное имя = обрезаем
             pad = nbsp * max(0, NAME_COL - len(raw))
             return f"{raw}{pad}"  # 💬 добивка до фикс ширины
-        
+
         def _mark_cell(is_me: bool) -> str:
             # 💬 маркер ">" не двигает цифры ранга: либо "> ", либо "  "
             return f">{nbsp}" if is_me else indent
-        
+
         def _rank_cell(pos: int) -> str:
             # 💬 фикс-ячейка ранга без ">" (сам ">" живёт в _mark_cell), чтобы колонки не съезжали
             base = f"{pos})"
             pad = nbsp * max(0, RANK_COL - len(base))
             return f"{base}{pad}{nbsp}"  # 💬 пробел между "1)" и эмодзи места
-        
+
         def _line(pos: int, name: str, val: int, is_me: bool = False) -> str:
             # 💬 собирает строку рейтинга с фикс колонкой имени и 🍪 (и без съезда из-за ">")
             icon = "🤓" if is_me else (place_icons.get(pos) or nbsp)  # 💬 у тебя всегда 🤓
             name_cell = _name_cell(name)
             return f"{_mark_cell(is_me)}{_rank_cell(pos)}{icon}{nbsp}{name_cell}{nbsp}{emoji}{nbsp}{val}"
-
 
     
         sorted_all = sorted(
@@ -1915,8 +1913,8 @@ async def show_leaderboard(message: Message, state: FSMContext):
             reverse=True
         )
     
-        res = [f"<b>{title}</b>"]
-    
+        res = [f"<b>{title}</b>", "<pre>"]  # 💬 <pre> = моноширинный шрифт, колонки реально выравниваются
+
         # 💬 “реальные + 30 фейковых” (без вывода строки “участников”)
         FAKE_ADD = 30
         real_count = len(sorted_all)
@@ -1932,10 +1930,11 @@ async def show_leaderboard(message: Message, state: FSMContext):
     
     
         if not sorted_all:
-            # 💬 даже если данных нет — не падаем и показываем красивый диапазон
+            # 💬 даже если данных нет = не падаем и показываем формат с моноширинным выравниванием
             res.append("Пока пусто")
-            res.append(f"1…{total_count}")  # 💬 визуальный “хвост”
-            res.append(f"1. <b>Ты</b> {my_name} {emoji} 0")
+            res.append(f"{indent}1…{total_count}")  # 💬 сколько всего пользователей
+            res.append(_line(1, my_name, 0, is_me=True))  # 💬 показываем тебя без слова Ты
+            res.append("</pre>")  # 💬 закрываем моноширинный блок
             return "\n".join(res)
     
         # 💬 ищем позицию “тебя”
@@ -1970,6 +1969,7 @@ async def show_leaderboard(message: Message, state: FSMContext):
             res.append(_line(my_rank, my_name, my_val, is_me=True))  # 💬 показываем твоё место без съезда 🍪
 
     
+        res.append("</pre>")  # 💬 закрываем моноширинный блок
         return "\n".join(res)
 
 
@@ -6520,6 +6520,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
