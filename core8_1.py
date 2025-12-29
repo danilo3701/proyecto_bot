@@ -167,7 +167,7 @@ SUBSCRIPTION_CHANNELS_PATH = "subscription_channels.json"
 AD_SUBSCRIPTION_DAYS = 3  # 💬 срок действия рекламной подписки (в днях)
 
 # 💬 ссылки для кнопок в главном меню
-MATERIALS_POST_URL = "https://t.me/espanolingooo_books/93"  # 💬 ссылка на конкретный пост с материалами
+MATERIALS_POST_URL = "https://t.me/+TOHEAq_otQY5MWE0"  # 💬 ссылка на конкретный пост с материалами
 CONTACT_URL = "https://t.me/Drancherrro"            # 💬 ссылка на твой личный контакт
 
 
