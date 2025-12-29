@@ -2618,7 +2618,7 @@ def build_mywords_menu_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="✏️ Редактировать", callback_data="mywords:edit_open")
         ],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="mywords:settings"),
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:back_main")],
+         InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:back_main")],
     ])
 
 def build_stop_kb() -> ReplyKeyboardMarkup:
