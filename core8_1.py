@@ -1881,18 +1881,28 @@ async def show_leaderboard(message: Message, state: FSMContext):
 
         NAME_COL = 20  # 💬 фикс ширина имени = 🍪 всегда в одной колонке (длинные имена режем)
 
+        RANK_COL = 5  # 💬 фикс ширина "1) " и "> 9) " чтобы 🍪 всегда стояла в одной колонке
+        
         def _name_cell(raw: str) -> str:
-            # 💬 делает ячейку имени фикс длины: обрезает и добивает nbsp
+            # 💬 делает ячейку имени фикс длины: режем до 20 и ставим "..."
             raw = (raw or "").strip()
             if len(raw) > NAME_COL:
-                raw = raw[:max(0, NAME_COL - 3)] + "..."
+                raw = raw[:max(0, NAME_COL - 3)] + "..."  # 💬 длинное имя = обрезаем
             pad = nbsp * max(0, NAME_COL - len(raw))
-            return f"{raw}{pad}"
+            return f"{raw}{pad}"  # 💬 добивка до фикс ширины
+        
+        def _rank_cell(pos: int, is_me: bool = False) -> str:
+            # 💬 делает фикс-ячейку ранга (с "> " для тебя), чтобы колонки не съезжали
+            base = f"> {pos}) " if is_me else f"{pos}) "
+            pad = nbsp * max(0, RANK_COL - len(base))
+            return f"{base}{pad}"
+        
+        def _line(pos: int, name: str, val: int, is_me: bool = False) -> str:
+            # 💬 собирает строку рейтинга с фикс колонкой имени и 🍪
+            icon = "🤓" if is_me else (place_icons.get(pos) or nbsp)  # 💬 у тебя всегда 🤓
+            name_cell = _name_cell(name)
+            return f"{indent}{_rank_cell(pos, is_me=is_me)}{icon}{nbsp}{name_cell}{nbsp}{emoji}{nbsp}{val}"
 
-
-        def _prefix(pos: int) -> str:
-            icon = place_icons.get(pos)
-            return f"{pos}) {icon}" if icon else f"{pos})"  # 💬 1) 👑, 6) без иконки
 
     
         sorted_all = sorted(
@@ -1940,25 +1950,20 @@ async def show_leaderboard(message: Message, state: FSMContext):
             my_rank = min(real_count + 1, total_count)
             my_val = 0
     
-        # 💬 топ-5 (фикс колонка имени = фикс колонка 🍪)
+        # 💬 топ-5
         top5 = sorted_all[:5]
-
         for idx, u in enumerate(top5, 1):
-            icon = place_icons.get(idx, "⭐")  # 💬 fallback на всякий
-            name_cell = _name_cell(u.get("name", "") or "")  # 💬 фикс ширина имени
             val = int(u.get(key, 0) or 0)
-
-            res.append(f"{indent}{idx}) {icon} {name_cell} {emoji} {val}")  # 💬 🍪 всегда на одной колонке
-
-        # 💬 красивый “хвост” типа 6…35 (с тем же отступом)
+            res.append(_line(idx, u.get("name", ""), val))  # 💬 выравнивание колонок как на скриншоте
+        
+        # 💬 хвост
         hidden_from = len(top5) + 1
         if total_count >= hidden_from:
             res.append(f"{indent}{hidden_from}…{total_count}")  # 💬 сколько всего пользователей
-
+        
         # 💬 строка “ты” (без слова Ты) + маркер ">" + 🤓, только если ты не в топ-5
         if my_rank > len(top5):
-            me_name_cell = _name_cell(my_name)  # 💬 те же правила обрезки/добивки
-            res.append(f"{indent}> {my_rank}) 🤓 {me_name_cell} {emoji} {my_val}")  # 💬 показываем твоё место
+            res.append(_line(my_rank, my_name, my_val, is_me=True))  # 💬 показываем твоё место без съезда 🍪
 
     
         return "\n".join(res)
@@ -6511,6 +6516,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
