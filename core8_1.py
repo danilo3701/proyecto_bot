@@ -519,6 +519,53 @@ def save_xp_data(xp_data):
     _atomic_json_dump(XP_DATA_PATH, xp_data)
     _atomic_json_dump(XP_DATA_BACKUP_PATH, xp_data)
 
+async def reminders_watchdog(bot: Bot):
+    # 💬 Фоновая задача: раз в минуту проверяет, пора ли отправить уведомление
+    while True:
+        try:
+            xp_data = load_xp_data()
+            now = datetime.datetime.now()
+            today = now.date().isoformat()
+
+            changed = False
+
+            for user_id_str, user_data in xp_data.items():
+                if not isinstance(user_data, dict):
+                    continue
+
+                reset_daily_words_if_needed(user_data)
+
+                words_today = int(user_data.get("words_learned_today", 0) or 0)
+                limit = int(user_data.get("words_daily_limit", 10) or 10)
+
+                reminder_hour = int(user_data.get("reminder_hour", 19) or 19)
+                check_hour = 0 if reminder_hour == 24 else reminder_hour  # 💬 24:00 = 00:00
+
+                last_sent = user_data.get("reminder_last_date")
+
+                if now.hour == check_hour and last_sent != today:
+                    # 💬 Если лимит уже выполнен, не спамим, но помечаем как "проверено сегодня"
+                    if words_today < limit:
+                        text = (
+                            "⏰ Напоминание\n"
+                            f"Сегодня = {words_today}/{limit} 🍪\n"
+                            "Зайди в бот и продолжай"
+                        )
+                        try:
+                            await bot.send_message(chat_id=int(user_id_str), text=text)
+                        except Exception:
+                            pass
+
+                    user_data["reminder_last_date"] = today
+                    changed = True
+
+            if changed:
+                save_xp_data(xp_data)
+
+        except Exception:
+            logging.exception("reminders_watchdog error")
+
+        await asyncio.sleep(60)  # 💬 Проверка раз в минуту
 
 
 
@@ -1810,6 +1857,7 @@ async def process_reminder_input(message: Message, state: FSMContext):
     user_id = str(message.chat.id)
     user = xp_data.setdefault(user_id, {})
     user["reminder_hour"] = hour
+    xp_data[str(user_id)]["reminder_last_date"] = None  # 💬 Сбрасываем, чтобы новое время применилось сразу
     save_xp_data(xp_data)
     await message.answer(f"✅ Время напоминания обновлено: {hour}:00")
     return await settings_menu(message, state)
@@ -6513,6 +6561,8 @@ if __name__ == '__main__':
 
         migrate_runtime_files_to_volume()  # 💬 выполняется один раз при старте
 
+        asyncio.create_task(reminders_watchdog(bot))  # 💬 Запуск фоновых уведомлений
+
 
         print("🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀 Бот запущен!")
         await dp.start_polling(bot)
@@ -6535,6 +6585,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
