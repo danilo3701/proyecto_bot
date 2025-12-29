@@ -29,6 +29,34 @@ from aiogram.exceptions import TelegramBadRequest
 
 router = Router()
 
+# 💬 Ссылки из core8_1 (чтобы не делать круговой импорт)
+CONTACT_URL: str = ""
+MATERIALS_POST_URL: str = ""
+
+def set_battle_links(contact_url: str, materials_url: str) -> None:
+    global CONTACT_URL, MATERIALS_POST_URL
+    CONTACT_URL = contact_url or ""
+    MATERIALS_POST_URL = materials_url or ""  # 💬 чтобы кнопки меню работали
+
+def _battle_main_menu_kb() -> InlineKeyboardMarkup:
+    # 💬 главное меню, чтобы после выхода из битвы кнопки сразу работали
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
+        [
+            InlineKeyboardButton(text="📎 Материалы", url=(MATERIALS_POST_URL or "https://t.me/")),
+            InlineKeyboardButton(text="Связь 💬", url=(CONTACT_URL or "https://t.me/"))
+        ],
+        [
+            InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
+            InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords")
+        ],
+        [
+            InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
+            InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")
+        ],
+    ])
+
+
 # 💬 Ссылка на topics из core8_1 (чтобы не делать круговой импорт)
 TOPICS_REF: Dict[str, Any] = {}
 
@@ -443,23 +471,7 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
     await state.set_state(Battle.Result)
     await state.update_data(battle_last_topic=rt.topic_key, battle_last_result_msg_id=res_msg.message_id)
 
-    def _battle_main_menu_kb() -> InlineKeyboardMarkup:
-    # 💬 главное меню, чтобы после выхода из битвы кнопки сразу работали
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📚 УЧИТЬСЯ",    callback_data="menu:learn")],
-        [
-            InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
-            InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL)
-        ],
 
-        [InlineKeyboardButton(text="⚔️ Битва",   callback_data="menu:battle"),
-         InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords")],
-
-        [InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating"),
-        InlineKeyboardButton(text="Настройки ⚙️",  callback_data="menu:settings")],
-
-
-    ])
 # ─────────────────────────────────────────────────────────
 # ✅ Публичный вход из core8_1 (кнопка в меню "Лексика")
 # ─────────────────────────────────────────────────────────
