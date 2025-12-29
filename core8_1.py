@@ -1869,7 +1869,20 @@ async def show_leaderboard(message: Message, state: FSMContext):
 
 
     def render_block(title: str, key: str, emoji: str) -> str:
-        medals = ["🥇", "🥈", "🥉"]
+        place_icons = {  # 💬 эмодзи мест как на скриншоте
+            1: "👑",
+            2: "🥈",
+            3: "🥉",
+            4: "🎓",
+            5: "🍀",
+        }
+        nbsp = "\u00A0"          # 💬 неразрывный пробел для стабильных отступов
+        indent = nbsp * 2        # 💬 отступ перед 1) 2) 3) как на скриншоте
+
+        def _prefix(pos: int) -> str:
+            icon = place_icons.get(pos)
+            return f"{pos}) {icon}" if icon else f"{pos})"  # 💬 1) 👑, 6) без иконки
+
     
         sorted_all = sorted(
             users,
@@ -1917,10 +1930,18 @@ async def show_leaderboard(message: Message, state: FSMContext):
     
         # 💬 топ-5 (4 и 5 без медалек)
         top5 = sorted_all[:5]
+
+        # 💬 считаем длину имени внутри ТОП-5, чтобы 🍪 были в одной колонке
+        max_name_len = max([len((u.get("name", "") or "")) for u in top5] + [0])
+
         for idx, u in enumerate(top5, 1):
-            prefix = medals[idx - 1] if idx <= 3 else f"{idx}."
+            icon = place_icons.get(idx, "⭐")  # 💬 fallback, но в топ-5 не понадобится
+            name = (u.get("name", "") or "")
+            pad = nbsp * max(0, max_name_len - len(name))  # 💬 добивка пробелами до одной ширины
             val = int(u.get(key, 0) or 0)
-            res.append(f"{prefix} {u.get('name','')} {emoji} {val}")
+
+            res.append(f"{indent}{idx}) {icon} {name}{pad} {emoji} {val}")  # 💬 ровная колонка 🍪 и отступы
+
     
         # 💬 красивый “хвост” типа 6…35
         hidden_from = len(top5) + 1
@@ -6481,6 +6502,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
