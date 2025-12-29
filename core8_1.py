@@ -1879,6 +1879,17 @@ async def show_leaderboard(message: Message, state: FSMContext):
         nbsp = "\u00A0"          # 💬 неразрывный пробел для стабильных отступов
         indent = nbsp * 2        # 💬 отступ перед 1) 2) 3) как на скриншоте
 
+        NAME_COL = 20  # 💬 фикс ширина имени = 🍪 всегда в одной колонке (длинные имена режем)
+
+        def _name_cell(raw: str) -> str:
+            # 💬 делает ячейку имени фикс длины: обрезает и добивает nbsp
+            raw = (raw or "").strip()
+            if len(raw) > NAME_COL:
+                raw = raw[:max(0, NAME_COL - 3)] + "..."
+            pad = nbsp * max(0, NAME_COL - len(raw))
+            return f"{raw}{pad}"
+
+
         def _prefix(pos: int) -> str:
             icon = place_icons.get(pos)
             return f"{pos}) {icon}" if icon else f"{pos})"  # 💬 1) 👑, 6) без иконки
@@ -1902,7 +1913,8 @@ async def show_leaderboard(message: Message, state: FSMContext):
         actor_name = (data.get("leaderboard_actor_name") or "").strip()
     
         current_uid = actor_uid or str(message.from_user.id)
-        my_name = actor_name or "Ты"
+        my_name = actor_name or (message.from_user.first_name or "Пользователь")  # 💬 имя вместо слова Ты
+
     
     
         if not sorted_all:
@@ -1928,29 +1940,26 @@ async def show_leaderboard(message: Message, state: FSMContext):
             my_rank = min(real_count + 1, total_count)
             my_val = 0
     
-        # 💬 топ-5 (4 и 5 без медалек)
+        # 💬 топ-5 (фикс колонка имени = фикс колонка 🍪)
         top5 = sorted_all[:5]
 
-        # 💬 считаем длину имени внутри ТОП-5, чтобы 🍪 были в одной колонке
-        max_name_len = max([len((u.get("name", "") or "")) for u in top5] + [0])
-
         for idx, u in enumerate(top5, 1):
-            icon = place_icons.get(idx, "⭐")  # 💬 fallback, но в топ-5 не понадобится
-            name = (u.get("name", "") or "")
-            pad = nbsp * max(0, max_name_len - len(name))  # 💬 добивка пробелами до одной ширины
+            icon = place_icons.get(idx, "⭐")  # 💬 fallback на всякий
+            name_cell = _name_cell(u.get("name", "") or "")  # 💬 фикс ширина имени
             val = int(u.get(key, 0) or 0)
 
-            res.append(f"{indent}{idx}) {icon} {name}{pad} {emoji} {val}")  # 💬 ровная колонка 🍪 и отступы
+            res.append(f"{indent}{idx}) {icon} {name_cell} {emoji} {val}")  # 💬 🍪 всегда на одной колонке
 
-    
-        # 💬 красивый “хвост” типа 6…35
+        # 💬 красивый “хвост” типа 6…35 (с тем же отступом)
         hidden_from = len(top5) + 1
         if total_count >= hidden_from:
-            res.append(f"{hidden_from}…{total_count}")  # 💬 вместо “ещё 25 участников”
-    
-        # 💬 строка “ты” (цифра → Ты → имя), только если ты не в топ-5
+            res.append(f"{indent}{hidden_from}…{total_count}")  # 💬 сколько всего пользователей
+
+        # 💬 строка “ты” (без слова Ты) + маркер ">" + 🤓, только если ты не в топ-5
         if my_rank > len(top5):
-            res.append(f"{my_rank}. <b>Ты</b> {my_name} {emoji} {my_val}")
+            me_name_cell = _name_cell(my_name)  # 💬 те же правила обрезки/добивки
+            res.append(f"{indent}> {my_rank}) 🤓 {me_name_cell} {emoji} {my_val}")  # 💬 показываем твоё место
+
     
         return "\n".join(res)
 
@@ -6502,6 +6511,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
