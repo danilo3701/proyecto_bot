@@ -1881,7 +1881,7 @@ async def show_leaderboard(message: Message, state: FSMContext):
 
         NAME_COL = 20  # 💬 фикс ширина имени = 🍪 всегда в одной колонке (длинные имена режем)
 
-        RANK_COL = 5  # 💬 фикс ширина "1) " и "> 9) " чтобы 🍪 всегда стояла в одной колонке
+        RANK_COL = 4   # 💬 фикс ширина "223)" (без маркера ">"), чтобы 🍪 не съезжала
         
         def _name_cell(raw: str) -> str:
             # 💬 делает ячейку имени фикс длины: режем до 20 и ставим "..."
@@ -1891,17 +1891,21 @@ async def show_leaderboard(message: Message, state: FSMContext):
             pad = nbsp * max(0, NAME_COL - len(raw))
             return f"{raw}{pad}"  # 💬 добивка до фикс ширины
         
-        def _rank_cell(pos: int, is_me: bool = False) -> str:
-            # 💬 делает фикс-ячейку ранга (с "> " для тебя), чтобы колонки не съезжали
-            base = f"> {pos}) " if is_me else f"{pos}) "
+        def _mark_cell(is_me: bool) -> str:
+            # 💬 маркер ">" не двигает цифры ранга: либо "> ", либо "  "
+            return f">{nbsp}" if is_me else indent
+        
+        def _rank_cell(pos: int) -> str:
+            # 💬 фикс-ячейка ранга без ">" (сам ">" живёт в _mark_cell), чтобы колонки не съезжали
+            base = f"{pos})"
             pad = nbsp * max(0, RANK_COL - len(base))
-            return f"{base}{pad}"
+            return f"{base}{pad}{nbsp}"  # 💬 пробел между "1)" и эмодзи места
         
         def _line(pos: int, name: str, val: int, is_me: bool = False) -> str:
-            # 💬 собирает строку рейтинга с фикс колонкой имени и 🍪
+            # 💬 собирает строку рейтинга с фикс колонкой имени и 🍪 (и без съезда из-за ">")
             icon = "🤓" if is_me else (place_icons.get(pos) or nbsp)  # 💬 у тебя всегда 🤓
             name_cell = _name_cell(name)
-            return f"{indent}{_rank_cell(pos, is_me=is_me)}{icon}{nbsp}{name_cell}{nbsp}{emoji}{nbsp}{val}"
+            return f"{_mark_cell(is_me)}{_rank_cell(pos)}{icon}{nbsp}{name_cell}{nbsp}{emoji}{nbsp}{val}"
 
 
     
@@ -6516,6 +6520,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
