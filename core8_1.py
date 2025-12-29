@@ -1940,12 +1940,14 @@ async def show_leaderboard(message: Message, state: FSMContext):
         if not sorted_all:
             # 💬 даже если данных нет = не падаем и показываем формат с моноширинным выравниванием
             res.append("Пока пусто")
-            res.append(_under_name(f"↳{total_count}"))  # 💬 общее число участников
-            me_line = _line(1, my_name, 0, is_me=True)  # 💬 строка пользователя отдельно (для выделения)
-
+            res.append(_under_name(f"↳{total_count}"))
+            
+            res.append(_line(my_rank, my_name, my_val, is_me=True))  # 💬 строка "ты" внутри моноширинного блока
+            
             res.append("</pre>")  # 💬 закрываем моноширинный блок
-            res.append(f"<b><code>{me_line}</code></b>")  # 💬 выделяем строку пользователя (жирный + моноширинный)
+            
             return "\n".join(res)
+
 
     
         # 💬 ищем позицию “тебя”
@@ -1975,14 +1977,13 @@ async def show_leaderboard(message: Message, state: FSMContext):
             res.append(_under_name(f"↳{total_count}"))  # 💬 общее число участников
 
         
-        me_line = _line(my_rank, my_name, my_val, is_me=True) if my_rank > len(top5) else None  # 💬 строка пользователя отдельно (для выделения)
-
+        if my_rank > len(top5):
+            res.append(_line(my_rank, my_name, my_val, is_me=True))  # 💬 строка "ты" внутри моноширинного блока
+        
         res.append("</pre>")  # 💬 закрываем моноширинный блок
-
-        if me_line:
-            res.append(f"<b><code>{me_line}</code></b>")  # 💬 выделяем строку пользователя (жирный + моноширинный)
-
+        
         return "\n".join(res)
+
 
 
     week_text = render_block("🏆 Рейтинг недели", "words_learned_week", "🍪")
@@ -2012,7 +2013,7 @@ async def show_leaderboard(message: Message, state: FSMContext):
     legend = "🍪 = слов выучено"  # 💬 легенда для рейтинга
 
 
-    await message.answer(f"{legend}\n\n{week_text}\n\n{month_text}", parse_mode="HTML", reply_markup=menu_kb)  # 💬 легенда перед блоками
+    await message.answer(f"{legend}\n\n{week_text}\n{month_text}", parse_mode="HTML", reply_markup=menu_kb)  # 💬 легенда перед блоками
 
 
 # 🟢 Новый хендлер: Главное меню (/menu)
