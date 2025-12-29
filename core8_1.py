@@ -1507,7 +1507,7 @@ async def start_handler(message: Message, state: FSMContext):
         [InlineKeyboardButton(text="⚔️ Битва",   callback_data="menu:battle"),
          InlineKeyboardButton(text="🧩 Мои слова", callback_data="menu:mywords")],
 
-        [InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating")
+        [InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating"),
         InlineKeyboardButton(text="⚙️ Настройки",  callback_data="menu:settings")],
 
 
