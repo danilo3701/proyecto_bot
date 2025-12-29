@@ -3003,7 +3003,14 @@ async def mywords_add_choose_cat_cb(callback: CallbackQuery, state: FSMContext):
     category = categories[idx]
     await state.update_data(mywords_category=category)
 
-    txt = f"➕ Добавить слово\n\nКатегория: *{category}*\n\nОтправь строкой: ES - RU"
+    txt = (
+        f"➕ Добавить слово\n\n"
+        f"Категория: *{category}*\n\n"
+        f"Отправь аот так: ES - RU\n"
+        f"Пример: *Comer - Кушать*"
+        f"*Comer - Кушать*"
+    )  # 💬 показываем пример формата ввода
+
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
     try:
         await callback.message.edit_text(txt, reply_markup=kb, parse_mode="Markdown")
