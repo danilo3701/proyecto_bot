@@ -170,7 +170,6 @@ AD_SUBSCRIPTION_DAYS = 3  # 💬 срок действия рекламной п
 MATERIALS_POST_URL = "https://t.me/+TOHEAq_otQY5MWE0"  # 💬 ссылка на конкретный пост с материалами
 CONTACT_URL = "https://t.me/Drancherrro"            # 💬 ссылка на твой личный контакт
 
-set_battle_links(CONTACT_URL, MATERIALS_POST_URL)  # 💬 чтобы кнопки "Материалы/Связь" работали в battle меню
 
 def is_ad_subscription_active(user_id: int) -> bool:
     # 💬 Проверяем, есть ли у пользователя активная рекламная подписка
