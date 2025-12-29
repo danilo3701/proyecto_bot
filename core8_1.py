@@ -544,17 +544,30 @@ async def reminders_watchdog(bot: Bot):
                 last_sent = user_data.get("reminder_last_date")
 
                 if now.hour == check_hour and last_sent != today:
-                    # 💬 Если лимит уже выполнен, не спамим, но помечаем как "проверено сегодня"
+                    # 💬 Отправляем 1 раз в день, но ставим reminder_last_date только если реально отправили
                     if words_today < limit:
                         text = (
                             "⏰ Напоминание\n"
                             f"Сегодня = {words_today}/{limit} 🍪\n"
                             "Зайди в бот и продолжай"
                         )
-                        try:
-                            await bot.send_message(chat_id=int(user_id_str), text=text)
-                        except Exception:
-                            pass
+                    else:
+                        text = (
+                            "✅ Лимит выполнен\n"
+                            f"Сегодня = {words_today}/{limit} 🍪"
+                        )
+                    
+                    sent_ok = False
+                    try:
+                        await bot.send_message(chat_id=int(user_id_str), text=text)
+                        sent_ok = True
+                    except Exception:
+                        sent_ok = False  # 💬 если Telegram временно не дал отправить = попробуем снова через минуту
+                    
+                    if sent_ok:
+                        user_data["reminder_last_date"] = today  # 💬 фиксируем только после успешной отправки
+                        changed = True
+
 
                     user_data["reminder_last_date"] = today
                     changed = True
@@ -6585,6 +6598,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
