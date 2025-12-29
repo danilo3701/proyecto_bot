@@ -1891,8 +1891,9 @@ async def show_leaderboard(message: Message, state: FSMContext):
             return f"{raw}{pad}"  # 💬 добивка до фикс ширины
 
         def _mark_cell(is_me: bool) -> str:
-            # 💬 маркер ">" не двигает цифры ранга: либо "> ", либо "  "
-            return f">{nbsp}" if is_me else indent
+            # 💬 изогнутая стрелка вместо ">", ширина ячейки та же = ранги не съезжают
+            return f"↳{nbsp}" if is_me else indent
+
 
         def _rank_cell(pos: int) -> str:
             # 💬 фикс-ячейка ранга без ">" (сам ">" живёт в _mark_cell), чтобы колонки не съезжали
@@ -1997,8 +1998,10 @@ async def show_leaderboard(message: Message, state: FSMContext):
         ]
     )
 
-    await message.answer(f"{week_text}\n\n{month_text}", parse_mode="HTML", reply_markup=menu_kb)
+    legend = "🍪 = слов выучено"  # 💬 легенда для рейтинга
 
+
+    await message.answer(f"{legend}\n\n{week_text}\n\n{month_text}", parse_mode="HTML", reply_markup=menu_kb)  # 💬 легенда перед блоками
 
 
 # 🟢 Новый хендлер: Главное меню (/menu)
@@ -6520,6 +6523,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
