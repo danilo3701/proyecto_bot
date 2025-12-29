@@ -22,6 +22,8 @@ from aiogram.types import (
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.filters import StateFilter
+from aiogram.filters import Command  # 💬 команды /battle_topics
+
 from aiogram.exceptions import TelegramBadRequest
 
 
@@ -38,11 +40,21 @@ def set_topics_ref(topics: Dict[str, Any]) -> None:
 # ─────────────────────────────────────────────────────────
 # ⚔️ FSM
 # ─────────────────────────────────────────────────────────
-class BattleStates(StatesGroup):
-    choosing_topic = State()
-    matchmaking = State()
-    in_battle = State()
-    post_battle = State()
+class Battle(StatesGroup):
+    Future = State()   # 💬 выбор темы битвы
+    Match = State()    # 💬 загрузка соперника
+    Running = State()  # 💬 бой идёт
+    Result = State()   # 💬 результат + реванш/меню
+
+class BattleTopicsAdmin(StatesGroup):
+    menu = State()          # 💬 меню: добавить/редакт/удалить
+    adding_category = State() # 💬 lex/gram
+    adding_key = State()      # 💬 ключ темы (id)
+    adding_title = State()    # 💬 видимое название
+    bulk_quiz = State()       # 💬 bulk QUIZ палками
+    choose_edit = State()     # 💬 выбрать тему для редактирования
+    edit_menu = State()       # 💬 меню темы: bulk/clear/delete
+    choose_delete = State()   # 💬 выбрать тему для удаления
 
 
 # ─────────────────────────────────────────────────────────
@@ -56,6 +68,30 @@ STOP_TEXT = "⛔ Stop"
 
 BATTLE_DATA_PATH = "/data/battle_data.json"
 BATTLE_DATA_TMP = "/data/battle_data.tmp"
+
+BATTLE_TOPICS_PATH = "/data/battle_topics.json"
+BATTLE_TOPICS_TMP  = "/data/battle_topics.tmp"
+
+def load_battle_topics() -> Dict[str, Any]:
+    # 💬 что делает эта часть: грузим battle темы из Volume; если нет файла = пусто
+    _ensure_data_dir()
+    if not os.path.exists(BATTLE_TOPICS_PATH):
+        return {}
+    try:
+        with open(BATTLE_TOPICS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+def save_battle_topics(data: Dict[str, Any]) -> None:
+    # 💬 что делает эта часть: атомарно сохраняем battle темы в Volume
+    _ensure_data_dir()
+    try:
+        with open(BATTLE_TOPICS_TMP, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(BATTLE_TOPICS_TMP, BATTLE_TOPICS_PATH)
+    except Exception:
+        pass
 
 
 # ─────────────────────────────────────────────────────────
@@ -135,6 +171,38 @@ def _topics_kb(topic_keys: List[str]) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="battle:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+def _bt_admin_menu_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➕ Добавить тему")],
+            [KeyboardButton(text="✏️ Редактировать тему")],
+            [KeyboardButton(text="🗑 Удалить тему")],
+            [KeyboardButton(text="⬅️ Назад")],
+        ],
+        resize_keyboard=True
+    )
+
+def _bt_category_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")],
+            [KeyboardButton(text="⬅️ Назад")],
+        ],
+        resize_keyboard=True
+    )
+
+def _bt_edit_menu_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📥QUIZ")],          # 💬 bulk вставка
+            [KeyboardButton(text="🧹 Очистить QUIZ")], # 💬 быстро очистить
+            [KeyboardButton(text="🗑 Удалить тему")],  # 💬 удалить текущую
+            [KeyboardButton(text="⬅️ Назад")],
+        ],
+        resize_keyboard=True
+    )
+
+
 
 def _left_seconds(rt: BattleRuntime) -> int:
     elapsed = time.monotonic() - rt.start_monotonic
@@ -160,6 +228,14 @@ def _collect_poll_quizzes(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
       1) phase["quiz_pool"]
       2) блоки внутри phase["vocab"] где b.get("quiz") и это poll-quiz
     """
+    # 💬 что делает эта часть: если это battle тема = берём quiz_pool прямо из темы
+    if isinstance(topic.get("quiz_pool"), list):
+        out = []
+        for q in (topic.get("quiz_pool") or []):
+            if isinstance(q, dict) and q.get("options") and q.get("correct_index") is not None:
+                out.append(q)
+        return out
+
     out: List[Dict[str, Any]] = []
     for ph in topic.get("vocab", []) or []:
         for q in (ph.get("quiz_pool") or []):
@@ -357,7 +433,7 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
         reply_markup=_result_kb(),
     )
 
-    await state.set_state(BattleStates.post_battle)
+    await state.set_state(Battle.Result)
     await state.update_data(battle_last_topic=rt.topic_key, battle_last_result_msg_id=res_msg.message_id)
 
 
@@ -368,22 +444,29 @@ async def start_battle_from_lex_menu(message: Message, state: FSMContext) -> Non
     # 💬 отменяем предыдущий бой если вдруг уже был
     await _cancel_battle(message.from_user.id)
 
-    # 💬 собираем темы где есть poll-quiz
+    # 💬 что делает эта часть: сначала берём battle темы из /data/battle_topics.json; если пусто = fallback на TOPICS_REF
+    battle_topics = load_battle_topics() or {}
+    source = battle_topics if battle_topics else (TOPICS_REF or {})
+
     keys = []
-    for k, info in (TOPICS_REF or {}).items():
+    for k, info in source.items():
         if not isinstance(info, dict):
             continue
+
+        # 💬 category в battle теме = "lex"/"gram"
         if info.get("category") != "lex":
             continue
+
         if len(_collect_poll_quizzes(info)) > 0:
             keys.append(k)
+
 
     if not keys:
         await message.answer("Пока нет тем для битвы 🙈")
         return
 
     random.shuffle(keys)
-    await state.set_state(BattleStates.choosing_topic)
+    await state.set_state(Battle.Future) # 💬 вход в выбор темы
 
     await message.answer(
         "⚔️ <b>Выбери тему для битвы</b>",
@@ -395,7 +478,7 @@ async def start_battle_from_lex_menu(message: Message, state: FSMContext) -> Non
 # ─────────────────────────────────────────────────────────
 # 🎯 Выбор темы
 # ─────────────────────────────────────────────────────────
-@router.callback_query(StateFilter(BattleStates.choosing_topic, BattleStates.post_battle), F.data.startswith("battle:topic:"))
+@router.callback_query(StateFilter(Battle.Future, Battle.Result), F.data.startswith("battle:topic:"))
 async def battle_choose_topic(callback: CallbackQuery, state: FSMContext, bot: Bot):
     await callback.answer()
 
@@ -409,7 +492,7 @@ async def battle_choose_topic(callback: CallbackQuery, state: FSMContext, bot: B
     info = TOPICS_REF.get(topic_key, {}) or {}
     title = info.get("title") or topic_key
 
-    await state.set_state(BattleStates.matchmaking)
+    await state.set_state(Battle.Match)
     await state.update_data(battle_last_topic=topic_key)
 
     # 💬 “загружаем соперника”
@@ -434,7 +517,7 @@ async def battle_choose_topic(callback: CallbackQuery, state: FSMContext, bot: B
     rt.topic_title = title
     BATTLES[user_id] = rt
 
-    await state.set_state(BattleStates.in_battle)
+    await state.set_state(Battle.Running)
 
     rt.task_tick = asyncio.create_task(_tick_loop(bot, callback.message.chat.id, user_id, state))
     rt.task_main = asyncio.create_task(_battle_loop(bot, callback.message.chat.id, user_id, state))
@@ -443,7 +526,7 @@ async def battle_choose_topic(callback: CallbackQuery, state: FSMContext, bot: B
 # ─────────────────────────────────────────────────────────
 # 🛑 Stop во время боя
 # ─────────────────────────────────────────────────────────
-@router.message(StateFilter(BattleStates.in_battle), F.text == STOP_TEXT)
+@router.message(StateFilter(Battle.Running), F.text == STOP_TEXT)
 async def battle_stop(message: Message, state: FSMContext, bot: Bot):
     # 💬 останавливаем бой и возвращаем в меню битвы
     await _cancel_battle(message.from_user.id)
@@ -460,7 +543,7 @@ async def battle_stop(message: Message, state: FSMContext, bot: Bot):
 # ─────────────────────────────────────────────────────────
 # 🗳 poll_answer во время боя
 # ─────────────────────────────────────────────────────────
-@router.poll_answer(StateFilter(BattleStates.in_battle))
+@router.poll_answer(StateFilter(Battle.Running))
 async def battle_poll_answer(poll_answer, state: FSMContext):
     user_id = poll_answer.user.id
     rt = BATTLES.get(user_id)
@@ -485,7 +568,7 @@ async def battle_poll_answer(poll_answer, state: FSMContext):
 # ─────────────────────────────────────────────────────────
 # 🔁 Реванш
 # ─────────────────────────────────────────────────────────
-@router.callback_query(StateFilter(BattleStates.post_battle), F.data == "battle:rematch")
+@router.callback_query(StateFilter(Battle.Result), F.data == ":rematch")
 async def battle_rematch(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
@@ -510,7 +593,7 @@ async def battle_rematch(callback: CallbackQuery, state: FSMContext):
 # ─────────────────────────────────────────────────────────
 # 🏠 В меню битвы
 # ─────────────────────────────────────────────────────────
-@router.callback_query(StateFilter(BattleStates.post_battle), F.data == "battle:menu")
+@router.callback_query(StateFilter(Battle.Result), F.data == "battle:menu")
 async def battle_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
@@ -523,10 +606,249 @@ async def battle_menu(callback: CallbackQuery, state: FSMContext):
     await start_battle_from_lex_menu(callback.message, state)
 
 
+
+@router.message(Command("battle_topics"))
+async def battle_topics_admin_start(message: Message, state: FSMContext):
+    # 💬 что делает эта часть: вход в админку battle тем отдельным FSM, не ломает бой
+    await state.clear()
+    await message.answer("⚙️ Battle темы = выбери действие:", reply_markup=_bt_admin_menu_kb())
+    await state.set_state(BattleTopicsAdmin.menu)
+
+
+@router.message(StateFilter(BattleTopicsAdmin.menu))
+async def battle_topics_admin_menu(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+
+    if text == "⬅️ Назад":
+        await state.clear()
+        await message.answer("Ок, вышел из меню battle тем.", reply_markup=ReplyKeyboardRemove())
+        return
+
+    if text == "➕ Добавить тему":
+        await message.answer("Выбери категорию:", reply_markup=_bt_category_kb())
+        return await state.set_state(BattleTopicsAdmin.adding_category)
+
+    if text == "✏️ Редактировать тему":
+        data = load_battle_topics()
+        if not data:
+            await message.answer("Пока нет battle тем.", reply_markup=_bt_admin_menu_kb())
+            return
+        lines = ["✏️ Напиши ключ темы из списка:"]
+        for k, v in data.items():
+            title = (v or {}).get("title") or k
+            lines.append(f"{k} = {title}")
+        await message.answer("\n".join(lines), reply_markup=ReplyKeyboardRemove())
+        return await state.set_state(BattleTopicsAdmin.choose_edit)
+
+    if text == "🗑 Удалить тему":
+        data = load_battle_topics()
+        if not data:
+            await message.answer("Пока нет battle тем.", reply_markup=_bt_admin_menu_kb())
+            return
+        lines = ["🗑 Напиши ключ темы для удаления:"]
+        for k, v in data.items():
+            title = (v or {}).get("title") or k
+            lines.append(f"{k} = {title}")
+        await message.answer("\n".join(lines), reply_markup=ReplyKeyboardRemove())
+        return await state.set_state(BattleTopicsAdmin.choose_delete)
+
+    await message.answer("❗ Нажми кнопку.", reply_markup=_bt_admin_menu_kb())
+
+
+@router.message(StateFilter(BattleTopicsAdmin.adding_category))
+async def battle_topics_add_category(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+
+    if text == "⬅️ Назад":
+        await message.answer("⚙️ Battle темы = выбери действие:", reply_markup=_bt_admin_menu_kb())
+        return await state.set_state(BattleTopicsAdmin.menu)
+
+    if text not in ["📚 Лексика", "🧠 Грамматика"]:
+        await message.answer("❗ Выбери категорию кнопкой.", reply_markup=_bt_category_kb())
+        return
+
+    category = "lex" if text == "📚 Лексика" else "gram"
+    await state.update_data(bt_category=category)  # 💬 сохраняем категорию
+    await message.answer("Введи ключ темы (латиница/цифры/_) например: ir_al_medico_battle", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(BattleTopicsAdmin.adding_key)
+
+
+@router.message(StateFilter(BattleTopicsAdmin.adding_key))
+async def battle_topics_add_key(message: Message, state: FSMContext):
+    key = (message.text or "").strip()
+
+    if not key:
+        await message.answer("❗ Введи ключ темы.")
+        return
+
+    clean = "".join(ch for ch in key if ch.isalnum() or ch == "_").lower()
+    if not clean:
+        await message.answer("❗ Ключ должен быть латиница/цифры/_.")
+        return
+
+    await state.update_data(bt_key=clean)  # 💬 сохраняем ключ
+    await message.answer("Введи название темы (то, что увидит пользователь):")
+    await state.set_state(BattleTopicsAdmin.adding_title)
+
+
+@router.message(StateFilter(BattleTopicsAdmin.adding_title))
+async def battle_topics_add_title(message: Message, state: FSMContext):
+    title = (message.text or "").strip()
+    if not title:
+        await message.answer("❗ Введи название темы.")
+        return
+
+    st = await state.get_data()
+    key = st.get("bt_key")
+    cat = st.get("bt_category")
+
+    data = load_battle_topics()
+    data[key] = {
+        "title": title,
+        "category": cat,
+        "quiz_pool": []
+    }
+    save_battle_topics(data)
+
+    await state.update_data(bt_current_key=key)  # 💬 текущая тема
+    await message.answer(
+        "✅ Тема создана.\n\n"
+        "Теперь отправь bulk QUIZ палками:\n"
+        "Вопрос | Правильный | Неверный1 | Неверный2 | Объяснение(опц.)\n"
+        "Пустые строки игнорируются.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await state.set_state(BattleTopicsAdmin.bulk_quiz)
+
+
+@router.message(StateFilter(BattleTopicsAdmin.bulk_quiz))
+async def battle_topics_bulk_quiz(message: Message, state: FSMContext):
+    # 💬 что делает эта часть: bulk импорт QUIZ как в CreateLessonBlock
+    raw = message.text or ""
+    lines_in = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+
+    st = await state.get_data()
+    key = st.get("bt_current_key")
+    if not key:
+        await message.answer("❗ Не вижу текущую тему. Зайди через /battle_topics ещё раз.")
+        await state.clear()
+        return
+
+    data = load_battle_topics()
+    topic = data.get(key) or {"title": key, "category": "lex", "quiz_pool": []}
+    topic.setdefault("quiz_pool", [])
+
+    added, skipped, skipped_idx = 0, 0, []
+
+    for i, ln in enumerate(lines_in, start=1):
+        parts = [p.strip() for p in ln.split("|")]
+        if len(parts) < 4 or not parts[0] or not parts[1] or not parts[2] or not parts[3]:
+            skipped += 1
+            skipped_idx.append(i)
+            continue
+
+        q, correct, wrong1, wrong2 = parts[0], parts[1], parts[2], parts[3]
+        expl = parts[4] if len(parts) >= 5 else ""
+        if not expl or expl == "-":
+            expl = f"Неверно. Правильно: {correct}."
+
+        topic["quiz_pool"].append({
+            "question": q,
+            "options": [correct, wrong1, wrong2],
+            "correct_index": 0,
+            "explanation_wrong": expl
+        })
+        added += 1
+
+    data[key] = topic
+    save_battle_topics(data)
+
+    if skipped:
+        await message.answer(
+            f"✅ Добавлено {added}.\n⚠️ Пропущено {skipped} (строки: {', '.join(map(str, skipped_idx))}).",
+            reply_markup=_bt_admin_menu_kb()
+        )
+    else:
+        await message.answer(f"✅ Добавлено {added}.", reply_markup=_bt_admin_menu_kb())
+
+    await state.set_state(BattleTopicsAdmin.menu)
+
+
+@router.message(StateFilter(BattleTopicsAdmin.choose_edit))
+async def battle_topics_choose_edit(message: Message, state: FSMContext):
+    key = (message.text or "").strip().lower()
+    data = load_battle_topics()
+
+    if key not in data:
+        await message.answer("❗ Не нашёл такой ключ. Введи ключ из списка.")
+        return
+
+    await state.update_data(bt_current_key=key)  # 💬 текущая тема для редактирования
+    title = (data.get(key) or {}).get("title") or key
+    await message.answer(f"✏️ Тема выбрана: {key} = {title}", reply_markup=_bt_edit_menu_kb())
+    await state.set_state(BattleTopicsAdmin.edit_menu)
+
+
+@router.message(StateFilter(BattleTopicsAdmin.edit_menu))
+async def battle_topics_edit_menu(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+    st = await state.get_data()
+    key = st.get("bt_current_key")
+
+    if text == "⬅️ Назад":
+        await message.answer("⚙️ Battle темы = выбери действие:", reply_markup=_bt_admin_menu_kb())
+        return await state.set_state(BattleTopicsAdmin.menu)
+
+    if not key:
+        await message.answer("❗ Не вижу тему для редактирования.", reply_markup=_bt_admin_menu_kb())
+        return await state.set_state(BattleTopicsAdmin.menu)
+
+    data = load_battle_topics()
+    topic = data.get(key) or {}
+
+    if text == "🧹 Очистить QUIZ":
+        topic["quiz_pool"] = []  # 💬 очищаем пул квизов
+        data[key] = topic
+        save_battle_topics(data)
+        await message.answer("✅ QUIZ очищен.", reply_markup=_bt_edit_menu_kb())
+        return
+
+    if text == "🗑 Удалить тему":
+        data.pop(key, None)  # 💬 удаляем тему целиком
+        save_battle_topics(data)
+        await message.answer("✅ Тема удалена.", reply_markup=_bt_admin_menu_kb())
+        return await state.set_state(BattleTopicsAdmin.menu)
+
+    if text == "📥QUIZ":
+        await message.answer(
+            "📥 Отправь bulk QUIZ палками:\n"
+            "Вопрос | Правильный | Неверный1 | Неверный2 | Объяснение(опц.)",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return await state.set_state(BattleTopicsAdmin.bulk_quiz)
+
+    await message.answer("❗ Нажми кнопку.", reply_markup=_bt_edit_menu_kb())
+
+
+@router.message(StateFilter(BattleTopicsAdmin.choose_delete))
+async def battle_topics_choose_delete(message: Message, state: FSMContext):
+    key = (message.text or "").strip().lower()
+    data = load_battle_topics()
+
+    if key not in data:
+        await message.answer("❗ Не нашёл такой ключ. Введи ключ из списка.")
+        return
+
+    data.pop(key, None)  # 💬 удаляем тему
+    save_battle_topics(data)
+
+    await message.answer("✅ Тема удалена.", reply_markup=_bt_admin_menu_kb())
+    await state.set_state(BattleTopicsAdmin.menu)
+
 # ─────────────────────────────────────────────────────────
 # ⬅️ Закрыть список тем
 # ─────────────────────────────────────────────────────────
-@router.callback_query(StateFilter(BattleStates.choosing_topic), F.data == "battle:close")
+@router.callback_query(StateFilter(Battle.Future), F.data == "battle:close")
 async def battle_close(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     try:
