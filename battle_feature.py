@@ -443,7 +443,23 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
     await state.set_state(Battle.Result)
     await state.update_data(battle_last_topic=rt.topic_key, battle_last_result_msg_id=res_msg.message_id)
 
+    def _battle_main_menu_kb() -> InlineKeyboardMarkup:
+    # 💬 главное меню, чтобы после выхода из битвы кнопки сразу работали
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📚 УЧИТЬСЯ",    callback_data="menu:learn")],
+        [
+            InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
+            InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL)
+        ],
 
+        [InlineKeyboardButton(text="⚔️ Битва",   callback_data="menu:battle"),
+         InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords")],
+
+        [InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating"),
+        InlineKeyboardButton(text="Настройки ⚙️",  callback_data="menu:settings")],
+
+
+    ])
 # ─────────────────────────────────────────────────────────
 # ✅ Публичный вход из core8_1 (кнопка в меню "Лексика")
 # ─────────────────────────────────────────────────────────
@@ -857,11 +873,36 @@ async def battle_topics_choose_delete(message: Message, state: FSMContext):
 # ─────────────────────────────────────────────────────────
 # ⬅️ Закрыть список тем
 # ─────────────────────────────────────────────────────────
-@router.callback_query(StateFilter(Battle.Future), F.data == "battle:close")
+@router.callback_query(F.data == "battle:close")
 async def battle_close(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+
+    # 💬 удаляем экран выбора темы/битвы
     try:
         await callback.message.delete()
-    except Exception:
+    except TelegramBadRequest:
         pass
-    await state.clear()  # 💬 выходим из битвы полностью
+
+    await state.clear()
+
+    # 💬 убираем ReplyKeyboard (Stop) чтобы не висела внизу
+    tmp = await callback.message.answer("Holaaa...", reply_markup=ReplyKeyboardRemove())
+    await asyncio.sleep(0.2)
+    try:
+        await tmp.delete()
+    except TelegramBadRequest:
+        pass
+
+    # 💬 имитируем ваш стандартный выход через стикер на пару секунд
+    sticker_id = "CAACAgIAAxkBAAIB4mX2xgAB3z0h9xL8yXrKpYJxOQAB1wAC0QADVp29Cq9VdYdZLwQnNgQ"
+    st = await callback.message.answer_sticker(sticker_id)
+    await asyncio.sleep(2.5)
+    try:
+        await st.delete()
+    except TelegramBadRequest:
+        pass
+
+    # 💬 важно: ставим состояние главного меню строкой (без импорта, чтобы не было circular import)
+    await state.set_state("LessonStates:choosing_category")
+    await callback.message.answer("Что изучаем?⭐", reply_markup=_battle_main_menu_kb())
+
