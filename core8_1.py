@@ -2763,6 +2763,8 @@ async def mywords_send_next_quiz(message: Message, state: FSMContext):
         options=options,
         type="quiz",
         correct_option_id=correct_id,
+        open_period=QUIZ_OPEN_PERIOD_S,  # 💬 квиз живёт 12 сек как в vocab
+        is_anonymous=False,              # 💬 чтобы поведение было как в vocab
         is_anonymous=False
     )
 
@@ -2803,8 +2805,16 @@ async def mywords_send_next_text(message: Message, state: FSMContext):
         return await mywords_send_next_text(message, state)
 
     prompt = f"Напиши по-испански: {word.get('ru','')}"
-    await smart_reply(message, prompt, reply_markup=build_stop_kb())
-    await state.update_data(mywords_text_queue=queue, mywords_current_word_id=word_id)
+    msg = await smart_reply(message, prompt, reply_markup=build_stop_kb())  # 💬 сохраняем id вопроса как в vocab
+    await state.update_data(
+        mywords_text_queue=queue,
+        mywords_current_word_id=word_id,
+        mywords_last_prompt_id=msg.message_id  # 💬 чтобы удалить вопрос после ответа
+    )
+    
+    # ✍️ маркер "пора писать" как в vocab
+    asyncio.create_task(send_and_auto_delete_text(bot, message.chat.id, "✍️", delay=1))  # 💬 мини-подсказка
+
     await state.set_state(LessonStates.mywords_text)
 
 # ─────────────────────────────────────────────────────────────
@@ -3114,7 +3124,8 @@ async def mywords_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
     try:
         if is_correct:
-            await bot.send_message(chat_id, random.choice(quiz_success_phrases) if quiz_success_phrases else "✅")
+            await bot.send_message(chat_id, random.choice(vocab_quiz_success_phrases) if vocab_quiz_success_phrases else "✅")  # 💬 берём фразы как в vocab
+
         else:
             await bot.send_message(chat_id, "❌ Ошибка. Вернёмся к этому слову ещё раз.")
     except Exception:
@@ -3136,6 +3147,7 @@ async def mywords_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 @track_handler
 async def mywords_text_answer(message: Message, state: FSMContext):
     data = await state.get_data()
+    prompt_id = data.get("mywords_last_prompt_id")  # 💬 id вопроса, чтобы удалить как в vocab
     pool = list(data.get("mywords_pool", []))
     word_id = data.get("mywords_current_word_id")
     word = next((w for w in pool if w.get("id") == word_id), None)
@@ -3165,13 +3177,33 @@ async def mywords_text_answer(message: Message, state: FSMContext):
             await smart_reply(message, "Выбирай:", reply_markup=build_offer_continue_kb())
             return await state.set_state(LessonStates.mywords_offer_continue)
 
-        await smart_reply(message, random.choice(quiz_success_phrases) if quiz_success_phrases else "✅")
+        fb = await smart_reply(
+            message,
+            random.choice(vocab_quiz_success_phrases) if vocab_quiz_success_phrases else "✅"
+        )  # 💬 фидбек как в vocab, но без XP
+
         await state.update_data(mywords_text_queue=queue, mywords_current_word_id=None)
         return await mywords_send_next_text(message, state)
 
     # 💬 неверно = возвращаем слово в конец очереди, learned не меняем
     queue.append(word_id)
-    await smart_reply(message, "❌ Ошибка. Попробуем ещё раз.")
+    fb = await smart_reply(message, "❌ Ошибка. Попробуем ещё раз.")  # 💬 фидбек без XP
+
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 пауза перед зачисткой как в vocab
+
+    to_delete = [prompt_id, message.message_id]  # 💬 вопрос + ответ пользователя
+    if isinstance(fb, Message):
+        to_delete.append(fb.message_id)          # 💬 удаляем фидбек
+
+    for mid in to_delete:
+        if not mid:
+            continue
+        try:
+            await bot.delete_message(message.chat.id, mid)
+        except TelegramBadRequest:
+            pass  # 💬 если уже удалено/нельзя удалить
+
+
     await state.update_data(mywords_text_queue=queue, mywords_current_word_id=None)
     return await mywords_send_next_text(message, state)
 
@@ -3184,7 +3216,7 @@ async def mywords_text_answer(message: Message, state: FSMContext):
 async def mywords_continue_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.update_data(mywords_passed_in_session=0)  # 💬 новый блок из N слов
-    await smart_reply(callback.message, random.choice(quiz_success_phrases) if quiz_success_phrases else "✅")
+    await smart_reply(callback.message, random.choice(vocab_quiz_success_phrases) if vocab_quiz_success_phrases else "✅")  # 💬 берём фразы как в vocab
     return await mywords_send_next_text(callback.message, state)
 
 @dp.callback_query(StateFilter(LessonStates.mywords_offer_continue), F.data == "mywords:home")
