@@ -1891,15 +1891,22 @@ async def show_leaderboard(message: Message, state: FSMContext):
             return f"{raw}{pad}"  # 💬 добивка до фикс ширины
 
         def _mark_cell(is_me: bool) -> str:
-            # 💬 изогнутая стрелка вместо ">", ширина ячейки та же = ранги не съезжают
-            return f"↳{nbsp}" if is_me else indent
+            # 💬 маркер ">" для строки пользователя, ширина ячейки всегда 2 = ранги не съезжают
+            return f">{nbsp}" if is_me else indent
+
 
 
         def _rank_cell(pos: int) -> str:
             # 💬 фикс-ячейка ранга без ">" (сам ">" живёт в _mark_cell), чтобы колонки не съезжали
             base = f"{pos})"
             pad = nbsp * max(0, RANK_COL - len(base))
-            return f"{base}{pad}{nbsp}"  # 💬 пробел между "1)" и эмодзи места
+            return f"{base}{pad}{nbsp}"  # 💬 пробел между "1)" и эмодзи мест
+
+        def _under_name(text: str) -> str:
+            # 💬 строка строго под колонкой имени (чтобы ↳91 стояло ровно как на скрине)
+            name_pad = f"{indent}{(nbsp * (RANK_COL + 1))}{(nbsp * 2)}"
+            return f"{name_pad}{text}"
+
 
         def _line(pos: int, name: str, val: int, is_me: bool = False) -> str:
             # 💬 собирает строку рейтинга с фикс колонкой имени и 🍪 (и без съезда из-за ">")
@@ -1933,10 +1940,13 @@ async def show_leaderboard(message: Message, state: FSMContext):
         if not sorted_all:
             # 💬 даже если данных нет = не падаем и показываем формат с моноширинным выравниванием
             res.append("Пока пусто")
-            res.append(f"{indent}1…{total_count}")  # 💬 сколько всего пользователей
-            res.append(_line(1, my_name, 0, is_me=True))  # 💬 показываем тебя без слова Ты
+            res.append(_under_name(f"↳{total_count}"))  # 💬 общее число участников
+            me_line = _line(1, my_name, 0, is_me=True)  # 💬 строка пользователя отдельно (для выделения)
+
             res.append("</pre>")  # 💬 закрываем моноширинный блок
+            res.append(f"<b><code>{me_line}</code></b>")  # 💬 выделяем строку пользователя (жирный + моноширинный)
             return "\n".join(res)
+
     
         # 💬 ищем позицию “тебя”
         my_rank = None
@@ -1960,17 +1970,18 @@ async def show_leaderboard(message: Message, state: FSMContext):
             val = int(u.get(key, 0) or 0)
             res.append(_line(idx, u.get("name", ""), val))  # 💬 выравнивание колонок как на скриншоте
         
-        # 💬 хвост
-        hidden_from = len(top5) + 1
-        if total_count >= hidden_from:
-            res.append(f"{indent}{hidden_from}…{total_count}")  # 💬 сколько всего пользователей
-        
-        # 💬 строка “ты” (без слова Ты) + маркер ">" + 🤓, только если ты не в топ-5
-        if my_rank > len(top5):
-            res.append(_line(my_rank, my_name, my_val, is_me=True))  # 💬 показываем твоё место без съезда 🍪
+        # 💬 сколько всего пользователей (пишем ровно под колонкой имени)
+        if total_count > len(top5):
+            res.append(_under_name(f"↳{total_count}"))  # 💬 общее число участников
 
-    
+        
+        me_line = _line(my_rank, my_name, my_val, is_me=True) if my_rank > len(top5) else None  # 💬 строка пользователя отдельно (для выделения)
+
         res.append("</pre>")  # 💬 закрываем моноширинный блок
+
+        if me_line:
+            res.append(f"<b><code>{me_line}</code></b>")  # 💬 выделяем строку пользователя (жирный + моноширинный)
+
         return "\n".join(res)
 
 
@@ -6523,6 +6534,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
 
 
 
