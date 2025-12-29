@@ -170,6 +170,7 @@ AD_SUBSCRIPTION_DAYS = 3  # 💬 срок действия рекламной п
 MATERIALS_POST_URL = "https://t.me/+TOHEAq_otQY5MWE0"  # 💬 ссылка на конкретный пост с материалами
 CONTACT_URL = "https://t.me/Drancherrro"            # 💬 ссылка на твой личный контакт
 
+set_battle_links(CONTACT_URL, MATERIALS_POST_URL)  # 💬 чтобы кнопки "Материалы/Связь" работали в battle меню
 
 def is_ad_subscription_active(user_id: int) -> bool:
     # 💬 Проверяем, есть ли у пользователя активная рекламная подписка
@@ -200,7 +201,7 @@ from edit_topic_flow     import router as edit_topic_router   # Роутер а�
 from topics.loader import load_topics                    # Функция чтения всех JSON-файлов с уроками
 from create_lesson_block import load_ads_data  # 💬 Функция загрузки рекламы из ads_data.json
 
-from battle_feature import router as battle_router, set_topics_ref, start_battle_from_lex_menu  # 💬 модуль "Битва"
+from battle_feature import router as battle_router, set_topics_ref, start_battle_from_lex_menu, set_battle_links  # 💬 модуль "Битва"
 
 
 # ——— Сценарии для учеников ——————————————————————————————————————
