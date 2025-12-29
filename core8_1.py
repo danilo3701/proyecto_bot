@@ -200,6 +200,9 @@ from edit_topic_flow     import router as edit_topic_router   # Роутер а�
 from topics.loader import load_topics                    # Функция чтения всех JSON-файлов с уроками
 from create_lesson_block import load_ads_data  # 💬 Функция загрузки рекламы из ads_data.json
 
+from battle_feature import router as battle_router, set_topics_ref, start_battle_from_lex_menu  # 💬 модуль "Битва"
+
+
 # ——— Сценарии для учеников ——————————————————————————————————————
 from scenarios_estiloso8_1 import (                     # Вся диалоговая логика “сценариев”
 
@@ -265,6 +268,7 @@ dp         = Dispatcher(storage=MemoryStorage())
 
 # ——— Подключаем админские роутеры ————————————————————————————————
 dp.include_router(edit_topic_router)
+dp.include_router(battle_router)  # 💬 подключаем хендлеры "Битвы"
 dp.include_router(create_topic_router)
 
 # 💬 что делает эта часть: копируем темы из Railway Volume (/data/topics) в локальную ./topics,
@@ -292,6 +296,9 @@ sync_topics_volume_to_local()  # 💬 подтягиваем темы из Volum
 
 # ——— Загружаем уроки ——————————————————————————————————————————
 topics = load_topics()
+
+set_topics_ref(topics)  # 💬 передаём topics в модуль "Битва" без круговых импортов
+
 
 from collections import deque
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
@@ -716,15 +723,21 @@ def ensure_my_words_user(data: dict, user_id: str) -> dict:
     return u
 
 def parse_es_ru_pair(raw: str):
-    # 💬 парсим строку формата ES - RU (делим по первому дефису)
-    if not raw or "-" not in raw:
+    # 💬 парсим строку формата ES - RU (делим по первому дефису, принимаем разные тире)
+    if not raw:
         return None, None
-    left, right = raw.split("-", 1)
+
+    raw = raw.replace("—", "-").replace("–", "-").replace("−", "-")  # 💬 нормализуем тире
+    if "-" not in raw:
+        return None, None
+
+    left, right = raw.split("-", 1)  # 💬 делим по первому "-"
     es = left.strip()
     ru = right.strip()
     if not es or not ru:
         return None, None
     return es, ru
+
 
 def gen_my_word_id() -> str:
     # 💬 простой уникальный id для слов (нужен при дубликатах ES)
@@ -1421,6 +1434,8 @@ async def start_handler(message: Message, state: FSMContext):
     await state.clear()
     global topics
     topics = load_topics()
+    set_topics_ref(topics)  # 💬 обновляем topics для "Битвы" после /start
+
 
     # 💬 Убираем старую Reply-клавиатуру и отправляем нормальное приветствие
     await smart_reply(
@@ -1489,10 +1504,11 @@ async def start_handler(message: Message, state: FSMContext):
             InlineKeyboardButton(text="💬 Связь", url=CONTACT_URL)
         ],
 
-        [InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating"),
+        [InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating"),    InlineKeyboardButton(text="⚔️ Битва",   callback_data="menu:battle"),
          InlineKeyboardButton(text="🧩 Мои слова", callback_data="menu:mywords")],
 
-        [InlineKeyboardButton(text="⚙️ Настройки",  callback_data="menu:settings")],
+        [InlineKeyboardButton(text="⚙️ Настройки",  callback_data="menu:settings"),
+         InlineKeyboardButton(text="⚔️ Битва",   callback_data="menu:battle")],
 
     ])
 
@@ -1572,6 +1588,16 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
     if action == "settings":
         await callback.answer()
         return await settings_menu(callback.message, state)
+        
+    # ⚔️ Битва
+    if action == "battle":
+        await callback.answer()
+        try:
+            await callback.message.delete()  # 💬 чистим главное меню чтобы не копилось
+        except TelegramBadRequest:
+            pass
+        return await start_battle_from_lex_menu(callback.message, state)  # 💬 показываем темы битвы
+
 
     if action == "mywords":
         await callback.answer()
@@ -2747,6 +2773,10 @@ async def mywords_send_next_quiz(message: Message, state: FSMContext):
     word = next((w for w in pool if w.get("id") == word_id), None)
     if not word:
         await state.update_data(mywords_quiz_queue=queue)
+        asyncio.create_task(_mywords_quiz_timeout_handler(
+            poll_msg.poll.id, message.chat.id, state, delay=int(QUIZ_TIMEOUT_TASK_S)
+        ))  # 💬 watchdog таймаут как в vocab, но без XP
+
         return await mywords_send_next_quiz(message, state)
 
     user_id = str(message.chat.id)
@@ -2764,9 +2794,9 @@ async def mywords_send_next_quiz(message: Message, state: FSMContext):
         type="quiz",
         correct_option_id=correct_id,
         open_period=QUIZ_OPEN_PERIOD_S,  # 💬 квиз живёт 12 сек как в vocab
-        is_anonymous=False,              # 💬 чтобы поведение было как в vocab
-        is_anonymous=False
+        is_anonymous=False               # 💬 чтобы поведение было как в vocab
     )
+
 
     await state.update_data(
         mywords_quiz_queue=queue,
@@ -2776,6 +2806,67 @@ async def mywords_send_next_quiz(message: Message, state: FSMContext):
         mywords_current_poll_msg_id=poll_msg.message_id
     )
     await state.set_state(LessonStates.mywords_quiz)
+
+async def _mywords_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMContext, delay: int):
+    await asyncio.sleep(delay)
+
+    # 💬 если уже не в mywords_quiz, то таймаут не срабатывает
+    if await state.get_state() != LessonStates.mywords_quiz:
+        return
+
+    data = await state.get_data()
+    if data.get("mywords_current_poll_id") != poll_id:
+        return  # 💬 poll уже обработан ответом
+
+    poll_msg_id = data.get("mywords_current_poll_msg_id")
+    word_id = data.get("mywords_current_word_id")
+    queue = list(data.get("mywords_quiz_queue", []))
+
+    # 💬 таймаут = считаем как ошибку и возвращаем слово в конец
+    if word_id:
+        queue.append(word_id)
+
+    await state.update_data(
+        mywords_quiz_queue=queue,
+        mywords_current_word_id=None,
+        mywords_current_poll_id=None,
+        mywords_current_correct_id=None,
+        mywords_current_poll_msg_id=None
+    )
+
+    # 💬 останавливаем poll и чистим сообщение как в vocab
+    try:
+        if poll_msg_id:
+            await bot.stop_poll(chat_id=chat_id, message_id=poll_msg_id)
+    except Exception:
+        pass
+
+    fb = None
+    try:
+        fb = await bot.send_message(chat_id, "⏱ Время вышло!")
+    except Exception:
+        pass
+
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 пауза и удаляем poll + фидбек
+
+    try:
+        if poll_msg_id:
+            await bot.delete_message(chat_id, poll_msg_id)
+    except Exception:
+        pass
+
+    try:
+        if isinstance(fb, Message):
+            await bot.delete_message(chat_id, fb.message_id)
+    except Exception:
+        pass
+
+    # 💬 fake message, чтобы переиспользовать mywords_send_next_quiz
+    fc = Chat(id=chat_id, type="private")
+    fu = User(id=chat_id, is_bot=False, first_name="")
+    fake = Message(message_id=0, date=datetime.datetime.now(), chat=fc, from_user=fu, text="")
+
+    return await mywords_send_next_quiz(fake, state)
 
 async def mywords_start_text_stage(message: Message, state: FSMContext):
     # 💬 старт text стадии RU=>ES
@@ -3088,7 +3179,6 @@ async def mywords_stop_any(message: Message, state: FSMContext):
 # ─────────────────────────────────────────────────────────────
 #   Quiz стадия: poll_answer
 # ─────────────────────────────────────────────────────────────
-
 @dp.poll_answer(StateFilter(LessonStates.mywords_quiz))
 @track_handler
 async def mywords_poll_answer(poll_answer: PollAnswer, state: FSMContext):
@@ -3096,48 +3186,84 @@ async def mywords_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     if poll_answer.poll_id != data.get("mywords_current_poll_id"):
         return  # 💬 это не наш poll
 
+    # 💬 отменяем watchdog таймаут
+    await state.update_data(mywords_current_poll_id=None)
+
     selected = poll_answer.option_ids[0] if poll_answer.option_ids else None
     correct = data.get("mywords_current_correct_id")
     is_correct = (selected == correct)
 
     chat_id = poll_answer.user.id
     poll_msg_id = data.get("mywords_current_poll_msg_id")
+    word_id = data.get("mywords_current_word_id")
+    queue = list(data.get("mywords_quiz_queue", []))
 
+    # 💬 закрываем poll
     try:
-        await bot.stop_poll(chat_id=chat_id, message_id=poll_msg_id)
+        if poll_msg_id:
+            await bot.stop_poll(chat_id=chat_id, message_id=poll_msg_id)
     except Exception:
         pass
 
-    queue = list(data.get("mywords_quiz_queue", []))
-    word_id = data.get("mywords_current_word_id")
+    # 💬 реакция как в vocab
+    if is_correct:
+        try:
+            if poll_msg_id:
+                await bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=poll_msg_id,
+                    reaction=[ReactionTypeEmoji(emoji="🎉")],
+                    is_big=True
+                )
+        except Exception:
+            pass
 
+    # 💬 неверно = возвращаем слово в конец
     if not is_correct and word_id:
-        queue.append(word_id)  # 💬 неверно = возвращаем в конец
+        queue.append(word_id)
 
+    # 💬 чистим текущие маркеры poll
     await state.update_data(
         mywords_quiz_queue=queue,
         mywords_current_word_id=None,
-        mywords_current_poll_id=None,
         mywords_current_correct_id=None,
         mywords_current_poll_msg_id=None
     )
 
+    # 💬 feedback как в vocab, но без XP
+    fb = None
     try:
         if is_correct:
-            await bot.send_message(chat_id, random.choice(vocab_quiz_success_phrases) if vocab_quiz_success_phrases else "✅")  # 💬 берём фразы как в vocab
-
+            fb = await bot.send_message(
+                chat_id,
+                random.choice(vocab_quiz_success_phrases) if vocab_quiz_success_phrases else "✅"
+            )
         else:
-            await bot.send_message(chat_id, "❌ Ошибка. Вернёмся к этому слову ещё раз.")
+            fb = await bot.send_message(chat_id, "❌ Ошибка. Вернёмся к этому слову ещё раз.")
     except Exception:
         pass
 
-    # 💬 создаём fake message как в vocab, чтобы переиспользовать send_next_quiz
-    def _fake_msg():
-        fc = Chat(id=chat_id, type="private")
-        fu = User(id=poll_answer.user.id, is_bot=False, first_name="")
-        return Message(message_id=0, date=datetime.datetime.now(), chat=fc, from_user=fu, text="")
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 пауза и удаляем poll + фидбек
 
-    return await mywords_send_next_quiz(_fake_msg(), state)
+    try:
+        if poll_msg_id:
+            await bot.delete_message(chat_id, poll_msg_id)
+    except Exception:
+        pass
+
+    try:
+        if isinstance(fb, Message):
+            await bot.delete_message(chat_id, fb.message_id)
+    except Exception:
+        pass
+
+    # 💬 fake message как в vocab, чтобы переиспользовать send_next_quiz
+    fc = Chat(id=chat_id, type="private")
+    fu = User(id=chat_id, is_bot=False, first_name="")
+    fake = Message(message_id=0, date=datetime.datetime.now(), chat=fc, from_user=fu, text="")
+
+    return await mywords_send_next_quiz(fake, state)
+
 
 # ─────────────────────────────────────────────────────────────
 #   Text стадия: ответ пользователя
@@ -3170,6 +3296,25 @@ async def mywords_text_answer(message: Message, state: FSMContext):
         if mode == "new":
             await mywords_mark_learned(user_id, category, word_id)  # 💬 learned=true
 
+        fb = await smart_reply(
+            message,
+            random.choice(vocab_quiz_success_phrases) if vocab_quiz_success_phrases else "✅"
+        )  # 💬 фидбек как в vocab, но без XP
+
+        await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 пауза перед зачисткой как в vocab
+
+        to_delete = [prompt_id, message.message_id]  # 💬 вопрос + ответ пользователя
+        if isinstance(fb, Message):
+            to_delete.append(fb.message_id)          # 💬 удаляем фидбек
+
+        for mid in to_delete:
+            if not mid:
+                continue
+            try:
+                await bot.delete_message(message.chat.id, mid)
+            except TelegramBadRequest:
+                pass  # 💬 если уже удалено/нельзя удалить
+
         session_words = mywords_get_session_words(user_id)
         if passed >= session_words and queue:
             await state.update_data(mywords_text_queue=queue, mywords_current_word_id=None)
@@ -3177,13 +3322,9 @@ async def mywords_text_answer(message: Message, state: FSMContext):
             await smart_reply(message, "Выбирай:", reply_markup=build_offer_continue_kb())
             return await state.set_state(LessonStates.mywords_offer_continue)
 
-        fb = await smart_reply(
-            message,
-            random.choice(vocab_quiz_success_phrases) if vocab_quiz_success_phrases else "✅"
-        )  # 💬 фидбек как в vocab, но без XP
-
         await state.update_data(mywords_text_queue=queue, mywords_current_word_id=None)
         return await mywords_send_next_text(message, state)
+
 
     # 💬 неверно = возвращаем слово в конец очереди, learned не меняем
     queue.append(word_id)
