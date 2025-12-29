@@ -2692,14 +2692,18 @@ async def mywords_show_main_menu(message: Message, state: FSMContext):
         [InlineKeyboardButton(text="📚 УЧИТЬСЯ",    callback_data="menu:learn")],
         [
             InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
-            InlineKeyboardButton(text="💬 Связь", url=CONTACT_URL)
+            InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL)
         ],
-        [
-            InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating"),
-            InlineKeyboardButton(text="🧩 Мои слова",  callback_data="menu:mywords")
-        ],
-        [InlineKeyboardButton(text="⚙️ Настройки",  callback_data="menu:settings")],
+
+        [InlineKeyboardButton(text="⚔️ Битва",   callback_data="menu:battle"),
+         InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords")],
+
+        [InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating"),
+        InlineKeyboardButton(text="Настройки ⚙️",  callback_data="menu:settings")],
+
+
     ])
+
 
     menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Что изучаем?⭐"
     try:
