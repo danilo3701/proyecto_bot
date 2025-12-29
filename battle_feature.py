@@ -6,7 +6,7 @@ import json
 import time
 import random
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field 
 from typing import Any, Dict, List, Optional
 
 from aiogram import Router, F, Bot
@@ -93,6 +93,11 @@ def save_battle_topics(data: Dict[str, Any]) -> None:
     except Exception:
         pass
 
+def _get_battle_source() -> Dict[str, Any]:
+    # 💬 что делает эта часть: единый источник для battle тем
+    bt = load_battle_topics() or {}
+    return bt if bt else (TOPICS_REF or {})
+
 
 # ─────────────────────────────────────────────────────────
 # 💾 Хранилище очков
@@ -126,7 +131,7 @@ def save_battle_data(data: Dict[str, Any]) -> None:
 @dataclass
 class BattleRuntime:
     stop: bool = False
-    event: asyncio.Event = asyncio.Event()
+    event: asyncio.Event = field(default_factory=asyncio.Event)  # 💬 отдельный Event на каждый бой
     current_poll_id: Optional[str] = None
     chosen_option: Optional[int] = None
 
@@ -139,7 +144,8 @@ class BattleRuntime:
     bot_score: int = 0
 
     score_msg_id: Optional[int] = None
-    poll_msg_ids: List[int] = None
+    poll_msg_ids: List[int] = field(default_factory=list)  # 💬 отдельный список на каждый бой
+
 
     task_tick: Optional[asyncio.Task] = None
     task_main: Optional[asyncio.Task] = None
@@ -163,9 +169,10 @@ def _result_kb() -> InlineKeyboardMarkup:
     ])
 
 def _topics_kb(topic_keys: List[str]) -> InlineKeyboardMarkup:
-    rows = []
+    rows = rows = []
+    source = _get_battle_source()  # 💬 берём battle_topics.json если есть
     for k in topic_keys[:18]:
-        info = TOPICS_REF.get(k, {})
+        info = source.get(k, {})
         title = info.get("title") or k
         rows.append([InlineKeyboardButton(text=f"⚔️ {title}", callback_data=f"battle:topic:{k}")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="battle:close")])
@@ -290,8 +297,8 @@ async def _tick_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) ->
                     message_id=rt.score_msg_id,
                     text=_format_score(rt),
                     parse_mode="HTML",
-                    reply_markup=_stop_kb(),
-                )
+                )  # 💬 обновляем только текст, reply keyboard нельзя редактировать
+
             except TelegramBadRequest:
                 pass
 
@@ -314,7 +321,7 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
     rt.score_msg_id = score_msg.message_id
 
     # 💬 вопросы
-    topic = TOPICS_REF.get(rt.topic_key, {}) or {}
+    topic = _get_battle_source().get(rt.topic_key, {}) or {}  # 💬 берём квизы из battle темы
     quiz_list = _collect_poll_quizzes(topic)
     random.shuffle(quiz_list)
 
@@ -370,8 +377,8 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
                     message_id=rt.score_msg_id,
                     text=_format_score(rt),
                     parse_mode="HTML",
-                    reply_markup=_stop_kb(),
-                )
+                )  # 💬 обновляем только текст, reply keyboard нельзя редактировать
+
             except TelegramBadRequest:
                 pass
 
@@ -489,7 +496,7 @@ async def battle_choose_topic(callback: CallbackQuery, state: FSMContext, bot: B
         pass
 
     topic_key = callback.data.split("battle:topic:", 1)[1]
-    info = TOPICS_REF.get(topic_key, {}) or {}
+    info = _get_battle_source().get(topic_key, {}) or {}  # 💬 берём данные battle темы
     title = info.get("title") or topic_key
 
     await state.set_state(Battle.Match)
@@ -568,7 +575,7 @@ async def battle_poll_answer(poll_answer, state: FSMContext):
 # ─────────────────────────────────────────────────────────
 # 🔁 Реванш
 # ─────────────────────────────────────────────────────────
-@router.callback_query(StateFilter(Battle.Result), F.data == ":rematch")
+@router.callback_query(StateFilter(Battle.Result), F.data == "battle:rematch")  # 💬 ловим правильный callback_data
 async def battle_rematch(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
@@ -609,6 +616,7 @@ async def battle_menu(callback: CallbackQuery, state: FSMContext):
 
 @router.message(Command("battle_topics"))
 async def battle_topics_admin_start(message: Message, state: FSMContext):
+    await _cancel_battle(message.from_user.id)  # 💬 если бой шёл, останавливаем чтобы не тикал в фоне
     # 💬 что делает эта часть: вход в админку battle тем отдельным FSM, не ломает бой
     await state.clear()
     await message.answer("⚙️ Battle темы = выбери действие:", reply_markup=_bt_admin_menu_kb())
