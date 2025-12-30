@@ -8,6 +8,8 @@ import random
 import asyncio
 from dataclasses import dataclass, field 
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote  # 💬 кодируем text/url для t.me/share/url
+
 
 from aiogram import Router, F, Bot
 from aiogram.types import (
@@ -206,12 +208,10 @@ def _result_kb() -> InlineKeyboardMarkup:
     ])  # 💬 добавили кнопку "поделиться" через Telegram share
 
 def _share_invite_url() -> str:
-    # 💬 открывает системное окно "Поделиться" в Telegram
-    text = "⚔️ Сыграем битву? Жми и выбирай тему!"
-    if BOT_USERNAME:
-        deep = f"https://t.me/{BOT_USERNAME}?start=battle"  # 💬 deep-link в бота (можно поменять payload позже)
-        return f"https://t.me/share/url?url={quote(deep)}&text={quote(text)}"
-    return f"https://t.me/share/url?text={quote(text)}"  # 💬 если username не передали = делимся только текстом
+    # 💬 что делает эта часть: шарим текст без явной ссылки, а сам url уходит отдельным параметром
+    text = "Сыграем битву? Жми и выбирай тему."
+    deep = "https://t.me/espanoljuega_bot?start=channel"  # 💬 твой стартовый payload
+    return f"https://t.me/share/url?url={quote(deep)}&text={quote(text)}"
 
 
 def _topics_kb(topic_keys: List[str]) -> InlineKeyboardMarkup:
