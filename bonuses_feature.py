@@ -1,8 +1,9 @@
 # bonuses_feature.py
-# 💬 модуль «🎁 Бонусы» = рефералка + заявка на подарок (выдача вручную)
+# 💬 модуль «🎁 Бонусы» = рефералка + накопление «звёзд» + заявка на подарок (выдача вручную)
 
 import time
 import logging
+from math import ceil
 from urllib.parse import quote
 
 from aiogram import Router, F
@@ -25,13 +26,28 @@ _load_subscription_channels = None
 _LessonStates = None
 
 _admin_chat_id: int | None = None
-_friends_needed: int = 2
 
 _materials_url: str = ""
 _contact_url: str = ""
 
 # 💬 если хочешь жёстко зафиксировать главный канал = поставь сюда "@espanolingooo"
 _main_channel_override: str | None = None
+
+# 💬 окно накопления: 7 дней
+_CYCLE_SECONDS = 7 * 24 * 60 * 60
+
+# 💬 таблица наград (итоговый бонус, не сумма)
+# 1 друг = 5⭐ (прогресс)
+# 2 друга = 15⭐ (можно просить подарок)
+# 3 друга = 25⭐
+# 5 друзей = 50⭐
+_REWARD_TABLE = [
+    (1, 5),
+    (2, 15),
+    (3, 25),
+    (5, 50),
+]
+_MIN_CLAIM_STARS = 15  # 💬 минимальная сумма, с которой можно запрашивать подарок
 
 
 def init_bonus_feature(
@@ -43,12 +59,11 @@ def init_bonus_feature(
     materials_url: str,
     contact_url: str,
     admin_chat_id: int,
-    friends_needed: int = 2,
-    main_channel_override: str | None = None
+    main_channel_override: str | None = None,
 ):
     # 💬 что делает эта часть: пробрасываем зависимости из core8_1.py, чтобы не было циклических импортов
     global _load_user_data, _save_user_data, _load_subscription_channels, _LessonStates
-    global _admin_chat_id, _friends_needed, _materials_url, _contact_url, _main_channel_override
+    global _admin_chat_id, _materials_url, _contact_url, _main_channel_override
 
     _load_user_data = load_user_data
     _save_user_data = save_user_data
@@ -56,7 +71,6 @@ def init_bonus_feature(
     _LessonStates = LessonStates
 
     _admin_chat_id = int(admin_chat_id)
-    _friends_needed = int(friends_needed)
 
     _materials_url = materials_url or ""
     _contact_url = contact_url or ""
@@ -79,15 +93,74 @@ def _get_main_channel() -> str:
     return "@espanolingooo"
 
 
+def _calc_stars(qualified: int) -> int:
+    # 💬 что делает эта часть: превращаем кол-во друзей в «звёзды» по таблице
+    stars = 0
+    for need, value in _REWARD_TABLE:
+        if qualified >= need:
+            stars = value
+    return stars
+
+
 def _ensure_ref_bonus(u: dict) -> dict:
     # 💬 что делает эта часть: гарантируем структуру в user_data для реф-бонусов
     rb = u.setdefault("ref_bonus", {})
+    rb.setdefault("cycle_started_at", 0)
+
     rb.setdefault("qualified", 0)
     rb.setdefault("qualified_users", [])
-    rb.setdefault("claim_status", "none")  # none | pending | issued | declined
+
+    rb.setdefault("stars", 0)
+
+    rb.setdefault("claim_status", "none")  # none | pending
+    rb.setdefault("pending_stars", 0)
     rb.setdefault("claim_requested_at", 0)
-    rb.setdefault("claim_issued_at", 0)
+
+    rb.setdefault("claims", [])  # история выдач
+    rb.setdefault("last_declined_at", 0)
+
     return rb
+
+
+def _reset_cycle_if_expired(rb: dict) -> None:
+    # 💬 что делает эта часть: сбрасываем накопление, если прошло 7 дней (кроме pending заявки)
+    now = int(time.time())
+    started = int(rb.get("cycle_started_at", 0) or 0)
+    if not started:
+        return
+
+    expired = now >= started + _CYCLE_SECONDS
+    if expired and rb.get("claim_status") != "pending":
+        rb["cycle_started_at"] = 0
+        rb["qualified"] = 0
+        rb["qualified_users"] = []
+        rb["stars"] = 0
+        rb["claim_status"] = "none"
+        rb["pending_stars"] = 0
+        rb["claim_requested_at"] = 0
+
+
+def _time_left_days(rb: dict) -> int:
+    # 💬 что делает эта часть: сколько дней осталось до сброса (округляем вверх)
+    now = int(time.time())
+    started = int(rb.get("cycle_started_at", 0) or 0)
+    if not started:
+        return 7
+    left = (started + _CYCLE_SECONDS) - now
+    if left <= 0:
+        return 0
+    return int(ceil(left / 86400))
+
+
+def _next_target(qualified: int) -> int:
+    # 💬 что делает эта часть: показываем ближайшую цель по друзьям
+    if qualified < 2:
+        return 2
+    if qualified < 3:
+        return 3
+    if qualified < 5:
+        return 5
+    return 5
 
 
 def bonus_register_referral_from_start(new_user_id: str, payload: str | None):
@@ -134,7 +207,7 @@ def bonus_register_referral_from_start(new_user_id: str, payload: str | None):
 
 def bonus_try_qualify_referral(user_id: str, subscribed_channels: list[str] | None = None) -> bool:
     """
-    💬 Засчитываем друга, когда он прошёл проверку подписки (в core8_1.py).
+    💬 Засчитываем друга после успешной проверки подписки (в core8_1.py).
     На деле проверяем только главный канал.
     """
     if not callable(_load_user_data) or not callable(_save_user_data):
@@ -161,10 +234,19 @@ def bonus_try_qualify_referral(user_id: str, subscribed_channels: list[str] | No
     inviter = data.setdefault(str(inviter_id), {})
     rb = _ensure_ref_bonus(inviter)
 
+    # 💬 сброс по времени перед начислением
+    _reset_cycle_if_expired(rb)
+
+    # 💬 старт окна накопления = при первом засчитанном друге
+    if not int(rb.get("cycle_started_at", 0) or 0):
+        rb["cycle_started_at"] = int(time.time())
+
     qualified_users = rb.setdefault("qualified_users", [])
     if str(user_id) not in qualified_users:
         qualified_users.append(str(user_id))
         rb["qualified"] = int(rb.get("qualified", 0)) + 1
+
+    rb["stars"] = _calc_stars(int(rb.get("qualified", 0)))
 
     # 💬 убираем из pending, если был там
     pending = inviter.setdefault("ref_pending", [])
@@ -181,21 +263,23 @@ def _build_bonuses_kb(user_id: str) -> InlineKeyboardMarkup:
     u = data.get(str(user_id), {})
     rb = _ensure_ref_bonus(u)
 
-    q = int(rb.get("qualified", 0))
-    can_claim = q >= _friends_needed and rb.get("claim_status") not in ("pending", "issued")
+    _reset_cycle_if_expired(rb)
+
+    stars = int(rb.get("stars", 0))
+    can_claim = stars >= _MIN_CLAIM_STARS and rb.get("claim_status") != "pending"
 
     rows: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton(text="📨 Пригласить друга", callback_data="bonuses:share")],
         [
-            InlineKeyboardButton(text="🔗 Моя ссылка", callback_data="bonuses:link"),
+            InlineKeyboardButton(text="ℹ️ Инструкция", callback_data="bonuses:how"),
             InlineKeyboardButton(text="🔄 Обновить", callback_data="bonuses:refresh"),
         ],
     ]
 
     if can_claim:
-        rows.append([InlineKeyboardButton(text="🎁 Получить подарок", callback_data="bonuses:claim")])
+        rows.append([InlineKeyboardButton(text=f"🎁 Запросить подарок ({stars}⭐)", callback_data="bonuses:claim")])
     else:
-        rows.append([InlineKeyboardButton(text="🔒 Получить подарок", callback_data="bonuses:locked")])
+        rows.append([InlineKeyboardButton(text="🔒 Запросить подарок", callback_data="bonuses:locked")])
 
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="bonuses:back")])
 
@@ -211,20 +295,45 @@ async def bonuses_open(message: Message, state):
     data = _load_user_data()
     u = data.setdefault(uid, {})
     rb = _ensure_ref_bonus(u)
-    _save_user_data(data)
+
+    _reset_cycle_if_expired(rb)
 
     qualified = int(rb.get("qualified", 0))
+    stars = _calc_stars(qualified)
+    rb["stars"] = stars  # 💬 синхронизируем на всякий случай
+
+    days_left = _time_left_days(rb)
     main_ch = _get_main_channel()
+
+    target = _next_target(qualified)
+    if qualified >= 5:
+        next_line = "Цель выполнена = 5 друзей"
+    else:
+        left = max(0, target - qualified)
+        next_line = f"До цели {target} = осталось {left} друг(а)"
+
+    claim_status = rb.get("claim_status")
+    if claim_status == "pending":
+        status_line = f"Статус = заявка отправлена ({int(rb.get('pending_stars', 0))}⭐)"
+    else:
+        status_line = "Статус = можно копить"
 
     text_out = (
         "🎁 <b>Бонусы</b>\n\n"
-        f"Прогресс = <b>{qualified}/{_friends_needed}</b>\n\n"
-        "Как засчитывается друг:\n"
-        "1) Переходит по твоей ссылке\n"
-        f"2) Подписывается на канал {main_ch}\n"
-        "3) Заходит в тему и набирает минимум XP\n\n"
-        "💬 На деле бот проверяет подписку, XP не считаем\n"
+        f"👥 Друзья = <b>{qualified}</b>\n"
+        f"⭐ Звёзды = <b>{stars}</b>\n"
+        f"⏳ До сброса = <b>{days_left}</b> дней\n\n"
+        f"{next_line}\n"
+        f"{status_line}\n\n"
+        "Награды:\n"
+        "1 друг = 5⭐\n"
+        "2 друга = 15⭐\n"
+        "3 друга = 25⭐\n"
+        "5 друзей = 50⭐\n\n"
+        f"Проверяем только подписку на {main_ch}\n"
     )
+
+    _save_user_data(data)
 
     kb = _build_bonuses_kb(uid)
 
@@ -233,7 +342,6 @@ async def bonuses_open(message: Message, state):
     except TelegramBadRequest:
         await message.answer(text_out, reply_markup=kb)
 
-    # 💬 остаёмся в choosing_category, чтобы главное меню продолжало работать
     if _LessonStates:
         try:
             await state.set_state(_LessonStates.choosing_category)
@@ -247,25 +355,37 @@ async def bonuses_refresh(callback: CallbackQuery, state):
     return await bonuses_open(callback.message, state)  # 💬 перерисовываем экран
 
 
+@router.callback_query(F.data == "bonuses:how")
+async def bonuses_how(callback: CallbackQuery):
+    # 💬 что делает эта часть: отдельная инструкция отдельной кнопкой
+    await callback.answer()
+
+    main_ch = _get_main_channel()
+    text_out = (
+        "ℹ️ <b>Инструкция</b>\n\n"
+        "Как засчитывается друг:\n"
+        "1) Друг переходит по твоей ссылке и нажимает Start\n"
+        f"2) Подписывается на канал {main_ch}\n"
+        "3) Нажимает кнопку проверки подписки\n\n"
+        "Важно:\n"
+        "• XP не считаем, только подписку\n"
+        "• Накопление действует 7 дней, потом сброс\n"
+    )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="bonuses:refresh")]
+    ])
+
+    try:
+        await callback.message.edit_text(text_out, reply_markup=kb)
+    except TelegramBadRequest:
+        await callback.message.answer(text_out, reply_markup=kb)
+
+
 @router.callback_query(F.data == "bonuses:locked")
 async def bonuses_locked(callback: CallbackQuery):
-    # 💬 что делает эта часть: мягко объясняем, почему «получить» пока нельзя
-    await callback.answer("Нужно 2/2 приглашённых, чтобы получить подарок.", show_alert=True)
-
-
-@router.callback_query(F.data == "bonuses:link")
-async def bonuses_send_link(callback: CallbackQuery):
-    await callback.answer()
-    me = await callback.bot.get_me()  # 💬 берём @username бота
-
-    uid = str(callback.from_user.id)
-    link = f"https://t.me/{me.username}?start=ref_{uid}"
-
-    await callback.message.answer(
-        f"🔗 Твоя ссылка:\n{link}\n\n"
-        "Скопируй и отправь другу.",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    # 💬 что делает эта часть: объясняем, почему «запросить» пока нельзя
+    await callback.answer("Подарок доступен от 15⭐ (нужно минимум 2 друга).", show_alert=True)
 
 
 @router.callback_query(F.data == "bonuses:share")
@@ -282,8 +402,10 @@ async def bonuses_share(callback: CallbackQuery):
     )
 
     share_url = f"https://t.me/share/url?url={quote(link)}&text={quote(text_msg)}"
+
     await callback.message.answer(
-        "📨 Нажми и поделись ссылкой:",
+        f"🔗 Твоя ссылка:\n{link}\n\n"
+        "Нажми «Поделиться» или просто скопируй ссылку.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="Поделиться", url=share_url)]
         ])
@@ -340,27 +462,39 @@ async def bonuses_claim(callback: CallbackQuery, state):
     u = data.setdefault(uid, {})
     rb = _ensure_ref_bonus(u)
 
-    qualified = int(rb.get("qualified", 0))
-    if qualified < _friends_needed:
-        return await callback.message.answer("🔒 Пока рано = нужно 2/2 приглашённых.")
+    _reset_cycle_if_expired(rb)
 
-    if rb.get("claim_status") in ("pending", "issued"):
-        return await callback.message.answer("⏳ Заявка уже отправлена или отмечена как выданная.")
+    qualified = int(rb.get("qualified", 0))
+    stars = _calc_stars(qualified)
+    rb["stars"] = stars
+
+    if rb.get("claim_status") == "pending":
+        return await callback.message.answer("⏳ Заявка уже отправлена.")
+
+    if stars < _MIN_CLAIM_STARS:
+        return await callback.message.answer("🔒 Подарок доступен от 15⭐ (нужно минимум 2 друга).")
 
     rb["claim_status"] = "pending"
+    rb["pending_stars"] = stars
     rb["claim_requested_at"] = int(time.time())
+
     _save_user_data(data)
 
-    # 💬 пишем админу заявку
     user_tag = callback.from_user.username
     user_tag = f"@{user_tag}" if user_tag else "(нет username)"
+
+    ids_short = ", ".join(rb.get("qualified_users", [])[-10:])  # последние 10
+    if not ids_short:
+        ids_short = "нет"
 
     admin_text = (
         "🎁 <b>Заявка на подарок</b>\n\n"
         f"Пользователь = {callback.from_user.full_name}\n"
         f"Username = {user_tag}\n"
         f"User ID = <code>{uid}</code>\n\n"
-        f"Прогресс = {qualified}/{_friends_needed}\n"
+        f"Друзья = {qualified}\n"
+        f"К выдаче = <b>{stars}⭐</b>\n"
+        f"ID друзей (последние) = {ids_short}\n\n"
         "После отправки подарка нажми «✅ Выдано»."
     )
 
@@ -374,8 +508,9 @@ async def bonuses_claim(callback: CallbackQuery, state):
     await callback.bot.send_message(_admin_chat_id, admin_text, reply_markup=admin_kb)
 
     await callback.message.answer(
-        "✅ Заявка отправлена админу.\n"
-        "Жди = я пришлю тебе подарок вручную."
+        f"✅ Заявка отправлена админу.\n"
+        f"Сумма = {stars}⭐\n"
+        "Жди, я отправлю подарок вручную."
     )
 
     return await bonuses_open(callback.message, state)  # 💬 обновляем экран
@@ -388,35 +523,55 @@ async def bonuses_admin_actions(callback: CallbackQuery):
     if _admin_chat_id is None:
         return
 
-    # 💬 разрешаем кнопки только админу
-    if int(callback.from_user.id) != int(_admin_chat_id):
-        return await callback.answer("⛔ Только админ.", show_alert=True)
+    # 💬 разрешаем действие только в админ-чате
+    if int(getattr(callback.message, "chat", None).id) != int(_admin_chat_id):
+        return await callback.answer("⛔ Только админ-чат.", show_alert=True)
 
-    action, uid = callback.data.split(":", 2)[1], callback.data.split(":", 2)[2]
+    parts = callback.data.split(":", 2)
+    if len(parts) < 3:
+        return
+
+    action = parts[1]
+    uid = parts[2]
 
     data = _load_user_data()
     u = data.setdefault(str(uid), {})
     rb = _ensure_ref_bonus(u)
 
     if action == "issued":
-        rb["claim_status"] = "issued"
-        rb["claim_issued_at"] = int(time.time())
+        stars = int(rb.get("pending_stars", 0) or 0)
+
+        # 💬 пишем в историю и сбрасываем цикл, чтобы можно было копить снова
+        rb.setdefault("claims", []).append({"stars": stars, "issued_at": int(time.time())})
+
+        rb["cycle_started_at"] = 0
+        rb["qualified"] = 0
+        rb["qualified_users"] = []
+        rb["stars"] = 0
+
+        rb["claim_status"] = "none"
+        rb["pending_stars"] = 0
+        rb["claim_requested_at"] = 0
+
         _save_user_data(data)
 
         await callback.message.edit_text("✅ Отмечено как выдано.")  # 💬 закрываем заявку
         try:
-            await callback.bot.send_message(int(uid), "🎉 Подарок отмечен как выданный. Спасибо!")
+            await callback.bot.send_message(int(uid), f"🎉 Подарок отмечен как выданный. Сумма = {stars}⭐")
         except Exception:
             pass
         return
 
     if action == "decline":
-        rb["claim_status"] = "declined"
+        rb["claim_status"] = "none"
+        rb["pending_stars"] = 0
+        rb["last_declined_at"] = int(time.time())
+
         _save_user_data(data)
 
         await callback.message.edit_text("❌ Отклонено.")
         try:
-            await callback.bot.send_message(int(uid), "❌ Заявка отклонена. Напиши админу, если считаешь что это ошибка.")
+            await callback.bot.send_message(int(uid), "❌ Заявка отклонена. Нажми «Обновить» и попробуй снова.")
         except Exception:
             pass
         return
