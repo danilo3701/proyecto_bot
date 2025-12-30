@@ -334,7 +334,7 @@ async def _safe_edit_score(bot: Bot, chat_id: int, rt: BattleRuntime) -> None:
                 return
 
 
-async def _safe_send_poll(bot: Bot, chat_id: int, question: str, options: List[str], correct: int):
+async def _safe_send_poll(bot: Bot, chat_id: int, question: str, options: List[str], correct: int, open_period: int = POLL_TIME_S):
     # 💬 что делает эта часть: отправляет poll и переживает RetryAfter
     for _ in range(2):
         try:
@@ -345,7 +345,7 @@ async def _safe_send_poll(bot: Bot, chat_id: int, question: str, options: List[s
                 type="quiz",
                 correct_option_id=correct,
                 is_anonymous=False,
-                open_period=POLL_TIME_S,
+                open_period=open_period,
             )
         except TelegramRetryAfter as e:
             await asyncio.sleep(float(e.retry_after))  # 💬 ждём лимит Telegram
@@ -416,21 +416,22 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
             await state.set_state(Battle.Result)
             return
 
-        # 💬 сколько вопросов реально успеем за 60 секунд
-        n = min(len(quiz_list), MAX_QUESTIONS_PER_BATTLE)
+        # 💬 вопросы идут по таймеру = сколько успеем за 60 секунд, по порядку
+        i = 0
+        while (not rt.stop) and (_left_seconds(rt) > 0):
+            remain = int(_left_seconds(rt))
+            if remain < 5:
+                break  # 💬 Telegram open_period >= 5
 
-        for i in range(n):
-            if rt.stop or _left_seconds(rt) <= 0:
-                break
+            q = quiz_list[i % len(quiz_list)]  # 💬 идём по порядку, если дошли до конца = по кругу
+            i += 1
 
-            round_started = time.monotonic()  # 💬 фиксируем слот раунда
+            round_started = time.monotonic()
 
-            q = quiz_list[i]
             question = (q.get("question") or "Вопрос").strip()
             options = list(q.get("options") or [])
             correct = int(q.get("correct_index") or 0)
 
-            # 💬 Telegram = максимум 10 вариантов
             options = options[:10]
             if not options:
                 continue
@@ -441,35 +442,38 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
             rt.current_poll_id = None
             rt.chosen_option = None
 
+            open_period = POLL_TIME_S
+            if remain < POLL_TIME_S:
+                open_period = max(5, remain)
+
             poll_msg = await _safe_send_poll(
-                bot, chat_id, question, options, correct
-            )  # 💬 безопасная отправка poll
+                bot, chat_id, question, options, correct, open_period=open_period
+            )  # 💬 poll отправили
             if not poll_msg:
-                break  # 💬 если Telegram не дал отправить = финализируем бой
+                break
 
             rt.current_poll_id = poll_msg.poll.id
             rt.poll_msg_ids.append(poll_msg.message_id)
 
-            # 💬 ждём ответ или таймаут
             try:
-                await asyncio.wait_for(rt.event.wait(), timeout=POLL_TIME_S + 1)
+                await asyncio.wait_for(rt.event.wait(), timeout=open_period + 1)
             except asyncio.TimeoutError:
                 pass
 
-            # 💬 проверяем ответ
             if rt.chosen_option is not None and rt.chosen_option == correct:
                 rt.user_score += 1
 
-            # 💬 обновляем scoreboard
             await _safe_edit_score(bot, chat_id, rt)
 
-            # 💬 чистим poll чтобы чат не захламлять
+            # 💬 сразу убираем poll после ответа (или таймаута)
             await _safe_delete(bot, chat_id, poll_msg.message_id)
 
-            # 💬 добиваем слот раунда до POLL_TIME_S
+            # 💬 минимальная пауза, чтобы не уткнуться в лимиты Telegram
             elapsed = time.monotonic() - round_started
-            if elapsed < POLL_TIME_S:
-                await asyncio.sleep(POLL_TIME_S - elapsed)
+            min_gap = 0.4
+            if elapsed < min_gap:
+                await asyncio.sleep(min_gap - elapsed)
+
 
         # ✅ ВАЖНО: финализация ТОЛЬКО ПОСЛЕ цикла, а не внутри него
         rt.stop = True
