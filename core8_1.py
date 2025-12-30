@@ -2069,8 +2069,8 @@ async def show_leaderboard(message: Message, state: FSMContext):
             res.append(_under_name(f"↳{total_count}"))  # 💬 общее число участников
             me_line = _line(1, my_name, 0, is_me=True)  # 💬 строка пользователя отдельно (для выделения)
 
+            res.append(me_line)  # 💬 строка пользователя внутри списка (не вылезает из <pre>)
             res.append("</pre>")  # 💬 закрываем моноширинный блок
-            res.append(f"<b><code>{me_line}</code></b>")  # 💬 выделяем строку пользователя (жирный + моноширинный)
             return "\n".join(res)
 
     
@@ -2103,12 +2103,12 @@ async def show_leaderboard(message: Message, state: FSMContext):
         
         me_line = _line(my_rank, my_name, my_val, is_me=True) if my_rank > len(top5) else None  # 💬 строка пользователя отдельно (для выделения)
 
-        res.append("</pre>")  # 💬 закрываем моноширинный блок
-
         if me_line:
-            res.append(f"<b><code>{me_line}</code></b>")  # 💬 выделяем строку пользователя (жирный + моноширинный)
+            res.append(me_line)  # 💬 показываем пользователя внутри <pre> на новой строке после ↳
 
+        res.append("</pre>")  # 💬 закрываем моноширинный блок
         return "\n".join(res)
+
 
 
     week_text = render_block("🏆 Рейтинг недели", "words_learned_week", "🍪")
