@@ -25,6 +25,7 @@ from aiogram.filters import StateFilter
 from aiogram.filters import Command  # 💬 команды /battle_topics
 
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramRetryAfter  # 💬 чтобы не падать на лимитах
 
 
 router = Router()
@@ -95,7 +96,7 @@ class BattleTopicsAdmin(StatesGroup):
 BATTLE_DURATION_S = 60
 BOT_SCORE_EVERY_S = 7
 POLL_TIME_S = 7
-MAX_QUESTIONS_PER_BATTLE = 8  # 💬 60 сек / 7 сек ≈ 8 вопросов
+MAX_QUESTIONS_PER_BATTLE = max(1, BATTLE_DURATION_S // POLL_TIME_S)  # 💬 сколько раундов влезает в бой
 STOP_TEXT = "⛔ Stop"
 
 BATTLE_DATA_PATH = "/data/battle_data.json"
@@ -163,7 +164,7 @@ def save_battle_data(data: Dict[str, Any]) -> None:
 @dataclass
 class BattleRuntime:
     stop: bool = False
-    event: asyncio.Event = field(default_factory=asyncio.Event)  # 💬 отдельный Event на каждый бой
+    event: asyncio.Event = field(default_factory=asyncio.Event)  # 💬 свой Event на каждый бой
     current_poll_id: Optional[str] = None
     chosen_option: Optional[int] = None
 
@@ -176,7 +177,8 @@ class BattleRuntime:
     bot_score: int = 0
 
     score_msg_id: Optional[int] = None
-    poll_msg_ids: List[int] = field(default_factory=list)  # 💬 отдельный список на каждый бой
+    poll_msg_ids: List[int] = field(default_factory=list)        # 💬 свой список на каждый бой
+    edit_lock: asyncio.Lock = field(default_factory=asyncio.Lock) # 💬 защита от одновременных edit’ов
 
 
     task_tick: Optional[asyncio.Task] = None
@@ -308,6 +310,49 @@ async def _safe_delete(bot: Bot, chat_id: int, msg_id: int) -> None:
         pass
 
 
+async def _safe_edit_score(bot: Bot, chat_id: int, rt: BattleRuntime) -> None:
+    # 💬 что делает эта часть: обновляет scoreboard и не роняет бой на RetryAfter/BadRequest
+    if not rt.score_msg_id:
+        return
+
+    async with rt.edit_lock:
+        for _ in range(2):
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=rt.score_msg_id,
+                    text=_format_score(rt),
+                    parse_mode="HTML",
+                )  # 💬 обновляем только текст, reply keyboard нельзя редактировать
+                return
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(float(e.retry_after))  # 💬 ждём лимит Telegram
+            except TelegramBadRequest:
+                return
+            except Exception:
+                return
+
+
+async def _safe_send_poll(bot: Bot, chat_id: int, question: str, options: List[str], correct: int):
+    # 💬 что делает эта часть: отправляет poll и переживает RetryAfter
+    for _ in range(2):
+        try:
+            return await bot.send_poll(
+                chat_id=chat_id,
+                question=question[:290],
+                options=[str(x)[:100] for x in options],
+                type="quiz",
+                correct_option_id=correct,
+                is_anonymous=False,
+                open_period=POLL_TIME_S,
+            )
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(float(e.retry_after))  # 💬 ждём лимит Telegram
+        except Exception:
+            return None
+    return None
+
+
 async def _cancel_battle(user_id: int) -> None:
     rt = BATTLES.get(user_id)
     if not rt:
@@ -334,17 +379,8 @@ async def _tick_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) ->
             break
 
         rt.bot_score += 1  # 💬 соперник набирает очки по таймеру
-        if rt.score_msg_id:
-            try:
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=rt.score_msg_id,
-                    text=_format_score(rt),
-                    parse_mode="HTML",
-                )  # 💬 обновляем только текст, reply keyboard нельзя редактировать
+        await _safe_edit_score(bot, chat_id, rt)  # 💬 безопасное обновление scoreboard
 
-            except TelegramBadRequest:
-                pass
 
 
 async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) -> None:
@@ -353,6 +389,7 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
         return
 
     rt.start_monotonic = time.monotonic()
+
     rt.poll_msg_ids = []
 
     # 💬 scoreboard сообщение
@@ -365,69 +402,60 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
     rt.score_msg_id = score_msg.message_id
 
     # 💬 вопросы
-    topic = _get_battle_source().get(rt.topic_key, {}) or {}  # 💬 берём квизы из battle темы
-    quiz_list = _collect_poll_quizzes(topic)
-    random.shuffle(quiz_list)
+topic = _get_battle_source().get(rt.topic_key, {}) or {}  # 💬 берём квизы из battle темы
+quiz_list = _collect_poll_quizzes(topic)  # 💬 по порядку, без shuffle
 
-    # 💬 "полквиза" и лимит под 60 секунд
-    n = max(1, len(quiz_list) // 2) if quiz_list else 0
-    n = min(n, MAX_QUESTIONS_PER_BATTLE)
+# 💬 сколько вопросов реально успеем за BATTLE_DURATION_S
+n = min(len(quiz_list), MAX_QUESTIONS_PER_BATTLE)
 
-    for i in range(n):
-        if rt.stop or _left_seconds(rt) <= 0:
-            break
+for i in range(n):
+    if rt.stop or _left_seconds(rt) <= 0:
+        break
 
-        q = quiz_list[i]
-        question = (q.get("question") or "Вопрос").strip()
-        options = list(q.get("options") or [])
-        correct = int(q.get("correct_index") or 0)
+    round_started = time.monotonic()  # 💬 фиксируем слот раунда, чтобы не спамить poll’ами
 
-        # 💬 Telegram = максимум 10 вариантов
-        options = options[:10]
-        if correct >= len(options):
-            correct = 0
+    q = quiz_list[i]
+    question = (q.get("question") or "Вопрос").strip()
+    options = list(q.get("options") or [])
+    correct = int(q.get("correct_index") or 0)
 
-        rt.event.clear()
-        rt.current_poll_id = None
-        rt.chosen_option = None
+    # 💬 Telegram = максимум 10 вариантов
+    options = options[:10]
+    if correct >= len(options):
+        correct = 0
 
-        poll_msg = await bot.send_poll(
-            chat_id=chat_id,
-            question=question[:290],
-            options=[str(x)[:100] for x in options],
-            type="quiz",
-            correct_option_id=correct,
-            is_anonymous=False,
-            open_period=POLL_TIME_S,
-        )
-        rt.current_poll_id = poll_msg.poll.id
-        rt.poll_msg_ids.append(poll_msg.message_id)
+    rt.event.clear()
+    rt.current_poll_id = None
+    rt.chosen_option = None
 
-        # 💬 ждём ответ или таймаут
-        try:
-            await asyncio.wait_for(rt.event.wait(), timeout=POLL_TIME_S + 1)
-        except asyncio.TimeoutError:
-            pass
+    poll_msg = await _safe_send_poll(bot, chat_id, question, options, correct)  # 💬 безопасная отправка poll
+    if not poll_msg:
+        break  # 💬 если Telegram не дал отправить = выходим и финализируем бой
 
-        # 💬 проверяем ответ
-        if rt.chosen_option is not None and rt.chosen_option == correct:
-            rt.user_score += 1
+    rt.current_poll_id = poll_msg.poll.id
+    rt.poll_msg_ids.append(poll_msg.message_id)
 
-        # 💬 обновляем scoreboard
-        if rt.score_msg_id:
-            try:
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=rt.score_msg_id,
-                    text=_format_score(rt),
-                    parse_mode="HTML",
-                )  # 💬 обновляем только текст, reply keyboard нельзя редактировать
+    # 💬 ждём ответ или таймаут
+    try:
+        await asyncio.wait_for(rt.event.wait(), timeout=POLL_TIME_S + 1)
+    except asyncio.TimeoutError:
+        pass
 
-            except TelegramBadRequest:
-                pass
+    # 💬 проверяем ответ
+    if rt.chosen_option is not None and rt.chosen_option == correct:
+        rt.user_score += 1
 
-        # 💬 чистим poll чтобы чат не захламлять
-        await _safe_delete(bot, chat_id, poll_msg.message_id)
+    # 💬 обновляем scoreboard
+    await _safe_edit_score(bot, chat_id, rt)  # 💬 безопасное обновление scoreboard
+
+    # 💬 чистим poll чтобы чат не захламлять
+    await _safe_delete(bot, chat_id, poll_msg.message_id)
+
+    # 💬 добиваем слот раунда до POLL_TIME_S, чтобы быстрые ответы не ломали бой лимитами Telegram
+    elapsed = time.monotonic() - round_started
+    if elapsed < POLL_TIME_S:
+        await asyncio.sleep(POLL_TIME_S - elapsed)
+
 
     # 💬 стопаем и финализируем
     rt.stop = True
