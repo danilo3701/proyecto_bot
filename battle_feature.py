@@ -408,7 +408,11 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
         if not quiz_list:
             rt.stop = True
             await _safe_edit_score(bot, chat_id, rt)
-            await bot.send_message(chat_id=chat_id, "В этой теме нет квизов 🙈", reply_markup=ReplyKeyboardRemove())
+            await bot.send_message(
+                chat_id=chat_id,
+                text="В этой теме нет квизов 🙈",
+                reply_markup=ReplyKeyboardRemove(),
+            )
             await state.set_state(Battle.Result)
             return
 
