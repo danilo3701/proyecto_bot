@@ -535,7 +535,11 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
         # 💬 страховка: если что-то упало в таске, чтобы бой не "зависал" молча
         rt.stop = True
         try:
-            await bot.send_message(chat_id=chat_id, "⚠️ Бой прервался из-за ошибки.", reply_markup=ReplyKeyboardRemove())
+            await bot.send_message(
+                chat_id=chat_id,
+                text="⚠️ Бой прервался из-за ошибки.",
+                reply_markup=ReplyKeyboardRemove(),
+            )  # 💬 сообщение об ошибке без нарушения порядка аргументов
         except Exception:
             pass
 
