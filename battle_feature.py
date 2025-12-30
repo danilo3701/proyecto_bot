@@ -1,3 +1,4 @@
+
 # battle_feature.py
 # 💬 Отдельный модуль "Битва" = отдельные состояния, задачи, сохранение очков
 
@@ -177,6 +178,8 @@ class BattleRuntime:
     start_monotonic: float = 0.0
     user_score: int = 0
     bot_score: int = 0
+    streak: int = 0  # 💬 сколько правильных подряд (для строки "🔥 2 подряд")
+
 
     score_msg_id: Optional[int] = None
     poll_msg_ids: List[int] = field(default_factory=list)        # 💬 свой список на каждый бой
@@ -263,16 +266,31 @@ def _left_seconds(rt: BattleRuntime) -> int:
     left = int(BATTLE_DURATION_S - elapsed)
     return max(0, left)
 
+def _time_bar(left_s: int, total_s: int, width: int = 10) -> str:
+    # 💬 что делает эта часть: рисует прогресс времени "██████░░░░"
+    total_s = max(1, int(total_s))
+    left_s = max(0, int(left_s))
+    filled = int(round((left_s / total_s) * width))
+    filled = max(0, min(width, filled))
+    return "█" * filled + "░" * (width - filled)
+
+
 def _format_score(rt: BattleRuntime) -> str:
     left = _left_seconds(rt)
+    bar = _time_bar(left, BATTLE_DURATION_S, width=10)
+
+    streak_line = ""
+    if rt.streak >= 2:
+        streak_line = f"\n🔥 <b>{rt.streak}</b> подряд"  # 💬 показываем только если серия 2+
+
     return (
-        f"⚔️ <b>Битва</b>\n"
-        f"📌 Тема: <b>{rt.topic_title}</b>\n\n"
-        f"👤 Ты: <b>{rt.user_score}</b>\n"
-        f"🤖 {rt.opponent_name}: <b>{rt.bot_score}</b>\n\n"
-        f"⏱ Осталось: <b>{left}</b> сек\n\n"
+        f"⚔️ <b>Битва по теме {rt.topic_title}</b>\n"
+        f"⏱ <b>{left}</b> сек {bar}\n"
+        f"👤 Ты <b>{rt.user_score}</b> | <b>{rt.bot_score}</b> {rt.opponent_name}"
+        f"{streak_line}\n\n"
         f"💬 Нажми {STOP_TEXT} чтобы выйти"
     )
+
 
 
 def _collect_poll_quizzes(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -389,7 +407,7 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
         return
 
     try:
-        rt.start_monotonic = time.monotonic()
+        
         rt.poll_msg_ids = []
 
         # 💬 scoreboard сообщение
@@ -462,8 +480,12 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
 
             if rt.chosen_option is not None and rt.chosen_option == correct:
                 rt.user_score += 1
+                rt.streak += 1  # 💬 правильный ответ = увеличиваем серию
+            else:
+                rt.streak = 0  # 💬 ошибка или таймаут = серия обнуляется
 
-            await _safe_edit_score(bot, chat_id, rt)
+            await _safe_edit_score(bot, chat_id, rt)  # 💬 обновляем scoreboard после каждого poll
+
 
             # 💬 сразу убираем poll после ответа (или таймаута)
             await _safe_delete(bot, chat_id, poll_msg.message_id)
@@ -615,6 +637,9 @@ async def _start_battle_with_topic(message: Message, state: FSMContext, bot: Bot
     rt.topic_key = topic_key
     rt.topic_title = title
     BATTLES[user_id] = rt
+
+    rt.start_monotonic = time.monotonic()  # 💬 фиксируем старт боя ДО запуска task_tick, чтобы таймер не был 0
+
 
     await state.set_state(Battle.Running)
 
