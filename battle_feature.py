@@ -283,13 +283,18 @@ def _format_score(rt: BattleRuntime) -> str:
     if rt.streak >= 2:
         streak_line = f"\n🔥 <b>{rt.streak}</b> подряд"  # 💬 показываем только если серия 2+
 
+    mm = left // 60  # 💬 минуты
+    ss = left % 60   # 💬 секунды
+    time_str = f"{mm:02d}:{ss:02d}"  # 💬 формат 00:41
+
     return (
         f"⚔️ <b>Битва по теме {rt.topic_title}</b>\n"
-        f"⏱ <b>{left}</b> сек {bar}\n"
+        f"⏱ <b>{time_str}</b> {bar}\n"
         f"👤 Ты <b>{rt.user_score}</b> | <b>{rt.bot_score}</b> {rt.opponent_name}"
         f"{streak_line}\n\n"
         f"💬 Нажми {STOP_TEXT} чтобы выйти"
     )
+
 
 
 
@@ -637,6 +642,8 @@ async def _start_battle_with_topic(message: Message, state: FSMContext, bot: Bot
     rt.topic_key = topic_key
     rt.topic_title = title
     BATTLES[user_id] = rt
+    rt.start_monotonic = time.monotonic()  # 💬 фиксируем старт боя до запуска task'ов, чтобы таймер работал
+
 
     rt.start_monotonic = time.monotonic()  # 💬 фиксируем старт боя ДО запуска task_tick, чтобы таймер не был 0
 
@@ -683,10 +690,13 @@ async def battle_stop(message: Message, state: FSMContext, bot: Bot):
 # ─────────────────────────────────────────────────────────
 # 🗳 poll_answer во время боя
 # ─────────────────────────────────────────────────────────
-@router.poll_answer(StateFilter(Battle.Running))
+@router.poll_answer()
 async def battle_poll_answer(poll_answer, state: FSMContext):
     user_id = poll_answer.user.id
     rt = BATTLES.get(user_id)
+    # 💬 PollAnswer может прийти без chat_id, поэтому StateFilter(Battle.Running) бывает не срабатывает
+    # 💬 фильтруем руками через BATTLES и current_poll_id
+
     if not rt or rt.stop:
         return
 
