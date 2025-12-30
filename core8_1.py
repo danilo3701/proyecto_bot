@@ -1081,8 +1081,6 @@ init_bonus_feature(
     materials_url=MATERIALS_POST_URL,
     contact_url=CONTACT_URL,
     admin_chat_id=ADMIN_CHAT_ID,
-    friends_needed=2,
-    main_channel_override=None,  # 💬 если надо зафиксировать = "@espanolingooo"
 )
 
 
