@@ -481,8 +481,14 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
             options = options[:10]
             if not options:
                 continue
-            if correct >= len(options):
-                correct = 0
+            # 💬 перемешиваем варианты, чтобы правильный не был всегда первым
+            try:
+                correct_value = options[correct]
+                random.shuffle(options)
+                correct = options.index(correct_value)
+            except Exception:
+                pass
+
 
             rt.event.clear()
             rt.current_poll_id = None
@@ -680,7 +686,7 @@ async def _start_battle_with_topic(message: Message, state: FSMContext, bot: Bot
 # ─────────────────────────────────────────────────────────
 # 🎯 Выбор темы
 # ─────────────────────────────────────────────────────────
-@router.callback_query(StateFilter(Battle.Future, Battle.Result), F.data.startswith("battle:topic:"))
+@router.callback_query(StateFilter(None, Battle.Future, Battle.Result), F.data.startswith("battle:topic:"))  # 💬 ловим клик даже если FSM пустой после рестарта
 async def battle_choose_topic(callback: CallbackQuery, state: FSMContext, bot: Bot):
     await callback.answer()
 
@@ -691,6 +697,8 @@ async def battle_choose_topic(callback: CallbackQuery, state: FSMContext, bot: B
         pass
 
     topic_key = callback.data.split("battle:topic:", 1)[1]
+    await state.update_data(battle_last_topic=topic_key)  # 💬 сохраняем выбор темы сразу при клике
+
     await _start_battle_with_topic(callback.message, state, bot, callback.from_user.id, topic_key)  # 💬 старт боя по выбранной теме
 
 
