@@ -400,120 +400,120 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
         reply_markup=_stop_kb(),
     )
     rt.score_msg_id = score_msg.message_id
-
-    # 💬 вопросы
-topic = _get_battle_source().get(rt.topic_key, {}) or {}  # 💬 берём квизы из battle темы
-quiz_list = _collect_poll_quizzes(topic)  # 💬 по порядку, без shuffle
-
-# 💬 сколько вопросов реально успеем за BATTLE_DURATION_S
-n = min(len(quiz_list), MAX_QUESTIONS_PER_BATTLE)
-
-for i in range(n):
-    if rt.stop or _left_seconds(rt) <= 0:
-        break
-
-    round_started = time.monotonic()  # 💬 фиксируем слот раунда, чтобы не спамить poll’ами
-
-    q = quiz_list[i]
-    question = (q.get("question") or "Вопрос").strip()
-    options = list(q.get("options") or [])
-    correct = int(q.get("correct_index") or 0)
-
-    # 💬 Telegram = максимум 10 вариантов
-    options = options[:10]
-    if correct >= len(options):
-        correct = 0
-
-    rt.event.clear()
-    rt.current_poll_id = None
-    rt.chosen_option = None
-
-    poll_msg = await _safe_send_poll(bot, chat_id, question, options, correct)  # 💬 безопасная отправка poll
-    if not poll_msg:
-        break  # 💬 если Telegram не дал отправить = выходим и финализируем бой
-
-    rt.current_poll_id = poll_msg.poll.id
-    rt.poll_msg_ids.append(poll_msg.message_id)
-
-    # 💬 ждём ответ или таймаут
-    try:
-        await asyncio.wait_for(rt.event.wait(), timeout=POLL_TIME_S + 1)
-    except asyncio.TimeoutError:
-        pass
-
-    # 💬 проверяем ответ
-    if rt.chosen_option is not None and rt.chosen_option == correct:
-        rt.user_score += 1
-
-    # 💬 обновляем scoreboard
-    await _safe_edit_score(bot, chat_id, rt)  # 💬 безопасное обновление scoreboard
-
-    # 💬 чистим poll чтобы чат не захламлять
-    await _safe_delete(bot, chat_id, poll_msg.message_id)
-
-    # 💬 добиваем слот раунда до POLL_TIME_S, чтобы быстрые ответы не ломали бой лимитами Telegram
-    elapsed = time.monotonic() - round_started
-    if elapsed < POLL_TIME_S:
-        await asyncio.sleep(POLL_TIME_S - elapsed)
-
-
-    # 💬 стопаем и финализируем
-    rt.stop = True
-
-    # 💬 убираем stop клавиатуру
-    try:
-        await bot.send_message(chat_id, "\u00AD", reply_markup=ReplyKeyboardRemove())
-    except Exception:
-        pass
-
-    # 💬 результат
-    win = rt.user_score > rt.bot_score
-    draw = rt.user_score == rt.bot_score
-
-    header = "🏁 <b>Финиш</b>\n"
-    if draw:
-        header += "🤝 <b>Ничья</b>\n\n"
-    elif win:
-        header += "🏆 <b>Победа</b>\n\n"
-    else:
-        header += "😈 <b>Поражение</b>\n\n"
-
-    result_text = (
-        header
-        + f"👤 Ты: <b>{rt.user_score}</b>\n"
-        + f"🤖 {rt.opponent_name}: <b>{rt.bot_score}</b>\n\n"
-        + f"💰 Очки в копилку: <b>+{rt.user_score}</b>"
-    )
-
-    # 💬 сохраняем очки
-    bd = load_battle_data()
-    uid = str(user_id)
-    u = bd.setdefault(uid, {})
-    u["total_points"] = int(u.get("total_points", 0)) + int(rt.user_score)
-    u["wins"] = int(u.get("wins", 0)) + (1 if win else 0)
-    u["losses"] = int(u.get("losses", 0)) + (1 if (not win and not draw) else 0)
-    u["draws"] = int(u.get("draws", 0)) + (1 if draw else 0)
-
-    by_topic = u.setdefault("by_topic", {})
-    t = by_topic.setdefault(rt.topic_key, {})
-    t["points"] = int(t.get("points", 0)) + int(rt.user_score)
-    t["wins"] = int(t.get("wins", 0)) + (1 if win else 0)
-    t["losses"] = int(t.get("losses", 0)) + (1 if (not win and not draw) else 0)
-    t["draws"] = int(t.get("draws", 0)) + (1 if draw else 0)
-
-    u["last_played"] = int(time.time())
-    save_battle_data(bd)
-
-    # 💬 кнопки результата
-    res_msg = await bot.send_message(
-        chat_id=chat_id,
-        text=result_text,
-        parse_mode="HTML",
-        reply_markup=_result_kb(),
-    )
-
-    await state.set_state(Battle.Result)
-    await state.update_data(battle_last_topic=rt.topic_key, battle_last_result_msg_id=res_msg.message_id)
+    
+        # 💬 вопросы
+    topic = _get_battle_source().get(rt.topic_key, {}) or {}  # 💬 берём квизы из battle темы
+    quiz_list = _collect_poll_quizzes(topic)  # 💬 по порядку, без shuffle
+    
+    # 💬 сколько вопросов реально успеем за BATTLE_DURATION_S
+    n = min(len(quiz_list), MAX_QUESTIONS_PER_BATTLE)
+    
+    for i in range(n):
+        if rt.stop or _left_seconds(rt) <= 0:
+            break
+    
+        round_started = time.monotonic()  # 💬 фиксируем слот раунда, чтобы не спамить poll’ами
+    
+        q = quiz_list[i]
+        question = (q.get("question") or "Вопрос").strip()
+        options = list(q.get("options") or [])
+        correct = int(q.get("correct_index") or 0)
+    
+        # 💬 Telegram = максимум 10 вариантов
+        options = options[:10]
+        if correct >= len(options):
+            correct = 0
+    
+        rt.event.clear()
+        rt.current_poll_id = None
+        rt.chosen_option = None
+    
+        poll_msg = await _safe_send_poll(bot, chat_id, question, options, correct)  # 💬 безопасная отправка poll
+        if not poll_msg:
+            break  # 💬 если Telegram не дал отправить = выходим и финализируем бой
+    
+        rt.current_poll_id = poll_msg.poll.id
+        rt.poll_msg_ids.append(poll_msg.message_id)
+    
+        # 💬 ждём ответ или таймаут
+        try:
+            await asyncio.wait_for(rt.event.wait(), timeout=POLL_TIME_S + 1)
+        except asyncio.TimeoutError:
+            pass
+    
+        # 💬 проверяем ответ
+        if rt.chosen_option is not None and rt.chosen_option == correct:
+            rt.user_score += 1
+    
+        # 💬 обновляем scoreboard
+        await _safe_edit_score(bot, chat_id, rt)  # 💬 безопасное обновление scoreboard
+    
+        # 💬 чистим poll чтобы чат не захламлять
+        await _safe_delete(bot, chat_id, poll_msg.message_id)
+    
+        # 💬 добиваем слот раунда до POLL_TIME_S, чтобы быстрые ответы не ломали бой лимитами Telegram
+        elapsed = time.monotonic() - round_started
+        if elapsed < POLL_TIME_S:
+            await asyncio.sleep(POLL_TIME_S - elapsed)
+    
+    
+        # 💬 стопаем и финализируем
+        rt.stop = True
+    
+        # 💬 убираем stop клавиатуру
+        try:
+            await bot.send_message(chat_id, "\u00AD", reply_markup=ReplyKeyboardRemove())
+        except Exception:
+            pass
+    
+        # 💬 результат
+        win = rt.user_score > rt.bot_score
+        draw = rt.user_score == rt.bot_score
+    
+        header = "🏁 <b>Финиш</b>\n"
+        if draw:
+            header += "🤝 <b>Ничья</b>\n\n"
+        elif win:
+            header += "🏆 <b>Победа</b>\n\n"
+        else:
+            header += "😈 <b>Поражение</b>\n\n"
+    
+        result_text = (
+            header
+            + f"👤 Ты: <b>{rt.user_score}</b>\n"
+            + f"🤖 {rt.opponent_name}: <b>{rt.bot_score}</b>\n\n"
+            + f"💰 Очки в копилку: <b>+{rt.user_score}</b>"
+        )
+    
+        # 💬 сохраняем очки
+        bd = load_battle_data()
+        uid = str(user_id)
+        u = bd.setdefault(uid, {})
+        u["total_points"] = int(u.get("total_points", 0)) + int(rt.user_score)
+        u["wins"] = int(u.get("wins", 0)) + (1 if win else 0)
+        u["losses"] = int(u.get("losses", 0)) + (1 if (not win and not draw) else 0)
+        u["draws"] = int(u.get("draws", 0)) + (1 if draw else 0)
+    
+        by_topic = u.setdefault("by_topic", {})
+        t = by_topic.setdefault(rt.topic_key, {})
+        t["points"] = int(t.get("points", 0)) + int(rt.user_score)
+        t["wins"] = int(t.get("wins", 0)) + (1 if win else 0)
+        t["losses"] = int(t.get("losses", 0)) + (1 if (not win and not draw) else 0)
+        t["draws"] = int(t.get("draws", 0)) + (1 if draw else 0)
+    
+        u["last_played"] = int(time.time())
+        save_battle_data(bd)
+    
+        # 💬 кнопки результата
+        res_msg = await bot.send_message(
+            chat_id=chat_id,
+            text=result_text,
+            parse_mode="HTML",
+            reply_markup=_result_kb(),
+        )
+    
+        await state.set_state(Battle.Result)
+        await state.update_data(battle_last_topic=rt.topic_key, battle_last_result_msg_id=res_msg.message_id)
 
 
 # ─────────────────────────────────────────────────────────
