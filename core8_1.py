@@ -3016,9 +3016,8 @@ async def mywords_add_choose_cat_cb(callback: CallbackQuery, state: FSMContext):
     txt = (
         f"➕ Добавить слово\n\n"
         f"Категория: *{category}*\n\n"
-        f"Отправь аот так: ES - RU\n"
+        f"Отправь вот так: ES - RU\n"
         f"Пример: *Comer - Кушать*"
-        f"*Comer - Кушать*"
     )  # 💬 показываем пример формата ввода
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
