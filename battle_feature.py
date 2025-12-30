@@ -33,10 +33,14 @@ router = Router()
 CONTACT_URL: str = ""
 MATERIALS_POST_URL: str = ""
 
-def set_battle_links(contact_url: str, materials_url: str) -> None:
-    global CONTACT_URL, MATERIALS_POST_URL
+BOT_USERNAME: str = ""  # 💬 username бота без @, для deep-link приглашения
+
+def set_battle_links(contact_url: str, materials_url: str, bot_username: str = "") -> None:
+    global CONTACT_URL, MATERIALS_POST_URL, BOT_USERNAME
     CONTACT_URL = contact_url or ""
     MATERIALS_POST_URL = materials_url or ""  # 💬 чтобы кнопки меню работали
+    BOT_USERNAME = (bot_username or "").replace("@", "").strip()  # 💬 сохраним username для ссылки приглашения
+
 
 def _battle_main_menu_kb() -> InlineKeyboardMarkup:
     # 💬 главное меню, чтобы после выхода из битвы кнопки сразу работали
@@ -193,8 +197,20 @@ def _result_kb() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="🔁 Реванш", callback_data="battle:rematch"),
             InlineKeyboardButton(text="🏠 В меню", callback_data="battle:menu"),
+        ],
+        [
+            InlineKeyboardButton(text="📨 Отправить запрос другу", url=_share_invite_url())
         ]
-    ])
+    ])  # 💬 добавили кнопку "поделиться" через Telegram share
+
+def _share_invite_url() -> str:
+    # 💬 открывает системное окно "Поделиться" в Telegram
+    text = "⚔️ Сыграем битву? Жми и выбирай тему!"
+    if BOT_USERNAME:
+        deep = f"https://t.me/{BOT_USERNAME}?start=battle"  # 💬 deep-link в бота (можно поменять payload позже)
+        return f"https://t.me/share/url?url={quote(deep)}&text={quote(text)}"
+    return f"https://t.me/share/url?text={quote(text)}"  # 💬 если username не передали = делимся только текстом
+
 
 def _topics_kb(topic_keys: List[str]) -> InlineKeyboardMarkup:
     rows = rows = []
