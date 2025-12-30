@@ -7,6 +7,8 @@ from math import ceil
 from urllib.parse import quote
 
 from aiogram import Router, F
+from aiogram.filters import Command  # 💬 команды типа /refstats
+
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -575,3 +577,134 @@ async def bonuses_admin_actions(callback: CallbackQuery):
         except Exception:
             pass
         return
+
+
+
+@router.message(Command("refstats"))
+async def refstats_cmd(message: Message):
+    # 💬 что делает эта часть: админ-команда статистики по рефералке
+    if _admin_chat_id is None:
+        return await message.answer("⚠️ ADMIN_CHAT_ID не настроен.")
+
+    # 💬 защита: только админ (либо в админ-чате, либо от админ-юзера)
+    if str(message.chat.id) != str(_admin_chat_id) and str(message.from_user.id) != str(_admin_chat_id):
+        return await message.answer("⛔ Команда доступна только админу.")
+
+    if not callable(_load_user_data):
+        return await message.answer("⚠️ load_user_data не подключён.")
+
+    data = _load_user_data() or {}
+
+    # 💬 аргумент: /refstats <inviter_id>
+    parts = (message.text or "").split(maxsplit=1)
+    target_inviter = parts[1].strip() if len(parts) > 1 else ""
+
+    # 💬 строим map inviter_id -> списки приглашённых
+    inviter_map: dict[str, dict[str, list[str]]] = {}
+    for uid, u in data.items():
+        inviter = str(u.get("referred_by") or "").strip()
+        if not inviter:
+            continue
+
+        st = (u.get("ref_status") or "clicked").strip()
+        bucket = "clicked" if st != "qualified" else "qualified"
+
+        inv = inviter_map.setdefault(inviter, {"clicked": [], "qualified": []})
+        inv[bucket].append(str(uid))
+
+    def _user_label(user_id: str) -> str:
+        u = data.get(str(user_id), {}) or {}
+        name = (u.get("name") or "").strip()
+        tg = (u.get("tg_username") or "").strip()
+        if tg:
+            return f"{tg} ({user_id})"
+        if name:
+            return f"{name} ({user_id})"
+        return f"{user_id}"
+
+    # =========================
+    # 1) ДЕТАЛЬНО ПО КОНКРЕТНОМУ
+    # =========================
+    if target_inviter:
+        inv_id = target_inviter
+        inv_data = inviter_map.get(inv_id, {"clicked": [], "qualified": []})
+
+        inviter_u = data.get(inv_id, {}) or {}
+        rb = _ensure_ref_bonus(inviter_u)
+        _reset_cycle_if_expired(rb)
+
+        qualified_cnt = int(rb.get("qualified", 0))
+        stars = int(rb.get("stars", 0))
+        days_left = _time_left_days(rb)
+        pending = inviter_u.get("ref_pending", []) or []
+        qualified_users = rb.get("qualified_users", []) or []
+
+        text_out = (
+            f"📊 <b>Реф-статистика</b>\n"
+            f"Пригласивший = {_user_label(inv_id)}\n\n"
+            f"👥 Засчитано = <b>{qualified_cnt}</b>\n"
+            f"⭐ Звёзды = <b>{stars}</b>\n"
+            f"⏳ До сброса = <b>{days_left}</b> дней\n\n"
+            f"🟡 Нажали Start (clicked) = <b>{len(inv_data['clicked'])}</b>\n"
+            f"🟢 Засчитаны (qualified) = <b>{len(inv_data['qualified'])}</b>\n\n"
+            "🟡 Список clicked:\n"
+        )
+
+        if inv_data["clicked"]:
+            text_out += "\n".join([f"• {_user_label(x)}" for x in inv_data["clicked"][:50]])
+        else:
+            text_out += "• нет"
+
+        text_out += "\n\n🟢 Список qualified:\n"
+        if inv_data["qualified"]:
+            text_out += "\n".join([f"• {_user_label(x)}" for x in inv_data["qualified"][:50]])
+        else:
+            text_out += "• нет"
+
+        # 💬 показываем внутренние списки (на случай расхождений)
+        text_out += "\n\n(внутренние списки)\n"
+        text_out += f"pending = {len(pending)}\n"
+        text_out += f"qualified_users = {len(qualified_users)}\n"
+
+        return await message.answer(text_out)
+
+    # =========================
+    # 2) ОБЩАЯ СВОДКА ПО ВСЕМ
+    # =========================
+    rows = []
+    for inv_id, grp in inviter_map.items():
+        inviter_u = data.get(inv_id, {}) or {}
+        rb = _ensure_ref_bonus(inviter_u)
+        _reset_cycle_if_expired(rb)
+
+        rows.append({
+            "inv_id": inv_id,
+            "clicked": len(grp["clicked"]),
+            "qualified": len(grp["qualified"]),
+            "stars": int(rb.get("stars", 0)),
+            "days_left": _time_left_days(rb),
+        })
+
+    # 💬 сортировка по засчитанным, затем по кликам
+    rows.sort(key=lambda r: (r["qualified"], r["clicked"]), reverse=True)
+
+    if not rows:
+        return await message.answer("Пока нет реф-переходов.")
+
+    lines = ["📊 <b>Реф-статистика (сводка)</b>\n"]
+    for r in rows[:30]:
+        lines.append(
+            f"• {_user_label(r['inv_id'])}\n"
+            f"  clicked={r['clicked']} | qualified={r['qualified']} | ⭐{r['stars']} | ⏳{r['days_left']}д\n"
+            f"  /refstats {r['inv_id']}"
+        )
+
+    return await message.answer("\n".join(lines))
+
+
+
+
+
+
+
+
