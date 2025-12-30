@@ -403,14 +403,19 @@ class LoggingMiddleware(BaseMiddleware):
                 except Exception:
                     pass
 
-            # 💬 отправляем админу хендлеры + тему, где упало
-            await bot.send_message(
-                ADMIN_CHAT_ID,
-                f"🔴 Ошибка в `{curr}` (prev: `{prev}`)\n"
-                f"📌 Тема: `{topic_name}` ({topic_key})"
-            )
 
-            raise
+            # 💬 отправляем админу хендлеры + тему, где упало (не мешаем запуску, если Telegram ругается)
+            try:
+                await bot.send_message(
+                    ADMIN_CHAT_ID,
+                    f"🔴 Ошибка в `{curr}` (prev: `{prev}`)\n"
+                    f"📌 Тема: `{topic_name}` ({topic_key})"
+                )
+            except TelegramBadRequest:
+                pass  # 💬 если админ-лог нельзя отправить (topic/thread), не валим бота
+
+            raise  # 💬 сохраняем исходное падение, чтобы увидеть настоящую причину
+
 
 
 # 💬 Регистрируем Middleware
