@@ -1042,12 +1042,17 @@ async def battle_close(callback: CallbackQuery, state: FSMContext):
         pass
 
     # 💬 имитируем ваш стандартный выход через стикер на пару секунд
-    sticker_id = "CAACAgIAAxkBAAIB4mX2xgAB3z0h9xL8yXrKpYJxOQAB1wAC0QADVp29Cq9VdYdZLwQnNgQ"
-    st = await callback.message.answer_sticker(sticker_id)
-    await asyncio.sleep(2.5)
     try:
-        await st.delete()
+        sticker_id = "CAACAgIAAxkBAAIB4mX2xgAB3z0h9xL8yXrKpYJxOQAB1wAC0QADVp29Cq9VdYdZLwQnNgQ"
+        st = await callback.message.answer_sticker(sticker_id)  # 💬 показываем стикер, но не падаем если Telegram ругнётся
+        await asyncio.sleep(2.5)
+        try:
+            await st.delete()
+        except TelegramBadRequest:
+            pass
     except TelegramBadRequest:
+        pass
+    except Exception:
         pass
 
     # 💬 важно: ставим состояние главного меню строкой (без импорта, чтобы не было circular import)
