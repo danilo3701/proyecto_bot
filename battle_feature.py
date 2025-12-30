@@ -357,6 +357,29 @@ async def _safe_edit_score(bot: Bot, chat_id: int, rt: BattleRuntime) -> None:
                 return
 
 
+async def _safe_refresh_scoreboard(bot: Bot, chat_id: int, rt: BattleRuntime) -> None:
+    # 💬 что делает эта часть: удаляет старый scoreboard и отправляет новый, чтобы он был "свежим" сообщением
+    async with rt.edit_lock:  # 💬 защита от гонки с _tick_loop (одновременный edit/delete)
+        if rt.score_msg_id:
+            await _safe_delete(bot, chat_id, rt.score_msg_id)  # 💬 удаляем старый scoreboard
+
+        for _ in range(2):
+            try:
+                msg = await bot.send_message(
+                    chat_id=chat_id,
+                    text=_format_score(rt),
+                    parse_mode="HTML",
+                    reply_markup=_stop_kb(),
+                )
+                rt.score_msg_id = msg.message_id  # 💬 запоминаем новый id scoreboard
+                return
+            except TelegramRetryAfter as e:
+                await asyncio.sleep(float(e.retry_after))  # 💬 ждём лимит Telegram
+            except Exception:
+                return
+
+
+
 async def _safe_send_poll(bot: Bot, chat_id: int, question: str, options: List[str], correct: int, open_period: int = POLL_TIME_S):
     # 💬 что делает эта часть: отправляет poll и переживает RetryAfter
     for _ in range(2):
@@ -489,11 +512,12 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
             else:
                 rt.streak = 0  # 💬 ошибка или таймаут = серия обнуляется
 
-            await _safe_edit_score(bot, chat_id, rt)  # 💬 обновляем scoreboard после каждого poll
-
-
             # 💬 сразу убираем poll после ответа (или таймаута)
             await _safe_delete(bot, chat_id, poll_msg.message_id)
+
+            # 💬 обновляем scoreboard после каждого poll (пересоздаём, чтобы таймер и счёт были видны сразу)
+            await _safe_refresh_scoreboard(bot, chat_id, rt)
+
 
             # 💬 минимальная пауза, чтобы не уткнуться в лимиты Telegram
             elapsed = time.monotonic() - round_started
