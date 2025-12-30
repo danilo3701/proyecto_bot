@@ -201,6 +201,13 @@ from topics.loader import load_topics                    # Функция чте
 from create_lesson_block import load_ads_data  # 💬 Функция загрузки рекламы из ads_data.json
 
 from battle_feature import router as battle_router, set_topics_ref, start_battle_from_lex_menu, set_battle_links  # 💬 модуль "Битва"
+from bonuses_feature import (
+    router as bonuses_router,
+    init_bonus_feature,
+    bonuses_open,
+    bonus_register_referral_from_start,
+    bonus_try_qualify_referral,
+)  # 💬 модуль «🎁 Бонусы»
 
 
 # ——— Сценарии для учеников ——————————————————————————————————————
@@ -269,6 +276,7 @@ dp         = Dispatcher(storage=MemoryStorage())
 # ——— Подключаем админские роутеры ————————————————————————————————
 dp.include_router(edit_topic_router)
 dp.include_router(battle_router)  # 💬 подключаем хендлеры "Битвы"
+dp.include_router(bonuses_router)  # 💬 подключаем хендлеры «Бонусы»
 dp.include_router(create_topic_router)
 
 # 💬 что делает эта часть: копируем темы из Railway Volume (/data/topics) в локальную ./topics,
@@ -1064,6 +1072,20 @@ class LessonStates(StatesGroup):
 
 
 
+# 💬 инициализация модуля «🎁 Бонусы» (рефералка + заявки)
+init_bonus_feature(
+    load_user_data=load_user_data,
+    save_user_data=save_user_data,
+    load_subscription_channels=load_subscription_channels,
+    LessonStates=LessonStates,
+    materials_url=MATERIALS_POST_URL,
+    contact_url=CONTACT_URL,
+    admin_chat_id=ADMIN_CHAT_ID,
+    friends_needed=2,
+    main_channel_override=None,  # 💬 если надо зафиксировать = "@espanolingooo"
+)
+
+
 
 
 # ─── УТИЛИТЫ XP ───────────────────────────────────────
@@ -1413,6 +1435,15 @@ async def start_handler(message: Message, state: FSMContext):
     if message.from_user.username:
         u.setdefault("tg_username", "@" + message.from_user.username)
 
+    # 💬 фиксируем рефералку из /start ref_<id>
+    payload = None
+    if message.text:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) > 1:
+            payload = parts[1].strip()
+    bonus_register_referral_from_start(user_id, payload)  # 💬 сохраняем, кто пригласил пользователя
+
+
     # 💬 ГАРАНТИРУЕМ поля для тем и подписок
     u.setdefault("unlocked_topics", [])  # ключи открытых тем
     u.setdefault("channels", {})         # история подписок по каналам
@@ -1508,6 +1539,8 @@ async def start_handler(message: Message, state: FSMContext):
             InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
             InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL)
         ],
+        [InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses")],  # 💬 открываем рефералку
+
 
         [InlineKeyboardButton(text="⚔️ Битва",   callback_data="menu:battle"),
          InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords")],
@@ -1608,6 +1641,11 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
     if action == "mywords":
         await callback.answer()
         return await mywords_menu(callback.message, state)  # 💬 открываем «Мои слова»
+
+    if action == "bonuses":
+        await callback.answer()
+        return await bonuses_open(callback.message, state)  # 💬 открываем «Бонусы»
+
 
     # 📚 УЧИТЬСЯ — показываем выбор уровня (категорию выберем позже внутри уровня)
     if action == "learn":
@@ -7441,6 +7479,12 @@ async def check_subscription(query: CallbackQuery, state: FSMContext):
     
 
     save_user_data(data)
+
+    try:
+        bonus_try_qualify_referral(uid, required)  # 💬 если пришёл по реф-ссылке = засчитываем приглашение
+    except Exception:
+        logging.exception("bonus_try_qualify_referral failed")
+
 
     # 3) Возвращаемся в меню урока
     return await lesson_menu_handler(query.message, state)
