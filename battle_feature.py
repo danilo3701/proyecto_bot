@@ -97,7 +97,7 @@ class BattleTopicsAdmin(StatesGroup):
 # ⚙️ Константы
 # ─────────────────────────────────────────────────────────
 BATTLE_DURATION_S = 60
-BOT_SCORE_EVERY_S = 7
+BOT_SCORE_EVERY_S = 5
 POLL_TIME_S = 7
 MAX_QUESTIONS_PER_BATTLE = max(1, BATTLE_DURATION_S // POLL_TIME_S)  # 💬 сколько раундов влезает в бой
 STOP_TEXT = "⛔ Stop"
