@@ -325,7 +325,7 @@ async def bonuses_open(message: Message, state):
         "2 друга = 15⭐\n"
         "3 друга = 25⭐\n"
         "5 друзей = 50⭐\n\n"
-        f"Проверяем только подписку на {main_ch}\n"
+
     )
 
     _save_user_data(data)
