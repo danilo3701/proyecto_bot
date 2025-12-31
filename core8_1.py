@@ -32,6 +32,7 @@ from aiogram.filters import CommandStart, StateFilter
 from aiogram.filters import Command # /start
 from aiogram.types import ReactionTypeEmoji  # 💬 тип реакции-эмоджи для setMessageReaction
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramNetworkError  # 💬 ловим сетевые таймауты Telegram при отправке репортов
 from aiogram.types import Chat, User
 from aiogram.types import Message
 from aiogram.types import (
@@ -435,9 +436,14 @@ class LoggingMiddleware(BaseMiddleware):
             admin_text = "\n".join(admin_lines)
 
             try:
-                await bot.send_message(ADMIN_CHAT_ID, admin_text)
-            except TelegramBadRequest:
-                pass
+                await bot.send_message(
+                    ADMIN_CHAT_ID,
+                    admin_text,
+                    request_timeout=120
+                )  # 💬 увеличиваем таймаут, чтобы не падать на сетевых лагов Telegram
+            except (TelegramBadRequest, TelegramNetworkError, asyncio.TimeoutError):
+                pass  # 💬 если Telegram тупит/таймаутит = не роняем бота из-за репорта админу
+
 
             # 2) 💬 сообщение пользователю + кнопка связи (и гасим “loading…” у callback)
             try:
