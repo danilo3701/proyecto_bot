@@ -23,6 +23,52 @@ import asyncio  # 💬 нужен для asyncio.TimeoutError
 
 router = Router()
 
+# ===== SAFE TELEGRAM WRAPPERS =====
+
+async def _safe_cb_answer(callback: CallbackQuery, text: str | None = None, *, show_alert: bool = False) -> None:
+    # 💬 что делает эта часть: гасим "loading…" и не падаем на Telegram таймаутах
+    try:
+        await callback.answer(text or "", show_alert=show_alert, request_timeout=60)
+    except (TelegramNetworkError, asyncio.TimeoutError):
+        pass
+
+
+async def _safe_edit_or_answer(message: Message, text: str, reply_markup=None) -> None:
+    # 💬 что делает эта часть: пробуем edit_text, иначе answer, и игнорируем сетевые лаги Telegram
+    try:
+        await message.edit_text(text, reply_markup=reply_markup, request_timeout=60)
+        return
+    except (TelegramBadRequest, TelegramNetworkError, asyncio.TimeoutError):
+        pass
+
+    try:
+        await message.answer(text, reply_markup=reply_markup, request_timeout=60)
+    except (TelegramNetworkError, asyncio.TimeoutError):
+        pass
+
+
+def _split_text(text: str, limit: int = 3800) -> list[str]:
+    # 💬 что делает эта часть: режем длинный текст, чтобы не ловить TelegramBadRequest (4096)
+    chunks = []
+    buf = ""
+    for line in (text or "").split("\n"):
+        if len(buf) + len(line) + 1 > limit:
+            chunks.append(buf)
+            buf = line
+        else:
+            buf = f"{buf}\n{line}".strip() if buf else line
+    if buf:
+        chunks.append(buf)
+    return chunks
+
+
+async def _safe_send_long(message: Message, text: str) -> None:
+    # 💬 что делает эта часть: отправляем длинное сообщение кусками
+    for chunk in _split_text(text):
+        try:
+            await message.answer(chunk, request_timeout=60)
+        except (TelegramNetworkError, asyncio.TimeoutError, TelegramBadRequest):
+            break
 
 
 
@@ -314,7 +360,6 @@ async def bonuses_open(message: Message, state):
     days_left = _time_left_days(rb)
     main_ch = _get_main_channel()
 
-    target = _next_target(qualified)
 
     # 💬 что делает эта часть: показываем только счётчики и награды (без целей/статусов)
     text_out = (
@@ -334,14 +379,8 @@ async def bonuses_open(message: Message, state):
 
     kb = _build_bonuses_kb(uid)
 
-    try:
-        await message.edit_text(text_out, reply_markup=kb, request_timeout=60)
-    except (TelegramBadRequest, TelegramNetworkError, asyncio.TimeoutError):
-        try:
-            await message.answer(text_out, reply_markup=kb, request_timeout=60)
-        except (TelegramNetworkError, asyncio.TimeoutError):
-            pass  # 💬 сеть легла = не роняем модуль бонусов
-)
+    await _safe_edit_or_answer(message, text_out, reply_markup=kb)  # 💬 безопасная отрисовка экрана бонусов
+
 
 
     if _LessonStates:
@@ -350,23 +389,16 @@ async def bonuses_open(message: Message, state):
         except Exception:
             pass
 
-
 @router.callback_query(F.data == "bonuses:refresh")
 async def bonuses_refresh(callback: CallbackQuery, state):
-    # 💬 что делает эта часть: безопасно гасим "loading…" и не роняем бота при сетевых таймаутах Telegram
-    try:
-        await callback.answer(request_timeout=60)
-    except (TelegramNetworkError, asyncio.TimeoutError):
-        pass
+    # 💬 что делает эта часть: обновляем экран и не падаем на таймаутах Telegram
+    await _safe_cb_answer(callback)
 
-    try:
-        return await bonuses_open(callback.message, state)  # 💬 перерисовываем экран
-    except (TelegramNetworkError, asyncio.TimeoutError):
-        try:
-            await callback.message.answer("⚠️ Telegram тормозит. Нажми «Обновить» ещё раз.", request_timeout=60)
-        except Exception:
-            pass
-        return
+    if not getattr(callback, "message", None):
+        return  # 💬 иногда message отсутствует
+
+    return await bonuses_open(callback.message, state)  # 💬 перерисовываем экран
+
 
 
 
