@@ -397,32 +397,97 @@ class LoggingMiddleware(BaseMiddleware):
             # 💬 берём последние два имени из handler_history
             curr = handler_history[-1] if handler_history else "unknown"
             prev = handler_history[-2] if len(handler_history) >= 2 else "none"
-            # 💬 отправляем админу только названия хендлеров
-            # 💬 пытаемся вытащить тему из FSM (если есть)
-            topic_key = "unknown"
-            topic_name = "unknown"
+
+            # 💬 тема из FSM (если есть) = но показываем только если реально известна
+            topic_key = None
+            topic_name = None
             st = data.get("state")
             if st:
                 try:
                     st_data = await st.get_data()
-                    topic_key = st_data.get("selected_topic", "unknown")
-                    info = topics.get(topic_key, {}) if isinstance(topics, dict) else {}
-                    topic_name = info.get("title") or info.get("name") or topic_key
+                    tk = st_data.get("selected_topic")
+                    if tk and tk != "unknown":
+                        info = topics.get(tk, {}) if isinstance(topics, dict) else {}
+                        tn = info.get("title") or info.get("name") or tk
+                        if tn and tn != "unknown":
+                            topic_key = tk
+                            topic_name = tn
                 except Exception:
                     pass
 
-
-            # 💬 отправляем админу хендлеры + тему, где упало (не мешаем запуску, если Telegram ругается)
+            # 💬 ник админа берём из CONTACT_URL (https://t.me/Drancherrro) = получится @Drancherrro
+            admin_nick = "@admin"
             try:
-                await bot.send_message(
-                    ADMIN_CHAT_ID,
-                    f"🔴 Ошибка в `{curr}` (prev: `{prev}`)\n"
-                    f"📌 Тема: `{topic_name}` ({topic_key})"
-                )
-            except TelegramBadRequest:
-                pass  # 💬 если админ-лог нельзя отправить (topic/thread), не валим бота
+                if isinstance(CONTACT_URL, str) and "t.me/" in CONTACT_URL:
+                    admin_nick = "@" + CONTACT_URL.rstrip("/").split("/")[-1]
+            except Exception:
+                pass
 
-            raise  # 💬 сохраняем исходное падение, чтобы увидеть настоящую причину
+            # 1) 💬 сообщение админу
+            admin_lines = [
+                "🔴 Ошибка",
+                f"Где = `{curr}`",
+                f"Пред = `{prev}`",
+            ]
+            if topic_key and topic_name:
+                admin_lines.append(f"Тема = `{topic_name}` ({topic_key})")
+            admin_lines.append(f"Тип = `{err.__class__.__name__}`")
+            admin_text = "\n".join(admin_lines)
+
+            try:
+                await bot.send_message(ADMIN_CHAT_ID, admin_text)
+            except TelegramBadRequest:
+                pass
+
+            # 2) 💬 сообщение пользователю + кнопка связи (и гасим “loading…” у callback)
+            try:
+                chat_id = None
+
+                if isinstance(event, CallbackQuery):
+                    try:
+                        await event.answer("⚠️ Ошибка. Нажми /start.", show_alert=False)
+                    except Exception:
+                        pass
+                    if event.message:
+                        chat_id = event.message.chat.id
+
+                elif isinstance(event, Message):
+                    chat_id = event.chat.id
+
+                # fallback на случай других типов event
+                if not chat_id and getattr(event, "chat", None):
+                    chat_id = getattr(event.chat, "id", None)
+
+                if chat_id:
+                    report_lines = [
+                        "⚠️ Упс, произошла ошибка",
+                        "",
+                        "<pre>",
+                        f"Где = {curr}",
+                        f"Пред = {prev}",
+                    ]
+                    if topic_key and topic_name:
+                        report_lines.append(f"Тема = {topic_name} ({topic_key})")
+                    report_lines += [
+                        "</pre>",
+                        "",
+                        "Что делать",
+                        "1) Нажми /start",
+                        f"2) Если повторится = нажми кнопку ниже и отправь админу блок выше ({admin_nick})",
+                    ]
+
+                    kb = InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(text="✉️ Сообщить админу", url=CONTACT_URL)]
+                        ]
+                    )
+
+                    await bot.send_message(chat_id, "\n".join(report_lines), reply_markup=kb)
+
+            except Exception:
+                pass
+
+            raise
 
 
 
