@@ -313,17 +313,6 @@ async def bonuses_open(message: Message, state):
     main_ch = _get_main_channel()
 
     target = _next_target(qualified)
-    if qualified >= 5:
-        next_line = "Цель выполнена = 5 друзей"
-    else:
-        left = max(0, target - qualified)
-        next_line = f"До цели {target} = осталось {left} друг(а)"
-
-    claim_status = rb.get("claim_status")
-    if claim_status == "pending":
-        status_line = f"Статус = заявка отправлена ({int(rb.get('pending_stars', 0))}⭐)"
-    else:
-        status_line = "Статус = можно копить"
 
     text_out = (
         "🎁 <b>Бонусы</b>\n\n"
