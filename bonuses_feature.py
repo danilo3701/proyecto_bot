@@ -373,14 +373,14 @@ async def bonuses_open(message: Message, state):
 
 @router.callback_query(F.data == "bonuses:refresh")
 async def bonuses_refresh(callback: CallbackQuery, state):
-     _track("bonuses_refresh") 
+    _track("bonuses_refresh")  # 💬 фиксируем текущий хендлер для админ-логов
     await callback.answer()
     return await bonuses_open(callback.message, state)  # 💬 перерисовываем экран
 
 
 @router.callback_query(F.data == "bonuses:how")
 async def bonuses_how(callback: CallbackQuery):
-     _track("bonuses_refresh") 
+    _track("bonuses_how")  # 💬 фиксируем текущий хендлер для админ-логов
     # 💬 что делает эта часть: отдельная инструкция отдельной кнопкой
     await callback.answer()
 
@@ -388,11 +388,9 @@ async def bonuses_how(callback: CallbackQuery):
     text_out = (
         "ℹ️ <b>Инструкция</b>\n\n"
         "Как засчитывается друг:\n"
-        "1) Друг переходит по твоей ссылке и нажимает Start\n"
-        f"2) Подписывается на канал {main_ch}\n"
-        "3) Нажимает кнопку проверки подписки\n\n"
-        "Важно:\n"
-        "• XP не считаем, только подписку\n"
+        "Необходимо перейти по твоей ссылке "
+        f"И набрать 100 XP в любой теме\n"
+
         "• Накопление действует 7 дней, потом сброс\n"
     )
 
@@ -404,6 +402,7 @@ async def bonuses_how(callback: CallbackQuery):
         await callback.message.edit_text(text_out, reply_markup=kb)
     except TelegramBadRequest:
         await callback.message.answer(text_out, reply_markup=kb)
+
 
 
 @router.callback_query(F.data == "bonuses:locked")
@@ -438,7 +437,9 @@ async def bonuses_share(callback: CallbackQuery):
 
 
 def _build_main_menu_kb() -> InlineKeyboardMarkup:
-     _track("bonuses_refresh") 
+    _track("bonuses_build_main_menu_kb")  # 💬 фиксируем место сборки меню для админ-логов
+    # 💬 что делает эта часть: главное меню (для кнопки «Назад» из бонусов)
+
     # 💬 что делает эта часть: главное меню (для кнопки «Назад» из бонусов)
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📚 УЧИТЬСЯ",    callback_data="menu:learn")],
@@ -460,9 +461,10 @@ def _build_main_menu_kb() -> InlineKeyboardMarkup:
 
 @router.callback_query(F.data == "bonuses:back")
 async def bonuses_back(callback: CallbackQuery, state):
-     _track("bonuses_refresh") 
+    _track("bonuses_back")  # 💬 фиксируем текущий хендлер для админ-логов
     await callback.answer()
     kb = _build_main_menu_kb()
+
 
     try:
         await callback.message.edit_text("Что изучаем?⭐", reply_markup=kb)  # 💬 возвращаем главное меню
@@ -478,8 +480,9 @@ async def bonuses_back(callback: CallbackQuery, state):
 
 @router.callback_query(F.data == "bonuses:claim")
 async def bonuses_claim(callback: CallbackQuery, state):
-     _track("bonuses_refresh") 
+    _track("bonuses_claim")  # 💬 фиксируем текущий хендлер для админ-логов
     await callback.answer()
+
 
     if _admin_chat_id is None:
         return await callback.message.answer("⚠️ Админ-чат не настроен.")
@@ -546,8 +549,9 @@ async def bonuses_claim(callback: CallbackQuery, state):
 
 @router.callback_query(F.data.startswith("bonuses_admin:"))
 async def bonuses_admin_actions(callback: CallbackQuery):
-     _track("bonuses_refresh") 
+    _track("bonuses_admin_actions")  # 💬 фиксируем текущий хендлер для админ-логов
     await callback.answer()
+
 
     if _admin_chat_id is None:
         return
@@ -609,8 +613,9 @@ async def bonuses_admin_actions(callback: CallbackQuery):
 
 @router.message(Command("refstats"))
 async def refstats_cmd(message: Message):
-     _track("bonuses_refresh") 
+    _track("refstats_cmd")  # 💬 фиксируем текущий хендлер для админ-логов
     # 💬 что делает эта часть: админ-команда статистики по рефералке
+
     if _admin_chat_id is None:
         return await message.answer("⚠️ ADMIN_CHAT_ID не настроен.")
 
