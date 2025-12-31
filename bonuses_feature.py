@@ -17,6 +17,8 @@ from aiogram.types import (
     ReplyKeyboardRemove,
 )
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramNetworkError  # 💬 ловим таймауты Telegram
+import asyncio  # 💬 нужен для asyncio.TimeoutError
 
 
 router = Router()
@@ -333,9 +335,14 @@ async def bonuses_open(message: Message, state):
     kb = _build_bonuses_kb(uid)
 
     try:
-        await message.edit_text(text_out, reply_markup=kb)
-    except TelegramBadRequest:
-        await message.answer(text_out, reply_markup=kb)
+        await message.edit_text(text_out, reply_markup=kb, request_timeout=60)
+    except (TelegramBadRequest, TelegramNetworkError, asyncio.TimeoutError):
+        try:
+            await message.answer(text_out, reply_markup=kb, request_timeout=60)
+        except (TelegramNetworkError, asyncio.TimeoutError):
+            pass  # 💬 сеть легла = не роняем модуль бонусов
+)
+
 
     if _LessonStates:
         try:
@@ -346,9 +353,21 @@ async def bonuses_open(message: Message, state):
 
 @router.callback_query(F.data == "bonuses:refresh")
 async def bonuses_refresh(callback: CallbackQuery, state):
+    # 💬 что делает эта часть: безопасно гасим "loading…" и не роняем бота при сетевых таймаутах Telegram
+    try:
+        await callback.answer(request_timeout=60)
+    except (TelegramNetworkError, asyncio.TimeoutError):
+        pass
 
-    await callback.answer()
-    return await bonuses_open(callback.message, state)  # 💬 перерисовываем экран
+    try:
+        return await bonuses_open(callback.message, state)  # 💬 перерисовываем экран
+    except (TelegramNetworkError, asyncio.TimeoutError):
+        try:
+            await callback.message.answer("⚠️ Telegram тормозит. Нажми «Обновить» ещё раз.", request_timeout=60)
+        except Exception:
+            pass
+        return
+
 
 
 @router.callback_query(F.data == "bonuses:how")
