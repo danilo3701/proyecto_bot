@@ -21,6 +21,24 @@ from aiogram.exceptions import TelegramBadRequest
 
 router = Router()
 
+def _track(name: str) -> None:
+    # 💬 фиксируем текущий хендлер в handler_history, чтобы в Telegram пришло точное место ошибки
+    try:
+        import __main__ as main
+        hh = getattr(main, "handler_history", None)
+        if hh is not None:
+            hh.append(name)
+            return
+    except Exception:
+        pass
+
+    try:
+        from core8_1 import handler_history as hh
+        hh.append(name)
+    except Exception:
+        pass
+
+
 # 💬 зависимости подставляем из core8_1.py через init_bonus_feature()
 _load_user_data = None
 _save_user_data = None
@@ -289,6 +307,8 @@ def _build_bonuses_kb(user_id: str) -> InlineKeyboardMarkup:
 
 
 async def bonuses_open(message: Message, state):
+    _track("bonuses_open")  # 💬 фиксируем текущий хендлер для админ-логов
+
     # 💬 что делает эта часть: главный экран «🎁 Бонусы»
     if not callable(_load_user_data) or not callable(_save_user_data):
         return await message.answer("⚠️ Модуль «Бонусы» не инициализирован.")
@@ -353,12 +373,14 @@ async def bonuses_open(message: Message, state):
 
 @router.callback_query(F.data == "bonuses:refresh")
 async def bonuses_refresh(callback: CallbackQuery, state):
+     _track("bonuses_refresh") 
     await callback.answer()
     return await bonuses_open(callback.message, state)  # 💬 перерисовываем экран
 
 
 @router.callback_query(F.data == "bonuses:how")
 async def bonuses_how(callback: CallbackQuery):
+     _track("bonuses_refresh") 
     # 💬 что делает эта часть: отдельная инструкция отдельной кнопкой
     await callback.answer()
 
@@ -392,6 +414,7 @@ async def bonuses_locked(callback: CallbackQuery):
 
 @router.callback_query(F.data == "bonuses:share")
 async def bonuses_share(callback: CallbackQuery):
+     _track("bonuses_refresh") 
     await callback.answer()
     me = await callback.bot.get_me()  # 💬 берём @username бота
 
@@ -415,6 +438,7 @@ async def bonuses_share(callback: CallbackQuery):
 
 
 def _build_main_menu_kb() -> InlineKeyboardMarkup:
+     _track("bonuses_refresh") 
     # 💬 что делает эта часть: главное меню (для кнопки «Назад» из бонусов)
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📚 УЧИТЬСЯ",    callback_data="menu:learn")],
@@ -436,6 +460,7 @@ def _build_main_menu_kb() -> InlineKeyboardMarkup:
 
 @router.callback_query(F.data == "bonuses:back")
 async def bonuses_back(callback: CallbackQuery, state):
+     _track("bonuses_refresh") 
     await callback.answer()
     kb = _build_main_menu_kb()
 
@@ -453,6 +478,7 @@ async def bonuses_back(callback: CallbackQuery, state):
 
 @router.callback_query(F.data == "bonuses:claim")
 async def bonuses_claim(callback: CallbackQuery, state):
+     _track("bonuses_refresh") 
     await callback.answer()
 
     if _admin_chat_id is None:
@@ -520,6 +546,7 @@ async def bonuses_claim(callback: CallbackQuery, state):
 
 @router.callback_query(F.data.startswith("bonuses_admin:"))
 async def bonuses_admin_actions(callback: CallbackQuery):
+     _track("bonuses_refresh") 
     await callback.answer()
 
     if _admin_chat_id is None:
@@ -582,6 +609,7 @@ async def bonuses_admin_actions(callback: CallbackQuery):
 
 @router.message(Command("refstats"))
 async def refstats_cmd(message: Message):
+     _track("bonuses_refresh") 
     # 💬 что делает эта часть: админ-команда статистики по рефералке
     if _admin_chat_id is None:
         return await message.answer("⚠️ ADMIN_CHAT_ID не настроен.")
