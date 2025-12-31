@@ -1,0 +1,7901 @@
+# ProyectoBot/core8_1.py
+# файл коры
+
+# ================================================================================
+# 🟡 Импорты и константы для core8_1.py
+# ================================================================================
+
+# ——— Standard library ——————————————————————————————————————————————
+import os                           # Работа с файлами и папками
+# ⛔ Проверка отключения бота через переменну
+if os.getenv("DISABLED") == "true":
+    print("🚫 Бот временно отключён.")
+    exit()
+os.makedirs("/data", exist_ok=True)  # 💬 создаём папку Volume, если ещё не создана
+from pathlib import Path  # 💬 чтобы строить путь к файлу надёжно
+
+import json                         # Чтение/запись JSON-топиков
+import random                       # Рандомизация (CTA-фразы, сценарии, стикеры)
+import asyncio                      # Асинхронные паузы (smart_reply)
+import logging                      # Логирование для отладки
+import math
+import time
+import datetime
+import sys
+import traceback
+import re  # 💬 нужен для конвертации [[...]] → ||...||
+
+# ——— Aiogram core ————————————————————————————————————————————————
+from aiogram import Bot, Dispatcher, F                   # Bot/DP и фильтр F  
+from aiogram.client.default import DefaultBotProperties  # Настройки бота (HTML по умолчанию)
+from aiogram.filters import CommandStart, StateFilter
+from aiogram.filters import Command # /start
+from aiogram.types import ReactionTypeEmoji  # 💬 тип реакции-эмоджи для setMessageReaction
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import Chat, User
+from aiogram.types import Message
+from aiogram.types import (
+    Message,                       # 💬 тип сообщения
+    CallbackQuery,                 # 💬 для inline-callback
+    InlineKeyboardMarkup,          # 💬 для inline-клавиатур
+    InlineKeyboardButton,          # 💬 для кнопок в inline
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardRemove,
+    FSInputFile,
+    PollAnswer,
+    BotCommand,
+    ReactionTypeEmoji  # 💬 для реакций «🎉» на сообщение-квиз
+
+)
+
+# 💬 Уровни и медали для глобального прогресса
+LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
+XP_PER_LEVEL = 3000  # XP, необходимое для перехода на следующий уровень
+MEDALS = ["🥉", "🥈", "🥇"]  # бронза, серебро, золото
+
+
+# 💬 Короткий прогресс по уровню для главного меню и Level-Up
+def render_short_level_progress(user_id: int) -> str:
+    """
+    💬 Возвращает строку вида:
+        🧭 Explorador A1: 1 de 5 ⭐️
+        46% 🟩🟩🟩🟨⬜⬜⬜⬜⬜⬜
+    Основано на глобальном total_xp из xp_data.json.
+    """
+    xp_data = load_xp_data()
+    total_xp = xp_data.get(str(user_id), {}).get("total_xp", 0)
+
+    # Текущий уровень по глобальному XP
+    lvl_idx = total_xp // XP_PER_LEVEL if XP_PER_LEVEL else 0
+    if lvl_idx >= len(LEVELS):
+        lvl_idx = len(LEVELS) - 1
+    level_code = LEVELS[lvl_idx]
+
+    # Названия уровней (можно будет допилить/переименовать отдельно)
+    level_titles = {
+        "A1": "🧭 Explorador A1",
+        "A2": "🧭 Explorador A2",
+        "B1": "🚀 Pro B1",
+        "B2": "🚀 Pro B2",
+        "C1": "🎓 Maestro C1",
+        "C2": "🎓 Maestro C2",
+    }
+    title = level_titles.get(level_code, f"🧭 Explorador {level_code}")
+
+    # 5 ступенек внутри одного уровня
+    STEPS_PER_LEVEL = 5
+    xp_in_level = total_xp % XP_PER_LEVEL if XP_PER_LEVEL else 0
+
+    if XP_PER_LEVEL:
+        step_idx = min(
+            xp_in_level * STEPS_PER_LEVEL // XP_PER_LEVEL,
+            STEPS_PER_LEVEL - 1,
+        )
+        percent = int(xp_in_level * 100 / XP_PER_LEVEL)
+    else:
+        step_idx = 0
+        percent = 0
+
+    step_num = step_idx + 1  # от 1 до 5
+
+    # Прогресс-бар из 10 сегментов по проценту внутри уровня
+    segments = 10
+    if percent <= 0:
+        filled = 0
+    else:
+        filled = percent * segments // 100
+        if filled == 0:
+            filled = 1
+        if filled > segments:
+            filled = segments
+    empty = segments - filled
+
+    bar = "🟩" * filled + "⬜" * empty
+
+    return f"{title}: {step_num} de {STEPS_PER_LEVEL} ⭐️\n{percent}% {bar}"
+
+
+# 💬 минимальная задержка между удалением старого и показом нового квиза
+QUIZ_NEXT_DELAY = 0.35  # секунды; можно уменьшать до 0.25, но ниже 0.2 риск флуд-лимитов
+
+
+def check_subscription_kb(topic_key: str, channels: list[str]) -> InlineKeyboardMarkup:
+    """
+    💬 Инлайн-клавиатура для блока «Рекламная подписка».
+    - по одной URL-кнопке на каждый канал из списка `channels`
+    - ниже кнопка «✅ Проверить подписку»
+    - ещё ниже кнопка «⬅️ Назад» в меню
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+
+    # 💬 Кнопки-ссылки на каналы
+    for ch in channels:
+        if not ch:
+            continue
+        username = ch.lstrip("@")
+        rows.append([
+            InlineKeyboardButton(
+                text=ch,
+                url=f"https://t.me/{username}",  # 💬 переход на канал
+            )
+        ])
+
+    # 💬 Кнопка проверки подписки
+    rows.append([
+        InlineKeyboardButton(
+            text="✅ Проверить подписку",
+            callback_data=f"check_subscription:{topic_key}",
+        )
+    ])
+
+    # 💬 Кнопка «Назад»
+    rows.append([
+        InlineKeyboardButton(
+            text="⬅️ Назад",
+            callback_data="back_to_topics",
+        )
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+
+
+SUBSCRIPTION_CHANNELS_PATH = "subscription_channels.json"
+
+AD_SUBSCRIPTION_DAYS = 3  # 💬 срок действия рекламной подписки (в днях)
+
+# 💬 ссылки для кнопок в главном меню
+MATERIALS_POST_URL = "https://t.me/+TOHEAq_otQY5MWE0"  # 💬 ссылка на конкретный пост с материалами
+CONTACT_URL = "https://t.me/Drancherrro"            # 💬 ссылка на твой личный контакт
+
+
+def is_ad_subscription_active(user_id: int) -> bool:
+    # 💬 Проверяем, есть ли у пользователя активная рекламная подписка
+    data = load_user_data()
+    user = data.get(str(user_id), {})
+    ad = user.get("ad_subscription") or {}
+    now = int(time.time())
+    return ad.get("active_until", 0) > now
+
+def load_subscription_channels():
+    if not os.path.exists(SUBSCRIPTION_CHANNELS_PATH):
+        with open(SUBSCRIPTION_CHANNELS_PATH, "w", encoding="utf-8") as f:
+            json.dump({"channels": []}, f, ensure_ascii=False, indent=2)
+    with open(SUBSCRIPTION_CHANNELS_PATH, "r", encoding="utf-8") as f:
+        return json.load(f).get("channels", [])
+
+
+from aiogram.enums import ChatAction                    # Анимация “печатает…”
+from aiogram.fsm.state import State, StatesGroup        # FSM: описываем состояния
+from aiogram.fsm.context import FSMContext              # FSM: доступ к state.data
+from aiogram.fsm.storage.memory import MemoryStorage    # Хранение FSM в памяти
+
+# ——— Роутеры админки ————————————————————————————————————————————
+from create_lesson_block import router as create_topic_router  # Роутер админского flow создания тем
+from edit_topic_flow     import router as edit_topic_router   # Роутер админского flow редактирования
+
+# ——— Загрузка тем ——————————————————————————————————————————————
+from topics.loader import load_topics                    # Функция чтения всех JSON-файлов с уроками
+from create_lesson_block import load_ads_data  # 💬 Функция загрузки рекламы из ads_data.json
+
+from battle_feature import router as battle_router, set_topics_ref, start_battle_from_lex_menu, set_battle_links  # 💬 модуль "Битва"
+from bonuses_feature import (
+    router as bonuses_router,
+    init_bonus_feature,
+    bonuses_open,
+    bonus_register_referral_from_start,
+    bonus_try_qualify_referral,
+)  # 💬 модуль «🎁 Бонусы»
+
+
+# ——— Сценарии для учеников ——————————————————————————————————————
+from scenarios_estiloso8_1 import (                     # Вся диалоговая логика “сценариев”
+
+    congrats_media,           # Стикеры/гифки-поздравления после окончания урока
+    refusal_stickers,         # Стикеры/гифки отказа
+    after_text,               # Сценарии “after” для текст-блоков упражнений
+    after_photo,              # Сценарии “after” для фото-блоков упражнений
+    after_quiz,               # Сценарии “after” для quiz-блоков упражнений
+    exercise_start_phrases,   # Вступительные фразы для потока «упражнения»
+    motivational_quotes,      # Цитаты для мотивации в главном меню
+    link_cta_phrases,         # Варианты призыва к действию (CTA) для link-блоков
+    follow_up_phrases,        # Общие follow-up (“Что дальше?”) в админке/учениках
+    custom_progress_emojis,   # Набор эмоджи для кастомного прогресса
+    start_stickers,
+    menu_study_phrases,
+    difficulty_intro_phrases,
+    vocab_start_phrases,       # Вступительные фразы для потока «Учить слова»
+    vocab_return_phrases,      # Фразы возвращения в поток  «Учить слова»
+    vocab_quiz_intro_phrases,  #  Фразы для введения в квиз после словаря
+    go_next_phrases
+)
+from scenario.quiz_reactions import vocab_quiz_success_phrases  # 💬 централизованные позитивные реакции квиза
+
+from scenario.confirm_done_block import confirm_done
+from scenario.feedback_difficulty_block import feedback_difficulty
+from scenario.offer_continue_block import offer_continue
+from scenario.refusal_block import refusal
+
+# ...другие импорты, если нужны...
+from typing import List
+
+
+
+scenarios = {
+    "confirm_done": confirm_done,
+    "feedback_difficulty": feedback_difficulty,
+    "offer_continue": offer_continue,
+    "refusal": refusal,
+    # ... остальные блоки тут ...
+}
+
+
+
+# ——— Локальные константы ————————————————————————————————————————
+EXERCISE_GIF_FOLDER = "gif/dudoso_after_link"   # Папка с MP4 для упражнений
+VID_GIF_FOLDER      = "gif/dudoso_after_link"   # То же для видео (пока дублирует)ç
+ADS_VIDEO_FOLDER = "ads_videos" # ——— Папка с видеорекламой
+
+# ——— Инициализация бота и FSM ——————————————————————————————————————
+BOT_TOKEN = "7267599701:AAG4duS6_2R8PFpoUzroIY1M5ib1OWw8o6s"  
+bot        = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+dp         = Dispatcher(storage=MemoryStorage())  
+
+
+
+
+
+
+
+
+
+
+
+# ——— Подключаем админские роутеры ————————————————————————————————
+dp.include_router(edit_topic_router)
+dp.include_router(battle_router)  # 💬 подключаем хендлеры "Битвы"
+dp.include_router(bonuses_router)  # 💬 подключаем хендлеры «Бонусы»
+dp.include_router(create_topic_router)
+
+# 💬 что делает эта часть: копируем темы из Railway Volume (/data/topics) в локальную ./topics,
+# чтобы load_topics() увидел новые темы без redeploy
+def sync_topics_volume_to_local():
+    volume_topics_dir = "/data/topics"
+    local_topics_dir = "topics"
+    try:
+        os.makedirs(volume_topics_dir, exist_ok=True)
+        os.makedirs(local_topics_dir, exist_ok=True)
+
+        for fname in os.listdir(volume_topics_dir):
+            if not fname.endswith(".json"):
+                continue
+            src = os.path.join(volume_topics_dir, fname)
+            dst = os.path.join(local_topics_dir, fname)
+            if os.path.exists(src) and not os.path.exists(dst):
+                with open(src, "rb") as s, open(dst, "wb") as d:
+                    d.write(s.read())
+    except Exception:
+        logging.exception("sync_topics_volume_to_local failed")
+
+
+sync_topics_volume_to_local()  # 💬 подтягиваем темы из Volume перед чтением
+
+# ——— Загружаем уроки ——————————————————————————————————————————
+topics = load_topics()
+
+set_topics_ref(topics)  # 💬 передаём topics в модуль "Битва" без круговых импортов
+
+
+from collections import deque
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
+
+from functools import wraps
+from inspect import signature
+
+# 💬 Декор и очередь для трекинга последних двух хендлеров и сохранения стека
+handler_history = deque(maxlen=2)
+last_stack      = []
+
+def track_handler(func):
+    sig = signature(func)
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        global last_stack
+        # 💬 сохраняем стек исполнения (кроме текущего кадра)
+        last_stack = traceback.extract_stack()[:-1]
+        # 💬 сохраняем имя хендлера
+        handler_history.append(func.__name__)
+
+
+        # 💬 аналитика: последний хендлер + (если есть) тема и state из FSM
+        try:
+            user_id = None
+
+            # пытаемся вытащить пользователя из args/kwargs
+            for v in list(kwargs.values()) + list(args):
+                if getattr(v, "from_user", None):
+                    user_id = str(v.from_user.id)
+                    break
+
+            if user_id:
+                st = kwargs.get("state")
+                topic_key = None
+                state_name = None
+                if st:
+                    try:
+                        st_data = await st.get_data()
+                        topic_key = st_data.get("selected_topic")
+                        state_name = await st.get_state()
+                    except Exception:
+                        pass
+
+                analytics_set_last_context(
+                    user_id=user_id,
+                    handler_name=func.__name__,
+                    topic_key=topic_key,
+                    state_name=state_name
+                )
+        except Exception:
+            logging.exception("track_handler: analytics last context failed")
+
+        # 💬 убираем лишний аргумент 'dispatcher'
+        kwargs.pop('dispatcher', None)
+        # 💬 фильтруем kwargs по сигнатуре func
+        filtered = {k: v for k, v in kwargs.items() if k in sig.parameters}
+        return await func(*args, **filtered)
+    return wrapper
+
+ADMIN_CHAT_ID = 930240763  # ваш Chat ID
+
+class LoggingMiddleware(BaseMiddleware):
+    # 💬 Глобальный перехват голосовых + логирование ошибок для всех апдейтов
+    async def __call__(self, handler, event, data):
+
+
+        # 💬 аналитика: фиксируем активность (first/last/clicks) на каждый апдейт
+        try:
+            if getattr(event, "from_user", None):
+                if isinstance(event, CallbackQuery):
+                    analytics_touch_daily(event.from_user, "callback")
+                elif isinstance(event, Message):
+                    analytics_touch_daily(event.from_user, "message")
+                else:
+                    analytics_touch_daily(event.from_user, event.__class__.__name__)
+        except Exception:
+            logging.exception("LoggingMiddleware: analytics touch failed")
+
+        # ⚠️ Любой voice/не-текст останавливаем до хендлеров
+        if isinstance(event, Message) and getattr(event, "voice", None):
+            await event.answer("⚠️ Голосовые сообщения пока не поддерживаются. Пришли текст или нажми кнопку ниже.")
+            return
+
+        try:
+            return await handler(event, data)
+        except Exception as err:
+            # 💬 берём последние два имени из handler_history
+            curr = handler_history[-1] if handler_history else "unknown"
+            prev = handler_history[-2] if len(handler_history) >= 2 else "none"
+
+            # 💬 тема из FSM (если есть) = но показываем только если реально известна
+            topic_key = None
+            topic_name = None
+            st = data.get("state")
+            if st:
+                try:
+                    st_data = await st.get_data()
+                    tk = st_data.get("selected_topic")
+                    if tk and tk != "unknown":
+                        info = topics.get(tk, {}) if isinstance(topics, dict) else {}
+                        tn = info.get("title") or info.get("name") or tk
+                        if tn and tn != "unknown":
+                            topic_key = tk
+                            topic_name = tn
+                except Exception:
+                    pass
+
+            # 💬 ник админа берём из CONTACT_URL (https://t.me/Drancherrro) = получится @Drancherrro
+            admin_nick = "@admin"
+            try:
+                if isinstance(CONTACT_URL, str) and "t.me/" in CONTACT_URL:
+                    admin_nick = "@" + CONTACT_URL.rstrip("/").split("/")[-1]
+            except Exception:
+                pass
+
+            # 1) 💬 сообщение админу
+            admin_lines = [
+                "🔴 Ошибка",
+                f"Где = `{curr}`",
+                f"Пред = `{prev}`",
+            ]
+            if topic_key and topic_name:
+                admin_lines.append(f"Тема = `{topic_name}` ({topic_key})")
+            admin_lines.append(f"Тип = `{err.__class__.__name__}`")
+            admin_text = "\n".join(admin_lines)
+
+            try:
+                await bot.send_message(ADMIN_CHAT_ID, admin_text)
+            except TelegramBadRequest:
+                pass
+
+            # 2) 💬 сообщение пользователю + кнопка связи (и гасим “loading…” у callback)
+            try:
+                chat_id = None
+
+                if isinstance(event, CallbackQuery):
+                    try:
+                        await event.answer("⚠️ Ошибка. Нажми /start.", show_alert=False)
+                    except Exception:
+                        pass
+                    if event.message:
+                        chat_id = event.message.chat.id
+
+                elif isinstance(event, Message):
+                    chat_id = event.chat.id
+
+                # fallback на случай других типов event
+                if not chat_id and getattr(event, "chat", None):
+                    chat_id = getattr(event.chat, "id", None)
+
+                if chat_id:
+                    report_lines = [
+                        "⚠️ Упс, произошла ошибка",
+                        "",
+                        "<pre>",
+                        f"Где = {curr}",
+                        f"Пред = {prev}",
+                    ]
+                    if topic_key and topic_name:
+                        report_lines.append(f"Тема = {topic_name} ({topic_key})")
+                    report_lines += [
+                        "</pre>",
+                        "",
+                        "Что делать",
+                        "1) Нажми /start",
+                        f"2) Если повторится = нажми кнопку ниже и отправь админу блок выше ({admin_nick})",
+                    ]
+
+                    kb = InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(text="✉️ Сообщить админу", url=CONTACT_URL)]
+                        ]
+                    )
+
+                    await bot.send_message(chat_id, "\n".join(report_lines), reply_markup=kb)
+
+            except Exception:
+                pass
+
+            raise
+
+
+
+# 💬 Регистрируем Middleware
+dp.update.middleware.register(LoggingMiddleware())
+
+
+# 💬 Фабрика: возвращает нужный vocab-список (по фазе или всё сразу)
+def get_vocab_list(data: dict) -> list:
+    """
+    💬 Новая логика компоновки (пакеты по 6):
+       • После КАЖДОГО link добавляем РОВНО 6 обычных Quiz (или меньше, если осталось меньше).
+       • Когда обычные Quiz закончились, ТОЛЬКО ПОТОМ добавляем все TextQuiz (также могут идти пакетом по 6 на показ).
+       • Inline-квизы, зашитые внутрь text/photo, не трогаем.
+       • Если ссылок нет — сначала весь пул обычных Quiz (батчами по 6), затем весь пул TextQuiz.
+    """
+    topic_key = data.get("selected_topic")
+    topic     = topics.get(topic_key, {})
+    ph_id     = data.get("selected_phase_id")
+
+    # legacy: без фазы — как раньше
+    if not ph_id:
+        return topic.get("vocab", [])
+
+    # берём фазу по её ID (фазы лежат в topic["vocab"] как блоки с phase_id)
+    phase = next((ph for ph in topic.get("vocab", []) if ph.get("phase_id") == ph_id), None)
+    if not phase:
+        return []
+
+    base          = list(phase.get("vocab", []))            # текст/линки/прочее
+    quiz_pool     = list(phase.get("quiz_pool", []))        # обычные квизы (3 варианта)
+    textquiz_pool = list(phase.get("textquiz_pool", []))    # текст-квизы (вписать ответ)
+
+    PACK = 6
+    compiled = []
+
+    # helper: забрать очередной пакет из pool
+    def take_pack(pool, start, pack=PACK):
+        return pool[start:start+pack], start + min(pack, max(0, len(pool) - start))
+
+    qi = 0  # указатель в обычных квизах
+
+    # 1) Проходим базовые блоки и после каждого link кладём пакет из 6 обычных квизов
+    for block in base:
+        compiled.append(block)
+        if ("link" in block) or ("url" in block) or (block.get("type") == "link"):
+            if qi < len(quiz_pool):
+                chunk, qi = take_pack(quiz_pool, qi)
+                compiled.extend(chunk)
+
+    # 2) Если обычные квизы ещё остались (линков было мало или не было) — докладываем всё, батчами по 6
+    while qi < len(quiz_pool):
+        chunk, qi = take_pack(quiz_pool, qi)
+        compiled.extend(chunk)
+
+    # 3) Текстовые квизы добавляем ТОЛЬКО после всех обычных
+    #    (порядок сохраняем; разбиение по 6 делает уже логика показа/offer_continue)
+    compiled.extend(textquiz_pool)
+
+    return compiled
+# 💬 что делает эта часть: собирает последовательность "link → 6 обычных квизов" по всей фазе,
+#                         затем в конец добавляет все text-квизы. Старое чередование убрано.
+
+
+
+
+
+import os
+
+XP_DATA_PATH = "/data/xp_data.json"
+
+XP_DATA_PATH = "/data/xp_data.json"
+XP_DATA_BACKUP_PATH = "/data/xp_data_backup.json"  # 💬 резерв: спасает рейтинг, если основной файл сломался
+
+def _atomic_json_dump(path: str, data: dict):
+    # 💬 атомарная запись: сначала temp, потом replace (не будет "битого" JSON)
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
+
+def load_xp_data():
+    # 💬 грузим XP; если файл пропал/битый — восстанавливаем из backup, чтобы рейтинг не "обнулялся"
+    if not os.path.exists(XP_DATA_PATH):
+        # если основного нет, но есть backup — восстановим
+        if os.path.exists(XP_DATA_BACKUP_PATH):
+            try:
+                with open(XP_DATA_BACKUP_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                _atomic_json_dump(XP_DATA_PATH, data)
+                return data
+            except Exception:
+                logging.exception("load_xp_data: backup restore failed")
+        _atomic_json_dump(XP_DATA_PATH, {})
+        return {}
+
+    try:
+        with open(XP_DATA_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        # если JSON сломался — пробуем поднять из backup
+        try:
+            if os.path.exists(XP_DATA_BACKUP_PATH):
+                with open(XP_DATA_BACKUP_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                _atomic_json_dump(XP_DATA_PATH, data)
+                return data
+        except Exception:
+            logging.exception("load_xp_data: failed to restore from backup")
+        return {}
+
+def save_xp_data(xp_data):
+    # 💬 сохраняем атомарно + пишем backup (чтобы redeploy/сбой не "стёр" рейтинг)
+    _atomic_json_dump(XP_DATA_PATH, xp_data)
+    _atomic_json_dump(XP_DATA_BACKUP_PATH, xp_data)
+
+
+
+
+
+def reset_daily_words_if_needed(user_data):
+    """
+    💬 Если дата не сегодня — сбрасываем счетчик words_learned_today и обновляем дату.
+    """
+    today = datetime.date.today().isoformat()
+    if user_data.get("words_today_date") != today:
+        user_data["words_learned_today"] = 0
+        user_data["words_today_date"] = today
+
+
+def migrate_runtime_files_to_volume():
+    # 💬 переносим данные из контейнера в Volume (один раз) + синхронизируем topics
+    try:
+        if not os.path.exists(XP_DATA_PATH) and os.path.exists("xp_data.json"):
+            with open("xp_data.json", "rb") as src, open(XP_DATA_PATH, "wb") as dst:
+                dst.write(src.read())
+
+        if not os.path.exists(USER_DATA_PATH) and os.path.exists("user_data.json"):
+            with open("user_data.json", "rb") as src, open(USER_DATA_PATH, "wb") as dst:
+                dst.write(src.read())
+
+        # --- TOPICS sync ---
+        volume_topics_dir = "/data/topics"
+        local_topics_dir = "topics"
+
+        os.makedirs(volume_topics_dir, exist_ok=True)
+        os.makedirs(local_topics_dir, exist_ok=True)
+
+        # 1) если в Volume нет файла, но он есть локально = копируем в Volume
+        for fname in os.listdir(local_topics_dir):
+            if not fname.endswith(".json"):
+                continue
+            src = os.path.join(local_topics_dir, fname)
+            dst = os.path.join(volume_topics_dir, fname)
+            if os.path.exists(src) and not os.path.exists(dst):
+                with open(src, "rb") as s, open(dst, "wb") as d:
+                    d.write(s.read())
+
+        # 2) если в локале нет файла, но он есть в Volume = копируем в локал
+        # 💬 что делает эта часть: даже если load_topics() читает ./topics, он увидит темы из Volume
+        for fname in os.listdir(volume_topics_dir):
+            if not fname.endswith(".json"):
+                continue
+            src = os.path.join(volume_topics_dir, fname)
+            dst = os.path.join(local_topics_dir, fname)
+            if os.path.exists(src) and not os.path.exists(dst):
+                with open(src, "rb") as s, open(dst, "wb") as d:
+                    d.write(s.read())
+
+    except Exception:
+        logging.exception("migrate_runtime_files_to_volume failed")
+
+
+
+def _analytics_purge_days(days: dict, keep_days: int = 30) -> dict:
+    # 💬 оставляем только последние keep_days дат формата YYYY-MM-DD
+    if not isinstance(days, dict):
+        return {}
+    keys = sorted(days.keys())
+    if len(keys) <= keep_days:
+        return days
+    to_drop = keys[:-keep_days]
+    for k in to_drop:
+        days.pop(k, None)
+    return days
+
+
+def analytics_touch_daily(from_user: User, event_type: str):
+    # 💬 фиксируем first/last/clicks за день + обновляем имя/username в xp_data.json
+    try:
+        uid = str(from_user.id)
+        ts = int(time.time())
+        today = datetime.date.today().isoformat()
+
+        xp_data = load_xp_data()
+        user = xp_data.get(uid, {})
+
+        # базовые поля (на случай если /start не проходили)
+        if not user.get("first_join"):
+            user["first_join"] = ts
+        user["last_active"] = ts
+
+        if not user.get("name"):
+            user["name"] = from_user.full_name or ""
+
+        tg_username = ("@" + from_user.username) if getattr(from_user, "username", None) else ""
+        if tg_username and user.get("tg_username") != tg_username:
+            user["tg_username"] = tg_username
+
+        analytics = user.get("analytics", {})
+        days = analytics.get("days", {})
+
+        dayrec = days.get(today, {})
+        if "first_ts" not in dayrec:
+            dayrec["first_ts"] = ts
+        dayrec["last_ts"] = ts
+        dayrec["clicks"] = dayrec.get("clicks", 0) + 1
+        dayrec["last_event_type"] = event_type
+
+        days[today] = dayrec
+        analytics["days"] = _analytics_purge_days(days, keep_days=30)
+        user["analytics"] = analytics
+
+        xp_data[uid] = user
+        save_xp_data(xp_data)
+
+    except Exception:
+        logging.exception("analytics_touch_daily: failed")
+
+
+def analytics_set_last_context(user_id: str, handler_name: str, topic_key: str = None, state_name: str = None):
+    # 💬 сохраняем где пользователь был последний раз (хендлер/тема/state)
+    try:
+        ts = int(time.time())
+        xp_data = load_xp_data()
+        user = xp_data.get(user_id, {})
+        analytics = user.get("analytics", {})
+        last = analytics.get("last", {})
+
+        last["ts"] = ts
+        last["handler"] = handler_name
+        if topic_key:
+            last["topic_key"] = topic_key
+        if state_name:
+            last["state"] = state_name
+
+        analytics["last"] = last
+        user["analytics"] = analytics
+        xp_data[user_id] = user
+        save_xp_data(xp_data)
+
+    except Exception:
+        logging.exception("analytics_set_last_context: failed")
+
+
+
+# 💬 USER DATA: сохраняем, какие темы разблокированы, и подписки на каналы
+USER_DATA_PATH = "/data/user_data.json"  # 💬 данные хранятся в Railway Volume и не теряются при redeploy
+USER_DATA_BACKUP_PATH = "/data/user_data_backup.json"  # 💬 резерв, чтобы настройки не "слетали"
+
+
+# 💬 MY WORDS: пользовательские слова и категории (Railway Volume)
+MY_WORDS_PATH = "/data/my_words.json"  # 💬 файл пользовательских слов
+MY_WORDS_BACKUP_PATH = "/data/my_words_backup.json"  # 💬 резерв, чтобы не потерять слова
+
+def load_my_words_data() -> dict:
+    # 💬 грузим my_words; если файла нет или он битый = создаём пустой или восстанавливаем из backup
+    if not os.path.exists(MY_WORDS_PATH):
+        if os.path.exists(MY_WORDS_BACKUP_PATH):
+            try:
+                with open(MY_WORDS_BACKUP_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                _atomic_json_dump(MY_WORDS_PATH, data)
+                return data
+            except Exception:
+                pass
+        data = {"users": {}}
+        _atomic_json_dump(MY_WORDS_PATH, data)
+        _atomic_json_dump(MY_WORDS_BACKUP_PATH, data)
+        return data
+
+    try:
+        with open(MY_WORDS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        # 💬 если основной файл битый = пробуем восстановить из backup
+        if os.path.exists(MY_WORDS_BACKUP_PATH):
+            try:
+                with open(MY_WORDS_BACKUP_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                _atomic_json_dump(MY_WORDS_PATH, data)
+                return data
+            except Exception:
+                pass
+        data = {"users": {}}
+        _atomic_json_dump(MY_WORDS_PATH, data)
+        _atomic_json_dump(MY_WORDS_BACKUP_PATH, data)
+        return data
+
+def save_my_words_data(data: dict) -> None:
+    # 💬 сохраняем атомарно + backup
+    _atomic_json_dump(MY_WORDS_PATH, data)
+    _atomic_json_dump(MY_WORDS_BACKUP_PATH, data)
+
+def ensure_my_words_user(data: dict, user_id: str) -> dict:
+    # 💬 создаём структуру пользователя, если её ещё нет
+    users = data.setdefault("users", {})
+    u = users.setdefault(user_id, {})
+    u.setdefault("settings", {"session_words": 5})
+    u.setdefault("categories", {})
+    return u
+
+def parse_es_ru_pair(raw: str):
+    # 💬 парсим строку формата ES - RU (делим по первому дефису, принимаем разные тире)
+    if not raw:
+        return None, None
+
+    raw = raw.replace("—", "-").replace("–", "-").replace("−", "-")  # 💬 нормализуем тире
+    if "-" not in raw:
+        return None, None
+
+    left, right = raw.split("-", 1)  # 💬 делим по первому "-"
+    es = left.strip()
+    ru = right.strip()
+    if not es or not ru:
+        return None, None
+    return es, ru
+
+
+def gen_my_word_id() -> str:
+    # 💬 простой уникальный id для слов (нужен при дубликатах ES)
+    return f"{int(time.time()*1000)}_{random.randint(1000, 9999)}"
+
+def load_user_data():
+    # 💬 грузим user_data; если файл пропал/битый — восстанавливаем из backup
+    if not os.path.exists(USER_DATA_PATH):
+        if os.path.exists(USER_DATA_BACKUP_PATH):
+            try:
+                with open(USER_DATA_BACKUP_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                _atomic_json_dump(USER_DATA_PATH, data)
+                return data
+            except Exception:
+                logging.exception("load_user_data: backup restore failed")
+        _atomic_json_dump(USER_DATA_PATH, {})
+        return {}
+
+    try:
+        with open(USER_DATA_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        try:
+            if os.path.exists(USER_DATA_BACKUP_PATH):
+                with open(USER_DATA_BACKUP_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                _atomic_json_dump(USER_DATA_PATH, data)
+                return data
+        except Exception:
+            logging.exception("load_user_data: failed to restore from backup")
+        return {}
+
+def save_user_data(data):
+    # 💬 сохраняем атомарно + backup
+    _atomic_json_dump(USER_DATA_PATH, data)
+    _atomic_json_dump(USER_DATA_BACKUP_PATH, data)
+
+
+
+
+# 💬 Возвращает (duration_sec, is_currently_subscribed)
+def get_subscription_duration(user_id: str, channel: str):
+    data = load_user_data().get(user_id, {})
+    ch = data.get("channels", {}).get(channel)
+    if not ch:
+        return 0, False
+    sub = ch.get("subscribed_at", 0)
+    unsub = ch.get("unsubscribed_at")
+    # если отписался — длительность = unsub - sub
+    if unsub:
+        return unsub - sub, False
+    # иначе — текущее время минус subscribed_at
+    return int(time.time()) - sub, True
+
+
+
+def get_channel_history(user_id: str, channel: str) -> List[dict]:
+    data = load_user_data().get(user_id, {})
+    sessions = data.get("channels", {}).get(channel, [])
+    return sessions if isinstance(sessions, list) else []
+
+
+
+
+
+
+
+
+
+
+
+async def register_or_update_user(message: Message):
+    # 💬 Добавляет пользователя или обновляет имя, username, дату
+    user_id = str(message.from_user.id)
+    xp_data = load_xp_data()
+    user_data = xp_data.get(user_id, {})
+    updated = False
+
+    # Имя из Telegram (или спрашиваем, если пусто)
+    name = message.from_user.full_name or ""
+    if not user_data.get("name"):
+        user_data["name"] = name
+        updated = True
+
+    # Username Telegram, если есть
+    tg_username = ("@" + message.from_user.username) if message.from_user.username else ""
+    if tg_username and user_data.get("tg_username") != tg_username:
+        user_data["tg_username"] = tg_username
+        updated = True
+
+    # Дата первого входа
+    if not user_data.get("first_join"):
+        user_data["first_join"] = int(time.time())
+        updated = True
+
+    # Дата последнего действия
+    user_data["last_active"] = int(time.time())
+
+    # Базовые поля, если нет
+    if "total_xp" not in user_data:
+        user_data["total_xp"] = 0
+        updated = True
+    if "by_topic" not in user_data:
+        user_data["by_topic"] = {}
+        updated = True
+    if "stats" not in user_data:
+        user_data["stats"] = {"words_learned": 0, "exercises_done": 0}
+        updated = True
+
+
+    # 💬 Инициализация счетчиков недели и месяца для рейтинга
+
+    # Базовые поля, если нет
+    if "total_xp" not in user_data:
+        user_data["total_xp"] = 0
+        updated = True
+    if "by_topic" not in user_data:
+        user_data["by_topic"] = {}
+        updated = True
+    if "stats" not in user_data:
+        user_data["stats"] = {"words_learned": 0, "exercises_done": 0}
+        updated = True
+
+    # 💬 Добавь инициализацию для недельных/месячных печенек:
+    if "words_learned_week" not in user_data:
+        user_data["words_learned_week"] = 0
+        user_data["words_week_number"] = datetime.date.today().isocalendar()[1]
+    if "words_learned_month" not in user_data:
+        user_data["words_learned_month"] = 0
+        user_data["words_month_number"] = datetime.date.today().month
+
+
+
+
+    xp_data[user_id] = user_data
+    if updated:
+        save_xp_data(xp_data)
+
+
+
+
+
+async def add_xp(user_id: int, topic: str, amount: int, action: str = None):
+    """
+    Универсальное начисление XP и обновление статистики по пользователю.
+    """
+    xp_data = load_xp_data()
+    user_id = str(user_id)
+
+
+    user = xp_data.get(user_id)
+    if not user:
+        # 💬 Авто-инициализация пользователя, если его ещё нет в xp_data.json
+        user = {
+            "total_xp": 0,
+            "by_topic": {},
+            "stats": {"words_learned": 0, "exercises_done": 0},
+            "first_join": int(time.time()),
+        }
+
+    reset_daily_words_if_needed(user)  # 💬 Сбросить/обновить дату, если нужно
+
+    # 1. Общий XP
+    user["total_xp"] = user.get("total_xp", 0) + amount
+
+
+
+    # 2. По теме
+    if "by_topic" not in user:
+        user["by_topic"] = {}
+    user["by_topic"][topic] = user["by_topic"].get(topic, 0) + amount
+
+    # 3. words_learned сегодня + лимит
+    if action == "words_learned":
+        limit = user.get("words_daily_limit", 10)
+        if user.get("words_learned_today", 0) < limit:
+            user["words_learned_today"] = user.get("words_learned_today", 0) + 1
+
+        # 💬 Счётчик за неделю
+        week = datetime.date.today().isocalendar()[1]
+        month = datetime.date.today().month
+
+        # Сброс если неделя или месяц поменялись
+        if user.get("words_week_number") != week:
+            user["words_learned_week"] = 0
+            user["words_week_number"] = week
+        if user.get("words_month_number") != month:
+            user["words_learned_month"] = 0
+            user["words_month_number"] = month
+
+        user["words_learned_week"] = user.get("words_learned_week", 0) + 1
+        user["words_learned_month"] = user.get("words_learned_month", 0) + 1
+
+        # 💬 Глобальная статистика: общий счётчик выученных слов (для отчётов/лимитов в сессии)
+        if "stats" not in user:
+            user["stats"] = {"words_learned": 0, "exercises_done": 0}
+        user["stats"]["words_learned"] = user["stats"].get("words_learned", 0) + 1  # 🍪 +1
+
+        # 💬 аналитика: слова по темам (чтобы понимать, какие темы реально учат)
+        analytics = user.get("analytics", {})
+        topics_words = analytics.get("topics_words", {})
+        if isinstance(topics_words, dict):
+            topics_words[topic] = topics_words.get(topic, 0) + 1
+        analytics["topics_words"] = topics_words
+        user["analytics"] = analytics
+
+
+
+
+    # 4. Последняя активность
+    user["last_active"] = int(time.time())
+
+    xp_data[user_id] = user
+    save_xp_data(xp_data)
+
+
+
+
+# ────────────────────────────────────────────────────────────
+# 🕑 Пример «временного» сообщения: отправляем и удаляем через 2 сек
+# ────────────────────────────────────────────────────────────
+
+# ────────────────────────────────────────────────────────────────────────────────
+# 🏷 ФИЛЬТРЫ ПО CURRENT_STAGE (универсальные для всех трёх потоков)
+# ────────────────────────────────────────────────────────────────────────────────
+
+async def is_confirm_done_vocab(message: Message, state: FSMContext) -> bool:
+    """Поток «Учить слова»: подтвердили выполнение link-блока?"""
+    data = await state.get_data()
+    return data.get("current_stage") == "confirm_done"
+
+async def is_feedback_difficulty_vocab(message: Message, state: FSMContext) -> bool:
+    """Поток «Учить слова»: отвечаем на «Как тебе задание?»"""
+    data = await state.get_data()
+    return data.get("current_stage") == "feedback_difficulty"
+
+async def is_offer_continue_vocab(message: Message, state: FSMContext) -> bool:
+    """Поток «Учить слова»: предложение «Продолжим или Домой?»"""
+    data = await state.get_data()
+    return data.get("current_stage") == "offer_continue"
+
+async def is_refusal_vocab(message: Message, state: FSMContext) -> bool:
+    """Поток «Учить слова»: отказ от link-блока или feedback_difficulty"""
+    data = await state.get_data()
+    return data.get("current_stage") == "refusal"
+
+async def is_vocab_exercise(message: Message, state: FSMContext) -> bool:
+    """Quiz-блок в «Учить слова»: внутри встроенного poll’а"""
+    data = await state.get_data()
+    return data.get("current_stage") == "vocab_exercise"
+
+
+
+# ======================================================================
+# 🔒 Блок 3: FSM-состояния (StatesGroup)
+# ======================================================================
+
+
+
+class LessonStates(StatesGroup):
+    # 🏁 Начальные шаги: выбор категории и темы
+    waiting_subscription = State()  # ожидание проверки подписки на канал(ы)
+    choosing_category     = State()  # после /start — ждем «📚 Лексика» или «🧠 Грамматика»
+    choosing_level        = State()  # 💬 состояние для выбора уровня после выбора категории
+    choosing_subcategory  = State()  # 💬 выбор «Лексика / Грамматика» внутри уровня
+    choosing_topic        = State()  # после выбора категории — ждем тему
+    waiting_lesson_action = State()  # главное меню: Учить слова/Делать упражнения/…
+    waiting_vocab_phase   = State()   # выбор фазы перед показом словаря
+    # 🧩 Мои слова (пользовательские категории)
+    mywords_menu                 = State()  # меню «Мои слова»
+    mywords_settings_wait        = State()  # ввод числа session_words
+
+    mywords_add_choose_category  = State()  # выбор категории для добавления
+    mywords_add_new_category     = State()  # ввод названия новой категории
+    mywords_add_input_pair       = State()  # ввод ES - RU
+    mywords_add_confirm          = State()  # подтверждение сохранения пары
+
+    mywords_edit_choose_category = State()  # выбор категории для редактирования
+    mywords_edit_menu            = State()  # меню редактирования выбранной категории
+    mywords_edit_delete_wait     = State()  # ввод индекса для удаления
+    mywords_edit_edit_index_wait = State()  # ввод индекса для изменения
+    mywords_edit_edit_pair_wait  = State()  # ввод новой пары ES - RU
+    mywords_edit_rename_wait     = State()  # ввод нового названия категории
+
+    mywords_learn_choose_cat     = State()  # выбор категории для обучения/повтора
+    mywords_quiz                 = State()  # стадия quiz RU=>ES (poll)
+    mywords_text                 = State()  # стадия text RU=>ES (ввод текста)
+    mywords_offer_continue       = State()  # пауза: продолжить или домой
+
+
+
+    # 📚 Поток «Учить слова»
+    showing_vocab         = State()  # показываем очередной блок (link/text/photo/quiz)
+    vocab_exercise        = State()  # ожидаем ответ на встроенный quiz
+    vocab_text_continue   = State()  # после текстового блока — «Я прочитал(a) / Пропустить»
+    vocab_photo_continue  = State()  # после фото — «Я просмотрел(а) / Пропустить»
+
+    vocab_optional_quiz   = State()  # ожидание ответа на опциональный quiz
+
+        # — Новый блок: текстовый квиз —
+    vocab_textquiz = State()   # ожидание ответа на текстовый квиз
+
+    review_failed_vocab = State()      # поток разбора неправильных vocab-quiz
+    review_failed_textquiz = State()   # поток разбора неправильных textquiz
+
+
+    # 🙊 Поток «Читать диалоги» — новая логика
+    waiting_dialog_phase  = State()    # выбор фазы перед чтением диалогов
+    showing_dialog        = State()    # показываем блок диалога (4 строки) с самопроверкой
+
+
+
+    # 🎬 Поток «Смотреть видео»
+    showing_video         = State()  # показываем видео  # 💬 состояние показа видео-блока
+
+   
+
+
+
+
+# 💬 инициализация модуля «🎁 Бонусы» (рефералка + заявки)
+init_bonus_feature(
+    load_user_data=load_user_data,
+    save_user_data=save_user_data,
+    load_subscription_channels=load_subscription_channels,
+    LessonStates=LessonStates,
+    materials_url=MATERIALS_POST_URL,
+    contact_url=CONTACT_URL,
+    admin_chat_id=ADMIN_CHAT_ID,
+)
+
+
+
+
+# ─── УТИЛИТЫ XP ───────────────────────────────────────
+
+async def award_xp(amount: int, state: FSMContext):
+    """
+    Добавляет amount XP (без изменения done_dialog) и обновляет level.
+    """
+    data = await state.get_data()
+    xp = data.get("xp", 0) + amount
+    await state.update_data(xp=xp, level=xp // 100)
+
+async def award_dialog(amount: int, state: FSMContext):
+    """
+    Добавляет amount XP и фиксирует одно пройденное чтение диалога.
+    """
+    data = await state.get_data()
+    xp = data.get("xp", 0) + amount
+    done = data.get("done_dialog", 0) + 1
+    await state.update_data(xp=xp, done_dialog=done, level=xp // 100)
+
+def render_bar(pct: int, length: int = 10) -> str:
+    """
+    Рисует прогресс-бар длины length по проценту pct (0–100).
+    """
+    filled = min(max(int(pct * length / 100), 0), length)
+    return "█" * filled + "░" * (length - filled)
+
+
+# 💬 есть ли ещё обычные квизы дальше от текущего индекса
+def _has_quiz_ahead(vocab_list: list, start_idx: int) -> bool:
+    for b in vocab_list[start_idx:]:
+        if b.get("type") == "quiz":
+            return True
+    return False
+
+
+@track_handler
+async def proceed_to_next(target, state: FSMContext):
+    """Перейти к следующему блоку обычным способом."""
+    data = await state.get_data()
+    new_idx = data.get("vocab_index", 0) + 1
+    await state.update_data(vocab_index=new_idx)
+    return await send_one_vocab(target, state)
+
+@track_handler
+async def send_optional_vocab_quiz(target, state: FSMContext):
+    """
+    Если у текущего блока есть поле 'quiz', показываем его как обычный poll,
+    но без начисления XP.
+    """
+    data = await state.get_data()
+    idx = data.get("vocab_index", 0)
+    block = get_vocab_list(data)[idx]
+    quiz = block.get("quiz")
+    # если квиза нет — сразу следующий
+    if not quiz:
+        return await proceed_to_next(target, state)
+
+    opts = quiz["options"].copy()
+    random.shuffle(opts)
+    correct_id = opts.index(quiz["correct_answer"])
+
+    poll = await bot.send_poll(
+        chat_id=target.chat.id if hasattr(target, "chat") else target.id,
+        question=quiz["question"],
+        options=opts,
+        type="quiz",
+        correct_option_id=correct_id,
+        is_anonymous=False
+    )
+    await state.update_data(
+        current_optional_poll_id=poll.poll.id,
+        current_optional_message_id=poll.message_id,
+        current_optional_correct_id=correct_id
+    )
+    await state.set_state(LessonStates.vocab_optional_quiz)
+
+
+# ======================================================
+# 🔧  отправка текста в «коричневом» блоке code через HTML <pre>
+# ======================================================
+async def send_plaintext(target, text: str):
+    chat_id = target.chat.id if hasattr(target, "chat") else target.id
+    await bot.send_message(chat_id, f"<pre>{text}</pre>", parse_mode="HTML")
+
+
+# 💬 helper: отправка текста в виде Telegram Quote (HTML <blockquote>)
+async def send_quotedtext(target, text: str, expandable: bool = False):
+    chat_id = target.chat.id if hasattr(target, "chat") else target.id
+    # 💬 если нужен expandable — ставим атрибут, иначе обычный блок
+    tag_open = "<blockquote expandable>" if expandable else "<blockquote>"
+    await bot.send_message(chat_id, f"{tag_open}{text}</blockquote>", parse_mode="HTML")
+
+
+
+
+
+
+
+# ================================================================================
+# 🔧 Утилита: проверка, что пользователь нажал одну из кнопок сцены
+# ================================================================================
+async def ensure_valid_choice(message: Message, options: List[str]) -> bool:
+    """
+    Возвращает True, если message.text в списке options;
+    иначе шлёт ошибку и клавиатуру с options и возвращает False.
+    + Обрабатывает голосовые/не-текстовые (message.text is None/empty).
+    """
+    txt = (message.text or "").strip()
+    if not txt:
+        # 💬 сюда попадут voice, фото без подписи и пустые тексты
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text=btn)] for btn in options],
+            resize_keyboard=True
+        )
+        await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())  # 💬 скрыть старую
+        await smart_reply(message, "⚠️ Голосовые и не-текстовые сообщения не поддерживаются. Выбери одну из кнопок ниже.", reply_markup=kb)
+        return False
+
+    if txt not in options:
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text=btn)] for btn in options],
+            resize_keyboard=True
+        )
+        await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+        await smart_reply(message, "Пожалуйста, выбери одну из кнопок.", reply_markup=kb)
+        return False
+
+    return True
+
+
+
+import unicodedata
+
+import unicodedata
+
+# 💬 Нормализация ответа TEXTQUIZ: lower + без акцентов и артиклей
+def normalize_textquiz(text: str) -> str:
+    txt = text.lower().strip()
+    # 1) убираем акценты
+    txt = unicodedata.normalize("NFD", txt)
+    txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
+    # 2) убираем апострофы
+    txt = txt.replace("'", "").replace("`", "")
+
+    # 3) выкидываем артикль, если стоит отдельно
+    parts = txt.split()
+    articles = {"el", "la", "los", "las", "un", "una", "unos", "unas"}
+    if parts and parts[0] in articles:
+        parts = parts[1:]
+
+    # 4) объединяем в одну «слепленную» строку
+    combined = "".join(parts)
+
+    # 5) режем артикль, если он был слитно (elcuaderno → cuaderno)
+    for art in articles:
+        if combined.startswith(art):
+            combined = combined[len(art):]
+            break
+
+    return combined
+
+
+
+
+# ─────────────────────────────────────────────────────────────
+# ⏱ ЕДИНЫЕ ТАЙМИНГИ ДЛЯ КВИЗОВ/ФИДБЭКА/УДАЛЕНИЙ
+# 💬 все «sleep/delay» собраны в одном месте для удобной настройки
+# ─────────────────────────────────────────────────────────────
+QUIZ_OPEN_PERIOD_S       = 12.0   # ⏳ сколько открыт опрос (poll) у Telegram Quiz
+QUIZ_TIMEOUT_TASK_S      = 13.0   # 🕒 дублёр-таймаут: через сколько сработает наш фоновый watchdog
+
+SLEEP_BEFORE_FEEDBACK_S  = 0.35   # ⏸ пауза между показом «правильного/похвалы» и XP
+SLEEP_AFTER_FEEDBACK_S   = 0.35    # 📖 даём дочитать XP/фидбек перед удалением
+
+AUTO_DELETE_TEXT_DELAY_S = 0.35   # 🧹 авто-удаление сервисных сообщений («Время вышло!», «✅ …»)
+AUTO_DELETE_GIF_DELAY_S  = 3.0    # 🧹 авто-удаление MP4/стикеров после ссылки-упражнения
+
+AUTO_DELETE_STICKER_DELAY_S = 2.3   # 🧹 авто-удаление стикеров по умолчанию
+LONG_STICKER_DELETE_S       = 10.0  # 🧹 редкий длинный показ стикера (подписка/баннер)
+# 💬 если не нужен длинный кейс — можно обеих местами использовать AUTO_DELETE_STICKER_DELAY_S
+
+# ─── Негативный фидбек при ошибке (квиз) ───────────────────────
+NEGATIVE_STICKERS = [
+      "CAACAgIAAxkBAAIRIGlE3W3MzKs6hfGC6PBO1kNZnIkdAAKhMgACnIfBSFQYZ8fI6S5UNgQ.",  # 💬 вставь сюда ID стикера №1
+      "CAACAgIAAxkBAAIQtGlExnTmmic3O0KvpIIspVsWb7JzAAKvEAACH1yYSbY5sQMKIUkvNgQ",  # 💬 №2
+      "CAACAgIAAxkBAAIQwGlEyGHOeggqkrRWCRSJ8wk16SlYAAKGAAPBnGAM5riI3F3JHAQ2BA",  # 💬 №3
+      "CAACAgIAAxkBAAIRJmlE3iEgwjBN2ZJagKtYmbauKs-kAALVCgAC16xhS8dwLdmVKEAtNgQ",  # 💬 №4
+      "CAACAgIAAxkBAAIRMGlE3pe_U8eaS2iRnDKdmV1Vb1m-AAIVMAACvxdJSHkF7H2f3kAaNgQ",  # 💬 №5
+      "CAACAgIAAxkBAAIRNGlE3q8aCIWKQZTrDaPe_iTl4l8AA-svAAJLt1FJWR9bn1FKlyY2BA",  # 💬 вставь сюда ID стикера №1
+      "CAACAgIAAxkBAAIROmlE3vTINWHAQRbefMkaaQgQ0FjWAAIrEAACIfiYSfeadbBgPmtmNgQ",  # 💬 №2
+      "CAACAgIAAxkBAAIRPmlE30Jnig-Oi5-n16Uuyi3FeJ_sAAIzAQACUomRI9GLrMjcGVmbNgQ",  # 💬 №3
+      "CAACAgIAAxkBAAIRQmlE31ct037BwKN26N_p-8L765eNAAImAQACUomRI3VoLZaREiseNgQ",  # 💬 №4
+      "CAACAgIAAxkBAAIRRmlE33yP9FpaV1RLhgIjG8cXperuAAJJAQACUomRI4JZzSRvd3QzNgQ",  # 💬 №5
+      "CAACAgIAAxkBAAIRSmlE36yXFEuP_JdjsrUIIb0mLPrlAAJMAQACUomRIyzkKh0sMQYCNgQ",  # 💬 №5
+      "CAACAgIAAxkBAAIRTmlE39AM4lV1UOtN8k4Je_Tcj9BfAALOAAP3AsgPXJhH4Myrboo2BA",  # 💬 №5
+      "CAACAgIAAxkBAAIRUmlE4AUDdKUh0k6c08vvP6OVpkBGAAIzAQAC9wLIDzvK4ZTu2U7NNgQ",  # 💬 №5
+      "CAACAgIAAxkBAAIRWGlE4EfuynZEoFaKP-PDGmYh9_i7AAK5AAP3AsgPkCGq-Dl3Rtg2BA",  # 💬 №5
+]
+
+NEGATIVE_STICKER_PROB   = 0.30  # 💬 шанс показать «негативный» стикер при ошибке
+WRONG_FB_TEXT_TOTAL_S   = 2.0   # 💬 сколько держим сообщение с правильным ответом (всего)
+WRONG_STICKER_DELAY_S   = 0.5   # 💬 через сколько после ответа показать стикер
+WRONG_STICKER_SHOW_S    = 1.0   # 💬 сколько показываем стикер (потом удаляем)
+
+
+AD_REACTION_DELETE_S     = 2.0    # 🎯 пауза перед зачисткой рекламного блока после клика
+
+# 💬 единые паузы чтения/ожидания для реакций и сервисных анимаций
+DICE_DELETE_DELAY_S              = 1.0   # 💬 задержка до удаления 🎲
+LINK_HINT_DELETE_S               = 3.0   # 💬 подсказка перед ссылкой (аним. текст)
+REPLY_REACTION_READ_DELAY_S      = 1.0   # 💬 пауза, чтобы прочитать реакцию (текст)
+REPLY_REACTION_READ_DELAY_PHOTO_S= 1.0   # 💬 пауза, чтобы прочитать реакцию (фото)
+
+# ─────────────────────────────────────────────────────────────
+# 💬 что делает эта часть: все задержки сведены в константы, чтобы менять
+# поведение бота без копания в десятках «sleep/delay» по коду.
+
+
+# ─── ЗАДЕРЖКИ И УДАЛЕНИЯ СТИКЕРОВ И ГИФОК ─────────────────────
+
+# 💬 Отправка стикера с авто-удалением через N секунд
+async def send_and_auto_delete_sticker(bot, chat_id, sticker, delay=AUTO_DELETE_STICKER_DELAY_S):  # 💬 единый дефолт для стикеров
+
+    msg = await bot.send_sticker(chat_id=chat_id, sticker=sticker)
+    await asyncio.sleep(delay)
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
+    except Exception:
+        pass
+
+
+
+# 💬 Отправка GIF/анимации с авто-удалением через N секунд (по умолчанию 3 сек)
+async def send_and_auto_delete_gif(bot, chat_id, gif, delay=AUTO_DELETE_GIF_DELAY_S):  # 💬 единый дефолт для GIF/видео
+
+    msg = await bot.send_animation(chat_id=chat_id, animation=gif)
+    await asyncio.sleep(delay)
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
+    except Exception:
+        pass
+
+
+
+async def _maybe_send_negative_sticker(bot, chat_id: int):  # 💬 1 из NEGATIVE_STICKERS при ошибке
+    if not NEGATIVE_STICKERS:
+        return
+    if random.random() >= NEGATIVE_STICKER_PROB:
+        return
+
+    await asyncio.sleep(WRONG_STICKER_DELAY_S)  # 💬 даём увидеть правильный ответ
+    await send_and_auto_delete_sticker(
+        bot,
+        chat_id,
+        random.choice(NEGATIVE_STICKERS),
+        delay=WRONG_STICKER_SHOW_S  # 💬 показываем 1 секунду
+    )
+
+
+# ===============================================================================  
+# 🔄 Обычный smart_reply с typing + динамической задержкой  
+# ===============================================================================  
+async def smart_reply(
+    target,           # Message или ChatFullInfo
+    text: str,
+    **kwargs
+):
+    # Определяем chat_id
+    if hasattr(target, "chat"):
+        chat_id = target.chat.id
+    else:
+        chat_id = getattr(target, "id", None)
+    # Показываем «typing…»
+    await bot.send_chat_action(chat_id, action=ChatAction.TYPING)
+    # Задержка: 10 мс на символ, но не больше 3 сек
+    await asyncio.sleep(min(len(text) * 0.01, 3.0))
+    # Отправляем сообщение
+    return await bot.send_message(chat_id, text, **kwargs)
+
+
+
+
+# 👇 ЭТУ функцию поставь ВНЕ всех хендлеров (где-то рядом с другими глобальными функциями)
+def render_leaderboard(title, top, emoji):
+    medals = ["🥇", "🥈", "🥉"]
+    res = [f"<b>{title}</b>"]
+    for idx, u in enumerate(top, 1):
+        m = medals[idx-1] if idx <= 3 else str(idx)
+        res.append(f"{m} {u['name']} {emoji} {u['words_learned']}")
+    return "\n".join(res)
+
+# 💬 Отправка текстового сообщения с авто-удалением через N секунд
+async def send_and_auto_delete_text(bot, chat_id, text, delay=AUTO_DELETE_TEXT_DELAY_S, **kwargs):  # 💬 единый дефолт
+
+    # 💬 отправляем текст и удаляем через delay секунд
+    msg = await bot.send_message(chat_id=chat_id, text=text, **kwargs)
+    await asyncio.sleep(delay)
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
+    except TelegramBadRequest:
+        pass
+
+
+
+# 💬 Набор ТЕКСТОВЫХ подсказок перед link (без эмодзи)
+LINK_HINT_TEXTS = (
+    "Готовим ссылку…",
+    "Секунду, открываю материал…",
+    "Сейчас пришлю ссылку",
+    "🏆",
+    "🎰",
+    "☕️",
+    "🎉",
+    "🚀",
+    "Дальше будет ссылка",
+)
+
+# 💬 Отправка СЛУЧАЙНОГО текста с авто-удалением, не блокируя поток
+async def send_and_auto_delete_random_text(bot, chat_id, texts=LINK_HINT_TEXTS, delay: float = 3.0):
+    try:
+        txt = random.choice(texts)
+    except Exception:
+        return  # 💬 если список пуст/ошибка — тихо выходим
+    await send_and_auto_delete_text(bot, chat_id, txt, delay=delay)  # 💬 используем существующую функцию
+
+
+
+# ================================================================================
+#   🚀 /start — выбор «📚 Лексика / 🧠 Грамматика»
+# ================================================================================
+# 💬 Команда /start → Показываем категории
+
+@dp.message(CommandStart())
+@track_handler
+async def start_handler(message: Message, state: FSMContext):
+    user_id   = str(message.from_user.id)
+    # 💬 Загружаем существующие данные пользователей
+    user_data = load_user_data()
+    # 💬 Получаем или создаём запись для этого user_id
+    u         = user_data.setdefault(user_id, {})
+
+    # 💬 Сохраняем полное имя
+    u.setdefault("name", message.from_user.full_name or "")
+    # 💬 Сохраняем Telegram-username
+    if message.from_user.username:
+        u.setdefault("tg_username", "@" + message.from_user.username)
+
+    # 💬 фиксируем рефералку из /start ref_<id>
+    payload = None
+    if message.text:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) > 1:
+            payload = parts[1].strip()
+    bonus_register_referral_from_start(user_id, payload)  # 💬 сохраняем, кто пригласил пользователя
+
+
+    # 💬 ГАРАНТИРУЕМ поля для тем и подписок
+    u.setdefault("unlocked_topics", [])  # ключи открытых тем
+    u.setdefault("channels", {})         # история подписок по каналам
+    u.setdefault("last_subscription_channel_index", -1)  # 💬 для ротации каналов
+
+
+    # 💬 Текущее время
+    now = int(time.time())
+    # — время первого входа
+    if "first_join" not in u:
+        u["first_join"] = now
+    # — время последней активности
+    u["last_active"] = now
+
+    # 💬 Сохраняем обновлённые данные в user_data.json
+    user_data[user_id] = u
+    save_user_data(user_data)
+
+    # 💬 Обновляем XP-профиль: имя / username / базовые поля в xp_data.json
+    await register_or_update_user(message)
+
+
+        # — далее остальная логика: приветствие, загрузка тем и установка состояния —
+    await state.clear()
+    global topics
+    topics = load_topics()
+    set_topics_ref(topics)  # 💬 обновляем topics для "Битвы" после /start
+
+
+    # 💬 Убираем старую Reply-клавиатуру и отправляем нормальное приветствие
+    await smart_reply(
+        message,
+        "Holaaa...",  # 💬 НЕ пустой текст, чтобы не ловить BadRequest: text must be non-empty
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+
+
+    # 💬 Отправляем рандомный стартовый стикер и авто-удаляем через 3 секунды
+    sticker_id = random.choice(start_stickers)  # список импортируется из scenarios_estiloso8_1
+    sticker_msg = await message.answer_sticker(sticker_id)
+
+    async def _auto_delete_start_sticker(msg):
+        await asyncio.sleep(3)
+        try:
+            await msg.delete()
+        except TelegramBadRequest:
+            # 💬 если сообщение уже удалено/недоступно — тихо игнорируем
+            pass
+
+    asyncio.create_task(_auto_delete_start_sticker(sticker_msg))
+
+    # 💬 Глобальный прогресс пользователя
+
+    xp_data = load_xp_data()
+    total_xp = xp_data.get(user_id, {}).get("total_xp", 0)
+    # Текущий уровень
+    lvl_idx = total_xp // XP_PER_LEVEL
+    if lvl_idx >= len(LEVELS):
+        lvl_idx = len(LEVELS) - 1
+    current_level = LEVELS[lvl_idx]
+    # Текущая медаль внутри уровня
+    medal_idx = (total_xp % XP_PER_LEVEL) // (XP_PER_LEVEL // 3)
+    current_medal = MEDALS[min(medal_idx, 2)]
+    # Определяем, что будет следующим
+    if medal_idx < 2:
+        next_level = current_level
+        next_medal = MEDALS[medal_idx + 1]
+    else:
+        next_level = LEVELS[min(lvl_idx + 1, len(LEVELS) - 1)]
+        next_medal = MEDALS[0]
+    # Строим прогресс-бар из 10 сегментов
+    filled = int((total_xp % XP_PER_LEVEL) / XP_PER_LEVEL * 10)
+    bar = "■" * filled + "□" * (10 - filled)
+
+    '''
+    # Отправляем прогресс
+    await message.answer(
+        f"📊 Уровень: {current_level}{current_medal}👇   \n"
+        f"[{bar}]\n"
+        f"{total_xp % XP_PER_LEVEL}/{XP_PER_LEVEL} XP ➡️ {next_level}{next_medal}"
+    )
+    '''
+
+    # 💬 Инициализация показа рекламы в «Учить слова»
+    await state.update_data(phase_entry_count=0, pending_phase=False)
+
+
+    # 💬 Главное меню теперь ИНЛАЙН — без ReplyKeyboard (ничего не «висит» внизу)
+    inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📚 УЧИТЬСЯ",    callback_data="menu:learn")],
+        [
+            InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
+            InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL)
+        ],
+        [InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses")],  # 💬 открываем рефералку
+
+
+        [InlineKeyboardButton(text="⚔️ Битва",   callback_data="menu:battle"),
+         InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords")],
+
+        [InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating"),
+        InlineKeyboardButton(text="Настройки ⚙️",  callback_data="menu:settings")],
+
+
+    ])
+
+
+    # 💬 Рандомная фраза «Что изучаем?» из сценариев (fallback — старая фраза)
+    menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Что изучаем?⭐"
+
+    menu_msg = await smart_reply(message, menu_text, reply_markup=inline_kb_main)  # 💬 инлайн-меню и храним msg
+
+    await state.update_data(last_menu_msg_id=menu_msg.message_id)  # 💬 запоминаем id для последующего удаления
+
+
+
+
+    await state.set_state(LessonStates.choosing_category)
+    # 💬 Теперь пользователь сразу может нажимать на кнопки!
+
+
+
+
+# ================================================================================
+#   🟡 1️⃣ Выбор категории (choosing_category)
+# ================================================================================
+
+
+@dp.callback_query(LessonStates.choosing_category, F.data.startswith("menu:"))
+@track_handler
+async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
+    # 💬 регистрируем активность пользователя (как и раньше)
+    await register_or_update_user(callback.message)
+
+    action = callback.data.split(":", 1)[1]
+
+    # ⛔ Временная блокировка раздела «Грамматика»
+    if action == "gram":
+        await callback.answer()
+        chat_id = callback.message.chat.id
+
+        # 💬 1) Текст «Раздел временно недоступен» → удалится через 2 секунды
+        asyncio.create_task(
+            send_and_auto_delete_text(
+                bot,
+                chat_id,
+                "Раздел временно недоступен",
+                delay=2.0,
+            )
+        )
+
+        # 💬 2) Через 1 секунду показываем стикер → тоже удалится через 2 секунды
+        await asyncio.sleep(1.0)
+        asyncio.create_task(
+            send_and_auto_delete_sticker(
+                bot,
+                chat_id,
+                GRAMMAR_LOCKED_STICKER,
+                delay=2.5,
+            )
+        )
+
+        # 💬 Главное меню остаётся тем же: просто не заходим в поток «Грамматика»
+        return
+
+
+    # 🏆/⚙️ — сразу открываем соответствующие разделы
+    if action == "rating":
+        await callback.answer()
+    
+        # 💬 сохраняем “кто нажал рейтинг”, потому что callback.message.from_user = бот
+        await state.update_data(
+            leaderboard_actor_uid=str(callback.from_user.id),
+            leaderboard_actor_name=((callback.from_user.full_name or callback.from_user.username) or "").strip()
+        )
+    
+        return await show_leaderboard(callback.message, state)
+
+
+    if action == "settings":
+        await callback.answer()
+        return await settings_menu(callback.message, state)
+        
+    # ⚔️ Битва
+    if action == "battle":
+        await callback.answer()
+        try:
+            await callback.message.delete()  # 💬 чистим главное меню чтобы не копилось
+        except TelegramBadRequest:
+            pass
+        return await start_battle_from_lex_menu(callback.message, state)  # 💬 показываем темы битвы
+
+
+    if action == "mywords":
+        await callback.answer()
+        return await mywords_menu(callback.message, state)  # 💬 открываем «Мои слова»
+
+    if action == "bonuses":
+        await callback.answer()
+        return await bonuses_open(callback.message, state)  # 💬 открываем «Бонусы»
+
+
+    # 📚 УЧИТЬСЯ — показываем выбор уровня (категорию выберем позже внутри уровня)
+    if action == "learn":
+        inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="😇 Новичку", callback_data="level:A0"),
+             InlineKeyboardButton(text="🌱 A1-A2",  callback_data="level:A1-A2")],
+            [InlineKeyboardButton(text="🔥 B1-B2",   callback_data="level:B1-B2"),
+             InlineKeyboardButton(text="🧠 C1",      callback_data="level:C1")],
+            [InlineKeyboardButton(text="⬅️ Назад",   callback_data="level:back")]
+        ])
+
+        # 💬 вместо новой реплай-клавы — редактируем то же сообщение с инлайном
+        # 💬 фраза про уровень берётся рандомно из набора
+        intro_text = random.choice(difficulty_intro_phrases) if difficulty_intro_phrases else \
+            "😜 Отличный выбор! А теперь давай определимся с уровнем сложности:"
+
+        await callback.message.edit_text(
+            intro_text,
+            reply_markup=inline_kb
+        )
+        await state.set_state(LessonStates.choosing_level)
+        await callback.answer()
+        return
+
+    # 📚/🧠 из старого меню — сохраняем категорию и спрашиваем уровень (старый сценарий)
+    if action in ("lex", "gram"):
+        category = "lex" if action == "lex" else "gram"
+        await state.update_data(chosen_category=category)
+
+        inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="😇 Новичку", callback_data="level:A0"),
+             InlineKeyboardButton(text="🌱 A1-A2",  callback_data="level:A1-A2")],
+            [InlineKeyboardButton(text="🔥 B1-B2",   callback_data="level:B1-B2"),
+             InlineKeyboardButton(text="🧠 C1",      callback_data="level:C1")],
+            [InlineKeyboardButton(text="⬅️ Назад",   callback_data="level:back")]
+        ])
+
+        # 💬 вместо новой реплай-клавы — редактируем то же сообщение с инлайном
+        # 💬 фраза про уровень берётся рандомно из набора
+        intro_text = random.choice(difficulty_intro_phrases) if difficulty_intro_phrases else \
+            "😜 Отличный выбор! А теперь давай определимся с уровнем сложности:"
+
+        await callback.message.edit_text(
+            intro_text,
+            reply_markup=inline_kb
+        )
+        await state.set_state(LessonStates.choosing_level)
+        await callback.answer()
+        return
+
+
+    # 💬 Теперь после выбора Лексика или Грамматика мы спрашиваем уровень (A1, A2 и т.д.).
+
+
+
+
+
+# 💬 Пользователь выбирает уровень, и показываются темы только из этой категории и уровня.
+@dp.callback_query(LessonStates.choosing_level, lambda c: c.data.startswith("level:"))
+@track_handler
+async def level_chosen(callback: CallbackQuery, state: FSMContext):
+    choice = callback.data.split(":")[1]
+
+    if choice == "back":
+        await callback.message.delete()
+        return await start_handler(callback.message, state)
+
+    level = choice
+    await state.update_data(chosen_level=level)
+
+    # 💬 После выбора уровня показываем выбор «Лексика / Грамматика» внутри этого уровня
+    inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📚 ЛЕКСИКА",    callback_data="subcat:lex"),
+            InlineKeyboardButton(text="🧠 ГРАММАТИКА", callback_data="subcat:gram"),
+        ],
+        [
+            InlineKeyboardButton(text="👈 НАЗАД",      callback_data="subcat:back"),
+        ],
+    ])
+
+    text = (
+        f"😎 Уровень <b>{level}</b> выбран!\n"
+        f"Что будем учить на этом уровне?"
+    )
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=inline_kb,
+        parse_mode="HTML"
+    )
+
+    await state.set_state(LessonStates.choosing_subcategory)
+    await callback.answer()
+
+
+
+async def show_topics_for_category_level(callback: CallbackQuery, state: FSMContext, category: str, level: str):
+    """
+    💬 Показываем список тем для выбранной категории и уровня + прогресс-бар
+    """
+    message = callback.message  # 💬 работаем через message, чтобы не плодить NameError
+
+    buttons = [
+        InlineKeyboardButton(text=info["visible_title"], callback_data=f"topic:{key}")
+        for key, info in topics.items()
+        if info.get("category") == category and info.get("level") == level
+    ]
+
+    if not buttons:
+        await message.edit_text("🤷‍♂️ Тем пока нет на уровне. Скоро добавим!")
+        # 💬 Если тем нет — возвращаем пользователя в стартовое меню
+        return await start_handler(message, state)
+
+    # 💬 По одной теме в строке
+    inline_keyboard = [[btn] for btn in buttons]
+
+    # 💬 Добавляем кнопку «НАЗАД» в конец списка тем
+    inline_keyboard.append(
+        [InlineKeyboardButton(text="👈 НАЗАД", callback_data="topic_back")]
+    )
+
+    inline_kb = InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
+
+    # 💬 Глобальный прогресс пользователя — короткий формат
+    try:
+        progress_text = render_short_level_progress(message.from_user.id)
+    except Exception:
+        # 💬 если вдруг что-то пошло не так с чтением xp_data — не ломаем поток
+        progress_text = ""
+
+    # 💬 Подпись экрана уровня + категория, чтобы не путать пользователя
+    if category == "lex":
+        cat_title = "📚 ЛЕКСИКА"
+    elif category == "gram":
+        cat_title = "🧠 ГРАММАТИКА"
+    else:
+        cat_title = "📘 Категория"
+
+    # 💬 Собираем один текст: сначала короткий прогресс, потом строка с уровнем
+    if progress_text:
+        level_screen_text = (
+            f"{progress_text}\n\n"
+            f"🧭 Уровень <b>{level}</b> · {cat_title}\n\n"
+            f"Выбери тему для этого уровня:"
+        )
+    else:
+        level_screen_text = (
+            f"🧭 Уровень <b>{level}</b> · {cat_title}\n\n"
+            f"Выбери тему для этого уровня:"
+        )
+
+    # 💬 Отправляем уровень со списком тем этого уровня (прогресс уже перед словом «Уровень»)
+    await message.edit_text(
+        level_screen_text,
+        reply_markup=inline_kb,
+        parse_mode="HTML"
+    )
+
+    await state.set_state(LessonStates.choosing_topic)  # 💬 дальше ждём выбор конкретной темы
+
+
+
+
+@dp.callback_query(LessonStates.choosing_subcategory, F.data.startswith("subcat:"))
+@track_handler
+async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
+    """
+    💬 Внутри выбранного уровня пользователь выбирает: Лексика / Грамматика / Назад
+    """
+    action = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    level = data.get("chosen_level")
+
+    # Если по какой-то причине уровень не сохранён — возвращаемся к выбору уровня
+    if not level:
+        inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="😇 Новичку", callback_data="level:A0"),
+                InlineKeyboardButton(text="🌱 A1-A2",  callback_data="level:A1-A2"),
+            ],
+            [
+                InlineKeyboardButton(text="🔥 B1-B2",   callback_data="level:B1-B2"),
+                InlineKeyboardButton(text="🧠 C1",      callback_data="level:C1"),
+            ],
+            [
+                InlineKeyboardButton(text="⬅️ Назад",   callback_data="level:back"),
+            ],
+        ])
+        intro_text = random.choice(difficulty_intro_phrases) if difficulty_intro_phrases else \
+            "😜 Отличный выбор! А теперь давай определимся с уровнем сложности:"
+
+        await callback.message.edit_text(
+            intro_text,
+            reply_markup=inline_kb,
+        )
+        await state.set_state(LessonStates.choosing_level)
+        await callback.answer()
+        return
+
+    # 🔙 Назад → возвращаемся к выбору уровня
+    if action == "back":
+        inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="😇 Новичку", callback_data="level:A0"),
+                InlineKeyboardButton(text="🌱 A1-A2",  callback_data="level:A1-A2"),
+            ],
+            [
+                InlineKeyboardButton(text="🔥 B1-B2",   callback_data="level:B1-B2"),
+                InlineKeyboardButton(text="🧠 C1",      callback_data="level:C1"),
+            ],
+            [
+                InlineKeyboardButton(text="⬅️ Назад",   callback_data="level:back"),
+            ],
+        ])
+        intro_text = random.choice(difficulty_intro_phrases) if difficulty_intro_phrases else \
+            "😜 Отличный выбор! А теперь давай определимся с уровнем сложности:"
+
+        await callback.message.edit_text(
+            intro_text,
+            reply_markup=inline_kb,
+        )
+        await state.set_state(LessonStates.choosing_level)
+        await callback.answer()
+        return
+
+    # ⛔ Временная блокировка раздела «Грамматика» внутри уровня
+    if action == "gram":
+        await callback.answer()
+        chat_id = callback.message.chat.id
+
+        asyncio.create_task(
+            send_and_auto_delete_text(
+                bot,
+                chat_id,
+                "Раздел временно недоступен",
+                delay=2.0,
+            )
+        )
+
+        await asyncio.sleep(1.0)
+        asyncio.create_task(
+            send_and_auto_delete_sticker(
+                bot,
+                chat_id,
+                GRAMMAR_LOCKED_STICKER,
+                delay=2.5,
+            )
+        )
+        # 💬 Остаёмся на экране выбора подкатегории
+        return
+
+    if action == "lex":
+        # 💬 Сохраняем выбранную категорию и показываем темы для этого уровня
+        await state.update_data(chosen_category="lex")
+        await show_topics_for_category_level(callback, state, category="lex", level=level)
+        await callback.answer()
+        return
+
+
+
+@dp.message(LessonStates.choosing_category, lambda m: m.text == "⚙️ Настройки")
+@dp.message(LessonStates.waiting_lesson_action, lambda m: m.text == "⚙️ Настройки")
+@track_handler
+async def settings_menu(message: Message, state: FSMContext):
+    """
+    💬 Меню настроек: выбор лимита слов в день и часа напоминания.
+    """
+    xp_data = load_xp_data()
+    user_id = str(message.chat.id)
+    user = xp_data.setdefault(user_id, {})
+    reset_daily_words_if_needed(user)
+    current_limit = user.get("words_daily_limit", 10)
+    reminder_hour = user.get("reminder_hour", 19)
+    save_xp_data(xp_data)
+
+    # Кнопки выбора лимита и времени
+    buttons = [
+        [KeyboardButton(text=f"🔢 Лимит слов: {current_limit}")],
+        [KeyboardButton(text=f"⏰ Время уведомления: {reminder_hour}:00")],
+        [KeyboardButton(text="⬅️ В меню")]
+    ]
+    kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+    await message.answer("⚙️ <b>Настройки:</b>\n\n— Сколько слов в день ты хочешь учить?\n— Время для напоминания:", parse_mode="HTML", reply_markup=kb)
+    await state.set_state("settings_menu")
+
+
+@track_handler  # 💬 фиксируем хендлер для админ-логов
+# 💬 Обрабатываем только если текст не пустой и не None
+@dp.message(lambda m: m.text is not None and m.text.startswith("🔢 Лимит слов:"))
+async def set_limit(message: Message, state: FSMContext):
+    # 💬 Здесь пользователь нажал на лимит слов
+    await message.answer("Введи новый лимит слов в день (от 1 до 50):")
+    await state.set_state("waiting_limit_input")
+
+
+@track_handler  # 💬 фиксируем хендлер для админ-логов
+@dp.message(StateFilter("waiting_limit_input"))
+async def process_limit_input(message: Message, state: FSMContext):
+    try:
+        val = int(message.text)
+        if not 1 <= val <= 50:
+            raise ValueError
+    except:
+        return await message.answer("Введи число от 1 до 50.")
+    xp_data = load_xp_data()
+    user_id = str(message.chat.id)
+    user = xp_data.setdefault(user_id, {})
+    user["words_daily_limit"] = val
+    save_xp_data(xp_data)
+    await message.answer(f"✅ Лимит обновлён: {val} слов в день.")
+    return await settings_menu(message, state)
+
+@track_handler 
+@dp.message(lambda m: m.text is not None and m.text.startswith("⏰ Время уведомления:"))
+async def set_reminder_time(message: Message, state: FSMContext):
+    await message.answer("Введи час (от 1 до 24), когда присылать напоминание:")
+    await state.set_state("waiting_reminder_input")
+
+@track_handler 
+@dp.message(StateFilter("waiting_reminder_input"))
+async def process_reminder_input(message: Message, state: FSMContext):
+    try:
+        hour = int(message.text)
+        if not 1 <= hour <= 24:
+            raise ValueError
+    except:
+        return await message.answer("Введи число от 1 до 24.")
+    xp_data = load_xp_data()
+    user_id = str(message.chat.id)
+    user = xp_data.setdefault(user_id, {})
+    user["reminder_hour"] = hour
+    save_xp_data(xp_data)
+    await message.answer(f"✅ Время напоминания обновлено: {hour}:00")
+    return await settings_menu(message, state)
+@track_handler  
+@dp.message(lambda m: m.text == "⬅️ В меню")
+async def back_to_menu(message: Message, state: FSMContext):
+    await start_handler(message, state)
+
+
+
+# 🎲 Стикеры для заблокированных кнопок (🔒 Читать / 🔒 Видео и т.д.)
+UNAVAILABLE_STICKERS = [
+    "CAACAgIAAxkBAAIQtGlExnTmmic3O0KvpIIspVsWb7JzAAKvEAACH1yYSbY5sQMKIUkvNgQ",  # 💬 вставь ID стикера
+    "CAACAgIAAxkBAAIQtmlExoF2ySyJV2ZfWGmjvZTkm6gtAALDEAACyy6YSWRm4_6tdy94NgQ",  # 💬 вставь ID стикера
+    "CAACAgIAAxkBAAIQuGlExpaDen0-RArL7Y1B0_X-gleoAAL2DgACMowBSlhbMUADkul4NgQ",  # 💬 вставь ID стикера
+    "CAACAgIAAxkBAAIQvmlEyFItz7xyloNqTjJ8CJkDUNd8AAJzAAPBnGAMCyMQkP6llyc2BA",  # 💬 вставь ID стикера
+    "CAACAgIAAxkBAAIQwGlEyGHOeggqkrRWCRSJ8wk16SlYAAKGAAPBnGAM5riI3F3JHAQ2BA",
+    "CAACAgIAAxkBAAIQwmlEyI0iFrq1o3yDm7WSpILFS9bkAAIqAQACUomRIz_Z0LQz8_8SNgQ",
+]
+
+
+
+@dp.message(LessonStates.waiting_lesson_action, lambda m: m.text in ["🎲 Упражнения", "🎬 Видео", "🙊 Диалоги"])
+@track_handler
+async def handle_unavailable_buttons(message: Message, state: FSMContext):
+    """
+    💬 Если пользователь нажимает на недоступную кнопку,
+    отправляем стикер отказа, который удаляется через 1.5 секунды.
+    """
+    # 🎲 выбираем один случайный стикер из списка
+    sticker_id = random.choice(UNAVAILABLE_STICKERS) if UNAVAILABLE_STICKERS else "CAACAgIAAxkBAAE4YOhogox6Armq-TOX3f5IkYPXCeUwuAACRAMAArVx2gYMtzsTtIZDMDYE"  # 💬 fallback если список пустой
+    await send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=1.5)  # 💬 показали и удалили
+
+
+
+
+
+@dp.message(F.text == "Рейтинг🏆")
+@track_handler
+async def show_leaderboard(message: Message, state: FSMContext):
+    xp_data = load_xp_data()
+    users = []
+    for uid, u in xp_data.items():
+        name = (u.get("name", "") or "").strip()
+        week = int(u.get("words_learned_week", 0) or 0)
+        month = int(u.get("words_learned_month", 0) or 0)
+
+        users.append({
+            "uid": str(uid),
+            "name": name or f"User {uid}",
+            "words_learned_week": week,
+            "words_learned_month": month
+        })
+
+    current_uid = str(message.from_user.id)
+    data = await state.get_data()  # 💬 берём FSM-data один раз, чтобы render_block мог читать actor_uid/actor_name и last_menu_msg_id
+
+
+    def render_block(title: str, key: str, emoji: str) -> str:
+        place_icons = {  # 💬 эмодзи мест как на скриншоте
+            1: "👑",
+            2: "🥈",
+            3: "🥉",
+            4: "🎓",
+            5: "🍀",
+        }
+        nbsp = " "               # 💬 обычный пробел = будет ровно работать внутри <pre> (моноширинный блок)
+        indent = nbsp * 2        # 💬 2 пробела отступа перед 1) 2) 3)
+
+        NAME_COL = 20            # 💬 ширина колонки имени
+        RANK_COL = 4             # 💬 ширина колонки ранга (1) / 10) / 223)
+
+        def _name_cell(raw: str) -> str:
+            # 💬 делает ячейку имени фикс длины: режем до 20 и ставим "..."
+            raw = (raw or "").strip()
+            if len(raw) > NAME_COL:
+                raw = raw[:max(0, NAME_COL - 3)] + "..."  # 💬 длинное имя = обрезаем
+            pad = nbsp * max(0, NAME_COL - len(raw))
+            return f"{raw}{pad}"  # 💬 добивка до фикс ширины
+
+        def _mark_cell(is_me: bool) -> str:
+            # 💬 маркер ">" для строки пользователя, ширина ячейки всегда 2 = ранги не съезжают
+            return f">{nbsp}" if is_me else indent
+
+
+
+        def _rank_cell(pos: int) -> str:
+            # 💬 фикс-ячейка ранга без ">" (сам ">" живёт в _mark_cell), чтобы колонки не съезжали
+            base = f"{pos})"
+            pad = nbsp * max(0, RANK_COL - len(base))
+            return f"{base}{pad}{nbsp}"  # 💬 пробел между "1)" и эмодзи мест
+
+        def _under_name(text: str) -> str:
+            # 💬 строка строго под колонкой имени (чтобы ↳91 стояло ровно как на скрине)
+            name_pad = f"{indent}{(nbsp * (RANK_COL + 1))}{(nbsp * 2)}"
+            return f"{name_pad}{text}"
+
+
+        def _line(pos: int, name: str, val: int, is_me: bool = False) -> str:
+            # 💬 собирает строку рейтинга с фикс колонкой имени и 🍪 (и без съезда из-за ">")
+            icon = "🤓" if is_me else (place_icons.get(pos) or nbsp)  # 💬 у тебя всегда 🤓
+            name_cell = _name_cell(name)
+            return f"{_mark_cell(is_me)}{_rank_cell(pos)}{icon}{nbsp}{name_cell}{nbsp}{emoji}{nbsp}{val}"
+
+    
+        sorted_all = sorted(
+            users,
+            key=lambda u: (int(u.get(key, 0) or 0), u.get("name", "")),
+            reverse=True
+        )
+    
+        res = [f"<b>{title}</b>", "<pre>"]  # 💬 <pre> = моноширинный шрифт, колонки реально выравниваются
+
+        # 💬 “реальные + 30 фейковых” (без вывода строки “участников”)
+        FAKE_ADD = 30
+        real_count = len(sorted_all)
+        total_count = real_count + FAKE_ADD
+    
+
+        actor_uid = (data.get("leaderboard_actor_uid") or "").strip()
+        actor_name = (data.get("leaderboard_actor_name") or "").strip()
+    
+        current_uid = actor_uid or str(message.from_user.id)
+        my_name = actor_name or (message.from_user.first_name or "Пользователь")  # 💬 имя вместо слова Ты
+
+    
+    
+        if not sorted_all:
+            # 💬 даже если данных нет = не падаем и показываем формат с моноширинным выравниванием
+            res.append("Пока пусто")
+            res.append(_under_name(f"↳{total_count}"))  # 💬 общее число участников
+            me_line = _line(1, my_name, 0, is_me=True)  # 💬 строка пользователя отдельно (для выделения)
+
+            res.append(me_line)  # 💬 строка пользователя внутри списка (не вылезает из <pre>)
+            res.append("</pre>")  # 💬 закрываем моноширинный блок
+            return "\n".join(res)
+
+    
+        # 💬 ищем позицию “тебя”
+        my_rank = None
+        my_val = 0
+        for idx, u in enumerate(sorted_all, 1):
+            if str(u.get("uid", "")) == str(current_uid):
+                my_rank = idx
+                my_val = int(u.get(key, 0) or 0)
+                if not my_name or my_name == "Ты":
+                    my_name = u.get("name", my_name)
+                break
+    
+        if my_rank is None:
+            # 💬 если вдруг юзера нет в xp_data — ставим его “после реальных”
+            my_rank = min(real_count + 1, total_count)
+            my_val = 0
+    
+        # 💬 топ-5
+        top5 = sorted_all[:5]
+        for idx, u in enumerate(top5, 1):
+            val = int(u.get(key, 0) or 0)
+            res.append(_line(idx, u.get("name", ""), val))  # 💬 выравнивание колонок как на скриншоте
+        
+        # 💬 сколько всего пользователей (пишем ровно под колонкой имени)
+        if total_count > len(top5):
+            res.append(_under_name(f"↳{total_count}"))  # 💬 общее число участников
+
+        
+        me_line = _line(my_rank, my_name, my_val, is_me=True) if my_rank > len(top5) else None  # 💬 строка пользователя отдельно (для выделения)
+
+        if me_line:
+            res.append(me_line)  # 💬 показываем пользователя внутри <pre> на новой строке после ↳
+
+        res.append("</pre>")  # 💬 закрываем моноширинный блок
+        return "\n".join(res)
+
+
+
+    week_text = render_block("🏆 Рейтинг недели", "words_learned_week", "🍪")
+    month_text = render_block("🏆 Рейтинг месяца", "words_learned_month", "🍪")
+
+
+    last_menu_msg_id = data.get("last_menu_msg_id")
+    if last_menu_msg_id:
+        try:
+            await bot.delete_message(message.chat.id, last_menu_msg_id)
+        except Exception:
+            pass
+
+    # 💬 убираем ReplyKeyboard (старые кнопки меню), и даём интро перед рейтингом
+    await message.answer(
+        "А теперь посмотрим, где ты среди толпы... 👀",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+
+    menu_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="В меню", callback_data="back_to_menu")]
+        ]
+    )
+
+    legend = "🍪 = слов выучено"  # 💬 легенда для рейтинга
+
+
+    await message.answer(f"{legend}\n\n{week_text}\n\n{month_text}", parse_mode="HTML", reply_markup=menu_kb)  # 💬 легенда перед блоками
+
+
+# 🟢 Новый хендлер: Главное меню (/menu)
+@dp.message(Command("menu"))
+@track_handler
+async def menu_handler(message: Message, state: FSMContext):
+    # 💬 Возвращает пользователя к выбору категории
+    await start_handler(message, state)
+
+
+
+@dp.message(Command("stats"))
+@track_handler
+async def stats_handler(message: Message, state: FSMContext):
+    # 💬 статистика только для админа
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+
+    xp_data = load_xp_data()
+    total_users = len(xp_data)
+
+    now_ts = int(time.time())
+    today = datetime.date.today().isoformat()
+    since_24h = now_ts - 86400
+
+    new_24h = 0
+    words_total = 0
+    words_today = 0
+
+    from collections import Counter
+    topics_words_total = Counter()
+
+    # 💬 собираем по каждому пользователю: клики сегодня + слова по темам
+    per_user_rows = []
+
+    for uid, u in xp_data.items():
+        if not isinstance(u, dict):
+            continue
+
+        if u.get("first_join", 0) >= since_24h:
+            new_24h += 1
+
+        stats = u.get("stats", {})
+        words_total += int(stats.get("words_learned", 0) or 0)
+        words_today += int(u.get("words_learned_today", 0) or 0)
+
+        analytics = u.get("analytics", {})
+        days = analytics.get("days", {})
+        dayrec = days.get(today) if isinstance(days, dict) else None
+        clicks_today = int(dayrec.get("clicks", 0) or 0) if isinstance(dayrec, dict) else 0
+
+        tw = analytics.get("topics_words", {})
+        user_topics = {}
+        if isinstance(tw, dict):
+            for tk, cnt in tw.items():
+                try:
+                    c_int = int(cnt or 0)
+                except Exception:
+                    continue
+                if c_int > 0:
+                    user_topics[tk] = c_int
+                    topics_words_total[tk] += c_int
+
+        per_user_rows.append({
+            "uid": uid,
+            "name": (u.get("name") or "").strip() or "Без имени",
+            "tg_username": (u.get("tg_username") or "").strip(),
+            "clicks_today": clicks_today,
+            "topics": user_topics
+        })
+
+    def title_for_topic(key: str) -> str:
+        # 💬 показываем название темы в статистике
+        info = topics.get(key, {}) if isinstance(topics, dict) else {}
+        t = (info.get("title") or info.get("name") or key)
+        return t
+
+    top_topics_words = topics_words_total.most_common(7)
+
+    lines = []
+    lines.append("<b>📊 Статистика бота</b>")
+    lines.append(f"👥 Всего пользователей = <b>{total_users}</b>")
+    lines.append(f"🆕 Новые за 24ч = <b>{new_24h}</b>")
+    lines.append(f"🍪 Слов выучено всего = <b>{words_total}</b>")
+    lines.append(f"🍪 Слов сегодня = <b>{words_today}</b>")
+
+    lines.append("")
+    lines.append("<b>👤 По пользователям</b>")
+    lines.append("🖱 клики сегодня + 🍪 слова по темам")
+
+    if per_user_rows:
+        # 💬 выводим всех, сортировка по кликам сегодня (desc)
+        per_user_rows.sort(key=lambda r: (r.get("clicks_today", 0), r.get("uid", "")), reverse=True)
+
+        for r in per_user_rows:
+            uname = f" {r['tg_username']}" if r.get("tg_username") else ""
+            lines.append(f"• <b>{r['name']}</b>{uname} <code>{r['uid']}</code> = 🖱 <b>{r['clicks_today']}</b>")
+
+            tdict = r.get("topics", {}) or {}
+            if tdict:
+                for tk, cnt in sorted(tdict.items(), key=lambda x: int(x[1] or 0), reverse=True):
+                    lines.append(f"↳ {title_for_topic(tk)} = <b>{cnt}</b> 🍪")
+            else:
+                lines.append("↳ тем пока нет")
+
+    else:
+        lines.append("— пользователей нет —")
+
+    lines.append("")
+    lines.append("<b>🔝 Темы по словам (всего)</b>")
+    if top_topics_words:
+        for i, (tk, c) in enumerate(top_topics_words, 1):
+            lines.append(f"{i}) {title_for_topic(tk)} = <b>{c}</b> 🍪")
+    else:
+        lines.append("— пока нет данных —")
+
+    # 💬 режем на несколько сообщений, если слишком длинно
+    chunk = ""
+    for line in lines:
+        add = line + "\n"
+        if len(chunk) + len(add) > 3800:
+            await message.answer(chunk, parse_mode="HTML")
+            chunk = ""
+        chunk += add
+
+    if chunk.strip():
+        await message.answer(chunk, parse_mode="HTML")
+
+@dp.message(Command("stats_export"))
+@track_handler
+async def stats_export_handler(message: Message, state: FSMContext):
+    # 💬 экспорт статистики файлом, только для админа
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+
+    xp_data = load_xp_data()
+    user_data = load_user_data()
+
+    now_ts = int(time.time())
+    today = datetime.date.today().isoformat()
+    since_24h = now_ts - 86400
+
+    total_users = len(xp_data)
+    new_24h = 0
+    words_total = 0
+    words_today = 0
+
+    from collections import Counter
+    topics_words_total = Counter()
+    users_out = []
+
+    # 💬 готовим данные по каждому юзеру
+    for uid, u in xp_data.items():
+        if not isinstance(u, dict):
+            continue
+
+        if u.get("first_join", 0) >= since_24h:
+            new_24h += 1
+
+        stats = u.get("stats", {})
+        words_total += int(stats.get("words_learned", 0) or 0)
+        words_today += int(u.get("words_learned_today", 0) or 0)
+
+        analytics = u.get("analytics", {})
+        days = analytics.get("days", {})
+        dayrec = days.get(today) if isinstance(days, dict) else None
+        clicks_today = int(dayrec.get("clicks", 0) or 0) if isinstance(dayrec, dict) else 0
+
+        tw = analytics.get("topics_words", {})
+        topics_map = {}
+        if isinstance(tw, dict):
+            for tk, cnt in tw.items():
+                try:
+                    c_int = int(cnt or 0)
+                except Exception:
+                    continue
+                if c_int > 0:
+                    topics_map[tk] = c_int
+                    topics_words_total[tk] += c_int
+
+        users_out.append({
+            "uid": uid,
+            "name": (u.get("name") or "").strip() or "Без имени",
+            "tg_username": (u.get("tg_username") or "").strip(),
+            "first_join": int(u.get("first_join", 0) or 0),
+            "clicks_today": clicks_today,
+            "words_learned_total": int(stats.get("words_learned", 0) or 0),
+            "words_learned_today": int(u.get("words_learned_today", 0) or 0),
+            "topics_words": topics_map
+        })
+
+    export_payload = {
+        "generated_at_ts": now_ts,
+        "generated_at_date": today,
+        "summary": {
+            "total_users": total_users,
+            "new_24h": new_24h,
+            "words_total": words_total,
+            "words_today": words_today
+        },
+        "topics_words_total": dict(topics_words_total),
+        "users": users_out,
+
+        # 💬 полный дамп, чтобы ты видел вообще всё
+        "raw": {
+            "xp_data": xp_data,
+            "user_data": user_data
+        }
+    }
+
+    export_path = f"/tmp/stats_export_{today}_{now_ts}.json"
+
+    # 💬 пишем файл на диск и отправляем документом
+    with open(export_path, "w", encoding="utf-8") as f:
+        json.dump(export_payload, f, ensure_ascii=False, indent=2)
+
+    try:
+        await message.answer_document(
+            document=FSInputFile(export_path),
+            caption=f"📎 stats_export = {today} = users {total_users}"
+        )
+    finally:
+        # 💬 чистим временный файл, чтобы не копился
+        try:
+            os.remove(export_path)
+        except Exception:
+            pass
+
+
+@dp.callback_query(lambda c: c.data == "back_to_menu")
+async def inline_back_to_menu(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()  # Удаляем сообщение с рейтингом (по желанию)
+    await start_handler(callback.message, state)
+    await callback.answer()  # Убирает "часики"
+
+
+
+
+
+    #   🟡 2️⃣ Выбор темы (choosing_topic)
+# ================================================================================
+@dp.callback_query(
+    lambda c: c.data and c.data.startswith("topic:"),
+    StateFilter(LessonStates.choosing_topic, LessonStates.waiting_subscription)
+)
+@track_handler
+async def topic_chosen(query: CallbackQuery, state: FSMContext):
+    await register_or_update_user(query.message)
+
+    # 💬 Попробуем показать pop-up с коротким описанием темы
+    topic_key = query.data.split(":", 1)[1]
+    desc = topics.get(topic_key, {}).get("description", "")
+    if desc:
+        MAX_ALERT = 200
+        alert_text = desc if len(desc) <= MAX_ALERT else desc[:MAX_ALERT - 3].rstrip() + "..."
+        await query.answer(text=alert_text, show_alert=True)
+    else:
+        await query.answer()
+
+    # 💬 Удаляем сообщение со списком тем
+    await query.message.delete()
+
+    # 💬 Сохраняем выбранную тему в FSM
+    await state.update_data(selected_topic=topic_key)
+
+    user_id_str = str(query.from_user.id)
+
+    # 0) Проверяем рекламную подписку:
+    #    a) ещё не истекла по времени
+    #    b) пользователь ВСЁ ЕЩЁ подписан на каналы из набора
+    data = load_user_data()
+    u = data.setdefault(user_id_str, {})
+    ad = u.get("ad_subscription") or {}
+    now = int(time.time())
+    active = False  # 💬 отключаем проверку по времени = всегда показываем окно подписки
+
+
+    if active and ad.get("channels"):
+        all_ok = True
+        for ch in ad["channels"]:
+            try:
+                member = await bot.get_chat_member(chat_id=ch, user_id=query.from_user.id)
+                is_member = member.status in ("member", "administrator", "creator")
+            except TelegramBadRequest:
+                is_member = False
+
+            if not is_member:
+                all_ok = False
+                # 💬 фиксируем момент отписки от канала и сбрасываем рекламную подписку
+                sessions = u.setdefault("channels", {}).setdefault(ch, [])
+                if sessions and sessions[-1].get("unsubscribed_at") is None:
+                    sessions[-1]["unsubscribed_at"] = now
+                u.pop("ad_subscription", None)
+                save_user_data(data)
+                break
+
+        if all_ok:
+            # 💬 подписка по времени активна и пользователь подписан на все каналы — пускаем в урок
+            unlocked = u.setdefault("unlocked_topics", [])
+            if topic_key not in unlocked:
+                unlocked.append(topic_key)
+                save_user_data(data)
+            return await lesson_menu_handler(query.message, state)
+
+    elif active:
+        # 💬 есть active_until, но нет списка каналов — считаем подписку невалидной и сбрасываем
+        u.pop("ad_subscription", None)
+        save_user_data(data)
+
+
+    # 1) Формируем пакет каналов для подписки из глобального списка
+    channels_list = load_subscription_channels()
+    all_user_data = load_user_data()
+    u = all_user_data.setdefault(user_id_str, {})
+    last_idx = u.get("last_subscription_channel_index", -1)
+
+    required: list[str] = []
+
+    if channels_list:
+        # 💬 всегда показываем только 1 канал = первый в subscription_channels.json
+        required = [channels_list[0]]
+        u["last_subscription_channel_index"] = 0
+    else:
+        # 💬 Каналов нет = индекс не двигаем
+        u["last_subscription_channel_index"] = last_idx
+
+
+    save_user_data(all_user_data)
+
+    # 💬 Сохраняем список каналов в state (для check_subscription и подсказок)
+    await state.update_data(
+        required_channel=required[0] if required else None,  # на всякий случай
+        required_channels=required,
+    )
+
+    # 2) Если каналов нет — открываем тему без проверки
+    if not required:
+        data = load_user_data()
+        u = data.setdefault(user_id_str, {})
+        unlocked = u.setdefault("unlocked_topics", [])
+        if topic_key not in unlocked:
+            unlocked.append(topic_key)
+            save_user_data(data)
+        return await lesson_menu_handler(query.message, state)
+
+    # 💬 Если юзер уже подписан на обязательный канал — не показываем окно подписки
+    try:
+        member = await bot.get_chat_member(chat_id=required[0], user_id=query.from_user.id)
+        is_member = member.status in ("member", "administrator", "creator")
+    except TelegramBadRequest:
+        is_member = False
+
+    if is_member:
+        data = load_user_data()
+        u = data.setdefault(user_id_str, {})
+
+        unlocked = u.setdefault("unlocked_topics", [])
+        if topic_key not in unlocked:
+            unlocked.append(topic_key)
+
+        # 💬 фиксируем сессию подписки (чтобы stats/история не были пустыми)
+        ch = required[0]
+        sessions = u.setdefault("channels", {}).setdefault(ch, [])
+        if not sessions or sessions[-1].get("unsubscribed_at") is not None:
+            sessions.append({"subscribed_at": now, "unsubscribed_at": None})
+
+        # 💬 отключаем таймерный доступ = подписку проверяем каждый раз при входе в тему
+        u.pop("ad_subscription", None)
+
+        save_user_data(data)
+        return await lesson_menu_handler(query.message, state)
+
+
+    # 3) Каналы есть — показываем окно подписки с inline-кнопками
+    channels_str = ", ".join(required)
+
+    # 💬 Убираем старую reply-клавиатуру (лексика/грамматика)
+    blank = await query.message.answer("\u00AD", reply_markup=ReplyKeyboardRemove())
+    await blank.delete()
+
+    await query.message.answer(
+        "🔒 Для бесплатного доступа\n"
+        "👇🏼 Подпишись на спонсорские каналы:",  # 💬 оффер 3-дневного доступа
+        reply_markup=check_subscription_kb(topic_key, required),
+    )
+
+
+    # 💬 Переводим FSM в состояние ожидания проверки подписки
+    await state.set_state(LessonStates.waiting_subscription)
+
+
+
+@dp.callback_query(
+    lambda c: c.data == "back_to_topics",
+    StateFilter(LessonStates.waiting_subscription, LessonStates.choosing_topic)
+)
+@track_handler
+async def cb_back_to_topics(callback: CallbackQuery, state: FSMContext):
+    """
+    💬 Инлайн-кнопка «⬅️ Назад» из окна подписки:
+    возвращаем пользователя в главное меню выбора уровня/тем.
+    """
+    await callback.answer()
+    # 💬 Удаляем сообщение с блоком подписки
+    try:
+        await callback.message.delete()
+    except TelegramBadRequest:
+        pass
+
+    # 💬 Возвращаемся в стартовый поток (главное меню)
+    await start_handler(callback.message, state)
+
+
+@dp.callback_query(StateFilter(LessonStates.choosing_topic), F.data == "topic_back")
+@track_handler
+async def topic_back_to_level(callback: CallbackQuery, state: FSMContext):
+    """
+    💬 Кнопка «👈 НАЗАД» в списке тем — возвращаемся к выбору уровня.
+    """
+    # 💬 Собираем клавиатуру уровней так же, как при выборе категории
+    inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="😇 Новичку", callback_data="level:A0"),
+            InlineKeyboardButton(text="🌱 A1-A2",  callback_data="level:A1-A2"),
+        ],
+        [
+            InlineKeyboardButton(text="🔥 B1-B2",   callback_data="level:B1-B2"),
+            InlineKeyboardButton(text="🧠 C1",      callback_data="level:C1"),
+        ],
+        [
+            InlineKeyboardButton(text="⬅️ Назад",   callback_data="level:back"),
+        ],
+    ])
+
+    # 💬 Тот же текст, что и при первом показе уровней
+    intro_text = random.choice(difficulty_intro_phrases) if difficulty_intro_phrases else \
+        "😜 Отличный выбор! А теперь давай определимся с уровнем сложности:"
+
+    # 💬 Показываем выбор уровней вместо списка тем
+    await callback.message.edit_text(
+        intro_text,
+        reply_markup=inline_kb,
+    )
+    await state.set_state(LessonStates.choosing_level)
+    await callback.answer()
+
+
+
+
+@dp.callback_query(
+    lambda c: c.data == "back_to_topics",
+    StateFilter(LessonStates.waiting_subscription, LessonStates.choosing_topic)
+)
+@track_handler
+async def cb_back_to_topics(callback: CallbackQuery, state: FSMContext):
+    """
+    💬 Кнопка «⬅️ Назад» из окна подписки:
+    возвращаем пользователя в главное меню / выбор темы.
+    """
+    await callback.answer()
+    # 💬 Убираем сообщение с каналами
+    await callback.message.delete()
+    # 💬 Минимально безопасно: возвращаемся в стартовый хендлер
+    await start_handler(callback.message, state)
+
+
+
+
+# ================================================================================
+#   🧩 МОИ СЛОВА (my_words.json)
+# ================================================================================
+
+def build_mywords_menu_kb() -> InlineKeyboardMarkup:
+    # 💬 главное меню «Мои слова»
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📖 Учить мои слова", callback_data="mywords:learn_new"),
+            InlineKeyboardButton(text="🔁 Повторить выученные", callback_data="mywords:learn_repeat")
+        ],
+        [
+            InlineKeyboardButton(text="➕ Добавить слово", callback_data="mywords:add_open"),
+            InlineKeyboardButton(text="✏️ Редактировать", callback_data="mywords:edit_open")
+        ],
+        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="mywords:settings"),
+         InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:back_main")],
+    ])
+
+def build_stop_kb() -> ReplyKeyboardMarkup:
+    # 💬 кнопка выхода во время обучения
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⏹ Стоп")]], resize_keyboard=True)
+
+def build_offer_continue_kb() -> InlineKeyboardMarkup:
+    # 💬 offer_continue как в vocab: продолжить или домой
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Продолжить", callback_data="mywords:continue"),
+            InlineKeyboardButton(text="🏠 Домой", callback_data="mywords:home")
+        ]
+    ])
+
+def mywords_build_categories_kb(categories: list, cb_prefix: str, back_cb: str) -> InlineKeyboardMarkup:
+    # 💬 список категорий инлайном (cb_prefix = действие)
+    rows = [[InlineKeyboardButton(text=name, callback_data=f"{cb_prefix}:{i}")] for i, name in enumerate(categories)]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def mywords_get_user_block(user_id: str) -> tuple[dict, dict]:
+    # 💬 загружаем хранилище и блок пользователя
+    store = load_my_words_data()
+    u = ensure_my_words_user(store, user_id)
+    return store, u
+
+def mywords_get_categories(user_id: str) -> list:
+    # 💬 список категорий в стабильном порядке
+    _, u = mywords_get_user_block(user_id)
+    cats = list(u.get("categories", {}).keys())
+    cats.sort(key=lambda x: x.lower())
+    return cats
+
+def mywords_get_session_words(user_id: str) -> int:
+    # 💬 читаем session_words из настроек
+    _, u = mywords_get_user_block(user_id)
+    n = int(u.get("settings", {}).get("session_words", 5) or 5)
+    return max(1, min(n, 30))
+
+def mywords_words_for_mode(u: dict, category: str, mode: str) -> list:
+    # 💬 new = learned False, repeat = learned True
+    words = list(u.get("categories", {}).get(category, []))
+    if mode == "new":
+        return [w for w in words if not w.get("learned")]
+    return [w for w in words if w.get("learned")]
+
+def mywords_all_es_in_category(u: dict, category: str) -> list:
+    # 💬 все ES в категории (для вариантов quiz)
+    words = list(u.get("categories", {}).get(category, []))
+    return [w.get("es", "") for w in words if w.get("es")]
+
+def mywords_build_quiz_options(correct_es: str, all_es: list) -> tuple[list, int]:
+    # 💬 варианты для poll quiz (Telegram требует минимум 2 варианта)
+    distractors = [x for x in all_es if x and x != correct_es]
+    random.shuffle(distractors)
+
+    options = [correct_es]
+    while len(options) < 4 and distractors:
+        options.append(distractors.pop())
+
+    if len(options) < 2:
+        options.append("не знаю")  # 💬 запасной вариант, чтобы poll не упал
+
+    random.shuffle(options)
+    return options, options.index(correct_es)
+
+async def mywords_show_main_menu(message: Message, state: FSMContext):
+    # 💬 возвращаемся в главное инлайн-меню без /start
+    inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📚 УЧИТЬСЯ",    callback_data="menu:learn")],
+        [
+            InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
+            InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL)
+        ],
+
+        [InlineKeyboardButton(text="⚔️ Битва",   callback_data="menu:battle"),
+         InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords")],
+
+        [InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating"),
+        InlineKeyboardButton(text="Настройки ⚙️",  callback_data="menu:settings")],
+
+
+    ])
+
+
+    menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Что изучаем?⭐"
+    try:
+        await message.edit_text(menu_text, reply_markup=inline_kb_main)
+    except Exception:
+        await smart_reply(message, menu_text, reply_markup=inline_kb_main)
+
+    await state.set_state(LessonStates.choosing_category)
+
+async def mywords_menu(message: Message, state: FSMContext):
+    # 💬 показываем меню «Мои слова»
+    user_id = str(message.chat.id)
+    store, _ = mywords_get_user_block(user_id)
+    save_my_words_data(store)  # 💬 гарантируем файл в Volume
+
+    txt = "🧩 *Мои слова*\n\nВыбирай действие:"
+    kb = build_mywords_menu_kb()
+
+    try:
+        await message.edit_text(txt, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        await smart_reply(message, txt, reply_markup=kb, parse_mode="Markdown")
+
+    await state.set_state(LessonStates.mywords_menu)
+
+async def mywords_show_categories(message: Message, state: FSMContext, mode: str):
+    # 💬 список категорий для режима обучения
+    user_id = str(message.chat.id)
+    categories = mywords_get_categories(user_id)
+
+    await state.update_data(mywords_mode=mode, mywords_categories=categories)
+
+    if mode == "new":
+        title = "📖 *Учить мои слова*\n\nВыбери категорию:"
+        prefix = "mywords:learncat"
+    else:
+        title = "🔁 *Повторить выученные слова*\n\nВыбери категорию:"
+        prefix = "mywords:repcat"
+
+    if not categories:
+        title += "\n\nПока нет категорий. Добавь слово."
+
+    kb = mywords_build_categories_kb(categories, cb_prefix=prefix, back_cb="mywords:menu")
+
+    try:
+        await message.edit_text(title, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        await smart_reply(message, title, reply_markup=kb, parse_mode="Markdown")
+
+    await state.set_state(LessonStates.mywords_learn_choose_cat)
+
+async def mywords_mark_learned(user_id: str, category: str, word_id: str):
+    # 💬 отмечаем слово как выученное (learned=true)
+    store, u = mywords_get_user_block(user_id)
+    words = u.get("categories", {}).get(category, [])
+    for w in words:
+        if w.get("id") == word_id:
+            w["learned"] = True
+            break
+    save_my_words_data(store)
+
+async def mywords_send_next_quiz(message: Message, state: FSMContext):
+    # 💬 следующий quiz RU=>ES, пока очередь не опустеет
+    data = await state.get_data()
+    queue = list(data.get("mywords_quiz_queue", []))
+    pool = list(data.get("mywords_pool", []))
+
+    if not queue:
+        return await mywords_start_text_stage(message, state)  # 💬 все quiz закрыты
+
+    word_id = queue.pop(0)
+    word = next((w for w in pool if w.get("id") == word_id), None)
+    if not word:
+        await state.update_data(mywords_quiz_queue=queue)
+        asyncio.create_task(_mywords_quiz_timeout_handler(
+            poll_msg.poll.id, message.chat.id, state, delay=int(QUIZ_TIMEOUT_TASK_S)
+        ))  # 💬 watchdog таймаут как в vocab, но без XP
+
+        return await mywords_send_next_quiz(message, state)
+
+    user_id = str(message.chat.id)
+    _, u = mywords_get_user_block(user_id)
+    category = data.get("mywords_category", "")
+    all_es = mywords_all_es_in_category(u, category)
+
+    options, correct_id = mywords_build_quiz_options(word.get("es", ""), all_es)
+    question = f"Как по-испански: {word.get('ru','')}?"
+
+    poll_msg = await bot.send_poll(
+        chat_id=message.chat.id,
+        question=question,
+        options=options,
+        type="quiz",
+        correct_option_id=correct_id,
+        open_period=QUIZ_OPEN_PERIOD_S,  # 💬 квиз живёт 12 сек как в vocab
+        is_anonymous=False               # 💬 чтобы поведение было как в vocab
+    )
+
+
+    await state.update_data(
+        mywords_quiz_queue=queue,
+        mywords_current_word_id=word_id,
+        mywords_current_correct_id=correct_id,
+        mywords_current_poll_id=poll_msg.poll.id,
+        mywords_current_poll_msg_id=poll_msg.message_id
+    )
+    await state.set_state(LessonStates.mywords_quiz)
+
+async def _mywords_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMContext, delay: int):
+    await asyncio.sleep(delay)
+
+    # 💬 если уже не в mywords_quiz, то таймаут не срабатывает
+    if await state.get_state() != LessonStates.mywords_quiz:
+        return
+
+    data = await state.get_data()
+    if data.get("mywords_current_poll_id") != poll_id:
+        return  # 💬 poll уже обработан ответом
+
+    poll_msg_id = data.get("mywords_current_poll_msg_id")
+    word_id = data.get("mywords_current_word_id")
+    queue = list(data.get("mywords_quiz_queue", []))
+
+    # 💬 таймаут = считаем как ошибку и возвращаем слово в конец
+    if word_id:
+        queue.append(word_id)
+
+    await state.update_data(
+        mywords_quiz_queue=queue,
+        mywords_current_word_id=None,
+        mywords_current_poll_id=None,
+        mywords_current_correct_id=None,
+        mywords_current_poll_msg_id=None
+    )
+
+    # 💬 останавливаем poll и чистим сообщение как в vocab
+    try:
+        if poll_msg_id:
+            await bot.stop_poll(chat_id=chat_id, message_id=poll_msg_id)
+    except Exception:
+        pass
+
+    fb = None
+    try:
+        fb = await bot.send_message(chat_id, "⏱ Время вышло!")
+    except Exception:
+        pass
+
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 пауза и удаляем poll + фидбек
+
+    try:
+        if poll_msg_id:
+            await bot.delete_message(chat_id, poll_msg_id)
+    except Exception:
+        pass
+
+    try:
+        if isinstance(fb, Message):
+            await bot.delete_message(chat_id, fb.message_id)
+    except Exception:
+        pass
+
+    # 💬 fake message, чтобы переиспользовать mywords_send_next_quiz
+    fc = Chat(id=chat_id, type="private")
+    fu = User(id=chat_id, is_bot=False, first_name="")
+    fake = Message(message_id=0, date=datetime.datetime.now(), chat=fc, from_user=fu, text="")
+
+    return await mywords_send_next_quiz(fake, state)
+
+async def mywords_start_text_stage(message: Message, state: FSMContext):
+    # 💬 старт text стадии RU=>ES
+    data = await state.get_data()
+    pool = list(data.get("mywords_pool", []))
+    queue = [w.get("id") for w in pool if w.get("id")]
+    random.shuffle(queue)
+
+    await state.update_data(mywords_text_queue=queue, mywords_current_word_id=None)
+    return await mywords_send_next_text(message, state)
+
+async def mywords_send_next_text(message: Message, state: FSMContext):
+    # 💬 следующий text RU=>ES (ввод текста)
+    data = await state.get_data()
+    queue = list(data.get("mywords_text_queue", []))
+    pool = list(data.get("mywords_pool", []))
+
+    if not queue:
+        mode = data.get("mywords_mode", "new")
+        await smart_reply(message, "🎉 Готово! Возвращаю в список категорий.", reply_markup=ReplyKeyboardRemove())
+        return await mywords_show_categories(message, state, mode)
+
+    word_id = queue.pop(0)
+    word = next((w for w in pool if w.get("id") == word_id), None)
+    if not word:
+        await state.update_data(mywords_text_queue=queue)
+        return await mywords_send_next_text(message, state)
+
+    prompt = f"Напиши по-испански: {word.get('ru','')}"
+    msg = await smart_reply(message, prompt, reply_markup=build_stop_kb())  # 💬 сохраняем id вопроса как в vocab
+    await state.update_data(
+        mywords_text_queue=queue,
+        mywords_current_word_id=word_id,
+        mywords_last_prompt_id=msg.message_id  # 💬 чтобы удалить вопрос после ответа
+    )
+    
+    # ✍️ маркер "пора писать" как в vocab
+    asyncio.create_task(send_and_auto_delete_text(bot, message.chat.id, "✍️", delay=1))  # 💬 мини-подсказка
+
+    await state.set_state(LessonStates.mywords_text)
+
+# ─────────────────────────────────────────────────────────────
+#   📌 Callback: навигация «Мои слова»
+# ─────────────────────────────────────────────────────────────
+
+@dp.callback_query(F.data == "mywords:menu")
+@track_handler
+async def mywords_menu_any_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    return await mywords_menu(callback.message, state)  # 💬 открыть меню «Мои слова»
+
+@dp.callback_query(F.data == "mywords:back_main")
+@track_handler
+async def mywords_back_main_any_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    return await mywords_show_main_menu(callback.message, state)  # 💬 назад в главное меню
+
+@dp.callback_query(F.data == "mywords:learn_new")
+@track_handler
+async def mywords_learn_new_any_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    return await mywords_show_categories(callback.message, state, mode="new")  # 💬 учить новые
+
+@dp.callback_query(F.data == "mywords:learn_repeat")
+@track_handler
+async def mywords_learn_repeat_any_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    return await mywords_show_categories(callback.message, state, mode="repeat")  # 💬 повтор
+
+@dp.callback_query(F.data == "mywords:settings")
+@track_handler
+async def mywords_settings_any_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    txt = "⚙️ Настройки\n\nСколько слов учим за раз?\nНапиши число."
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:menu")]])
+    try:
+        await callback.message.edit_text(txt, reply_markup=kb)
+    except Exception:
+        await smart_reply(callback.message, txt, reply_markup=kb)
+    await state.set_state(LessonStates.mywords_settings_wait)
+
+@dp.message(StateFilter(LessonStates.mywords_settings_wait))
+@track_handler
+async def mywords_settings_wait_number(message: Message, state: FSMContext):
+    user_id = str(message.chat.id)
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        return await smart_reply(message, "Напиши число, например 5.")  # 💬 валидация числа
+
+    n = max(1, min(int(raw), 30))
+    store, u = mywords_get_user_block(user_id)
+    u.setdefault("settings", {})["session_words"] = n
+    save_my_words_data(store)
+
+    await smart_reply(message, f"✅ Сохранено = {n}", reply_markup=ReplyKeyboardRemove())
+    return await mywords_menu(message, state)
+
+# ─────────────────────────────────────────────────────────────
+#   ➕ Добавить слово
+# ─────────────────────────────────────────────────────────────
+
+@dp.callback_query(F.data == "mywords:add_open")
+@track_handler
+async def mywords_add_open_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    user_id = str(callback.message.chat.id)
+    categories = mywords_get_categories(user_id)
+    await state.update_data(mywords_categories=categories)
+
+    kb_rows = [[InlineKeyboardButton(text=name, callback_data=f"mywords:addcat:{i}")] for i, name in enumerate(categories)]
+    kb_rows.append([InlineKeyboardButton(text="➕ Новая категория", callback_data="mywords:add_newcat")])
+    kb_rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:menu")])
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+
+    txt = "➕ Добавить слово\n\nВыбери категорию:"
+    try:
+        await callback.message.edit_text(txt, reply_markup=kb)
+    except Exception:
+        await smart_reply(callback.message, txt, reply_markup=kb)
+
+    await state.set_state(LessonStates.mywords_add_choose_category)
+
+@dp.callback_query(StateFilter(LessonStates.mywords_add_choose_category), F.data.startswith("mywords:addcat:"))
+@track_handler
+async def mywords_add_choose_cat_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    data = await state.get_data()
+    categories = data.get("mywords_categories", [])
+    idx = int(callback.data.split(":")[-1])
+
+    if idx < 0 or idx >= len(categories):
+        return await mywords_menu(callback.message, state)
+
+    category = categories[idx]
+    await state.update_data(mywords_category=category)
+
+    txt = (
+        f"➕ Добавить слово\n\n"
+        f"Категория: *{category}*\n\n"
+        f"Отправь вот так: ES - RU\n"
+        f"Пример: *Comer - Кушать*"
+    )  # 💬 показываем пример формата ввода
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
+    try:
+        await callback.message.edit_text(txt, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        await smart_reply(callback.message, txt, reply_markup=kb, parse_mode="Markdown")
+
+    await state.set_state(LessonStates.mywords_add_input_pair)
+
+@dp.callback_query(StateFilter(LessonStates.mywords_add_choose_category), F.data == "mywords:add_newcat")
+@track_handler
+async def mywords_add_newcat_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    txt = "➕ Новая категория\n\nНапиши название категории."
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
+    try:
+        await callback.message.edit_text(txt, reply_markup=kb)
+    except Exception:
+        await smart_reply(callback.message, txt, reply_markup=kb)
+    await state.set_state(LessonStates.mywords_add_new_category)
+
+@dp.message(StateFilter(LessonStates.mywords_add_new_category))
+@track_handler
+async def mywords_add_newcat_name(message: Message, state: FSMContext):
+    user_id = str(message.chat.id)
+    name = (message.text or "").strip()
+    if not name:
+        return await smart_reply(message, "Напиши название категории.")  # 💬 валидация
+
+    store, u = mywords_get_user_block(user_id)
+    cats = u.setdefault("categories", {})
+    cats.setdefault(name, [])
+    save_my_words_data(store)
+
+    await state.update_data(mywords_category=name)
+    await smart_reply(message, f"Категория выбрана: {name}\n\nОтправь строкой: ES - RU", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(LessonStates.mywords_add_input_pair)
+
+@dp.message(StateFilter(LessonStates.mywords_add_input_pair))
+@track_handler
+async def mywords_add_input_pair(message: Message, state: FSMContext):
+    es, ru = parse_es_ru_pair(message.text or "")
+    if not es or not ru:
+        return await smart_reply(message, "Формат такой: ES - RU")  # 💬 валидация формата
+
+    await state.update_data(mywords_pending_pair={"es": es, "ru": ru})
+
+    txt = f"Проверь:\n\nES: *{es}*\nRU: *{ru}*\n\nСохранить?"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Сохранить", callback_data="mywords:add_save")],
+        [InlineKeyboardButton(text="🗑 Отмена", callback_data="mywords:menu")]
+    ])
+    await smart_reply(message, txt, reply_markup=kb, parse_mode="Markdown")
+    await state.set_state(LessonStates.mywords_add_confirm)
+
+@dp.callback_query(StateFilter(LessonStates.mywords_add_confirm), F.data == "mywords:add_save")
+@track_handler
+async def mywords_add_save_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    user_id = str(callback.message.chat.id)
+    data = await state.get_data()
+    category = data.get("mywords_category", "")
+    pair = data.get("mywords_pending_pair") or {}
+
+    store, u = mywords_get_user_block(user_id)
+    cats = u.setdefault("categories", {})
+    words = cats.setdefault(category, [])
+
+    if len(words) >= 30:
+        await smart_reply(callback.message, "В категории уже 30 слов. Создай новую категорию.")
+        return await mywords_menu(callback.message, state)
+
+    words.append({
+        "id": gen_my_word_id(),
+        "es": pair.get("es", ""),
+        "ru": pair.get("ru", ""),
+        "learned": False
+    })
+    save_my_words_data(store)
+
+    await smart_reply(callback.message, "✅ Сохранено!")
+    return await mywords_menu(callback.message, state)
+
+# ─────────────────────────────────────────────────────────────
+#   📖 Учить / 🔁 Повторить: выбор категории
+# ─────────────────────────────────────────────────────────────
+
+@dp.callback_query(StateFilter(LessonStates.mywords_learn_choose_cat), F.data.startswith("mywords:learncat:"))
+@track_handler
+async def mywords_choose_cat_new_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    data = await state.get_data()
+    categories = data.get("mywords_categories", [])
+    idx = int(callback.data.split(":")[-1])
+    if idx < 0 or idx >= len(categories):
+        return await mywords_menu(callback.message, state)
+
+    category = categories[idx]
+    user_id = str(callback.message.chat.id)
+
+    store, u = mywords_get_user_block(user_id)
+    pool_words = mywords_words_for_mode(u, category, mode="new")
+    if not pool_words:
+        await smart_reply(callback.message, "В этой категории нет новых слов. Возвращаю к категориям.")
+        return await mywords_show_categories(callback.message, state, mode="new")
+
+    pool = []
+    for w in pool_words:
+        if not w.get("id"):
+            w["id"] = gen_my_word_id()  # 💬 id нужен при дубликатах ES
+        pool.append({"id": w["id"], "es": w.get("es",""), "ru": w.get("ru","")})
+    save_my_words_data(store)
+
+    quiz_queue = [w["id"] for w in pool]
+    random.shuffle(quiz_queue)
+
+    await state.update_data(
+        mywords_category=category,
+        mywords_mode="new",
+        mywords_pool=pool,
+        mywords_quiz_queue=quiz_queue,
+        mywords_passed_in_session=0
+    )
+
+    await smart_reply(callback.message, f"📖 Категория: {category}\n\nСтадия 1 = quiz.", reply_markup=build_stop_kb())
+    return await mywords_send_next_quiz(callback.message, state)
+
+@dp.callback_query(StateFilter(LessonStates.mywords_learn_choose_cat), F.data.startswith("mywords:repcat:"))
+@track_handler
+async def mywords_choose_cat_repeat_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    data = await state.get_data()
+    categories = data.get("mywords_categories", [])
+    idx = int(callback.data.split(":")[-1])
+    if idx < 0 or idx >= len(categories):
+        return await mywords_menu(callback.message, state)
+
+    category = categories[idx]
+    user_id = str(callback.message.chat.id)
+
+    store, u = mywords_get_user_block(user_id)
+    pool_words = mywords_words_for_mode(u, category, mode="repeat")
+    if not pool_words:
+        await smart_reply(callback.message, "В этой категории нет выученных слов. Возвращаю к категориям.")
+        return await mywords_show_categories(callback.message, state, mode="repeat")
+
+    pool = []
+    for w in pool_words:
+        if not w.get("id"):
+            w["id"] = gen_my_word_id()
+        pool.append({"id": w["id"], "es": w.get("es",""), "ru": w.get("ru","")})
+    save_my_words_data(store)
+
+    await state.update_data(
+        mywords_category=category,
+        mywords_mode="repeat",
+        mywords_pool=pool,
+        mywords_passed_in_session=0
+    )
+
+    await smart_reply(callback.message, f"🔁 Категория: {category}\n\nПовтор = только text.", reply_markup=build_stop_kb())
+    return await mywords_start_text_stage(callback.message, state)
+
+# ─────────────────────────────────────────────────────────────
+#   ⏹ Стоп во время обучения (quiz/text)
+# ─────────────────────────────────────────────────────────────
+
+@dp.message(StateFilter(LessonStates.mywords_quiz, LessonStates.mywords_text), F.text == "⏹ Стоп")
+@track_handler
+async def mywords_stop_any(message: Message, state: FSMContext):
+    await smart_reply(message, "Ок, стоп.", reply_markup=ReplyKeyboardRemove())  # 💬 выход в меню
+    return await mywords_menu(message, state)
+
+# ─────────────────────────────────────────────────────────────
+#   Quiz стадия: poll_answer
+# ─────────────────────────────────────────────────────────────
+@dp.poll_answer(StateFilter(LessonStates.mywords_quiz))
+@track_handler
+async def mywords_poll_answer(poll_answer: PollAnswer, state: FSMContext):
+    data = await state.get_data()
+    if poll_answer.poll_id != data.get("mywords_current_poll_id"):
+        return  # 💬 это не наш poll
+
+    # 💬 отменяем watchdog таймаут
+    await state.update_data(mywords_current_poll_id=None)
+
+    selected = poll_answer.option_ids[0] if poll_answer.option_ids else None
+    correct = data.get("mywords_current_correct_id")
+    is_correct = (selected == correct)
+
+    chat_id = poll_answer.user.id
+    poll_msg_id = data.get("mywords_current_poll_msg_id")
+    word_id = data.get("mywords_current_word_id")
+    queue = list(data.get("mywords_quiz_queue", []))
+
+    # 💬 закрываем poll
+    try:
+        if poll_msg_id:
+            await bot.stop_poll(chat_id=chat_id, message_id=poll_msg_id)
+    except Exception:
+        pass
+
+    # 💬 реакция как в vocab
+    if is_correct:
+        try:
+            if poll_msg_id:
+                await bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=poll_msg_id,
+                    reaction=[ReactionTypeEmoji(emoji="🎉")],
+                    is_big=True
+                )
+        except Exception:
+            pass
+
+    # 💬 неверно = возвращаем слово в конец
+    if not is_correct and word_id:
+        queue.append(word_id)
+
+    # 💬 чистим текущие маркеры poll
+    await state.update_data(
+        mywords_quiz_queue=queue,
+        mywords_current_word_id=None,
+        mywords_current_correct_id=None,
+        mywords_current_poll_msg_id=None
+    )
+
+    # 💬 feedback как в vocab, но без XP
+    fb = None
+    try:
+        if is_correct:
+            fb = await bot.send_message(
+                chat_id,
+                random.choice(vocab_quiz_success_phrases) if vocab_quiz_success_phrases else "✅"
+            )
+        else:
+            fb = await bot.send_message(chat_id, "❌ Ошибка. Вернёмся к этому слову ещё раз.")
+    except Exception:
+        pass
+
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 пауза и удаляем poll + фидбек
+
+    try:
+        if poll_msg_id:
+            await bot.delete_message(chat_id, poll_msg_id)
+    except Exception:
+        pass
+
+    try:
+        if isinstance(fb, Message):
+            await bot.delete_message(chat_id, fb.message_id)
+    except Exception:
+        pass
+
+    # 💬 fake message как в vocab, чтобы переиспользовать send_next_quiz
+    fc = Chat(id=chat_id, type="private")
+    fu = User(id=chat_id, is_bot=False, first_name="")
+    fake = Message(message_id=0, date=datetime.datetime.now(), chat=fc, from_user=fu, text="")
+
+    return await mywords_send_next_quiz(fake, state)
+
+
+# ─────────────────────────────────────────────────────────────
+#   Text стадия: ответ пользователя
+# ─────────────────────────────────────────────────────────────
+
+@dp.message(StateFilter(LessonStates.mywords_text))
+@track_handler
+async def mywords_text_answer(message: Message, state: FSMContext):
+    data = await state.get_data()
+    prompt_id = data.get("mywords_last_prompt_id")  # 💬 id вопроса, чтобы удалить как в vocab
+    pool = list(data.get("mywords_pool", []))
+    word_id = data.get("mywords_current_word_id")
+    word = next((w for w in pool if w.get("id") == word_id), None)
+    if not word:
+        return await mywords_send_next_text(message, state)
+
+    user_answer = normalize_textquiz(message.text or "")
+    correct = normalize_textquiz(word.get("es", ""))
+
+    queue = list(data.get("mywords_text_queue", []))
+    passed = int(data.get("mywords_passed_in_session", 0) or 0)
+    mode = data.get("mywords_mode", "new")
+    category = data.get("mywords_category", "")
+    user_id = str(message.chat.id)
+
+    if user_answer == correct:
+        passed += 1  # 💬 считаем только правильно закрытые text
+        await state.update_data(mywords_passed_in_session=passed)
+
+        if mode == "new":
+            await mywords_mark_learned(user_id, category, word_id)  # 💬 learned=true
+
+        fb = await smart_reply(
+            message,
+            random.choice(vocab_quiz_success_phrases) if vocab_quiz_success_phrases else "✅"
+        )  # 💬 фидбек как в vocab, но без XP
+
+        await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 пауза перед зачисткой как в vocab
+
+        to_delete = [prompt_id, message.message_id]  # 💬 вопрос + ответ пользователя
+        if isinstance(fb, Message):
+            to_delete.append(fb.message_id)          # 💬 удаляем фидбек
+
+        for mid in to_delete:
+            if not mid:
+                continue
+            try:
+                await bot.delete_message(message.chat.id, mid)
+            except TelegramBadRequest:
+                pass  # 💬 если уже удалено/нельзя удалить
+
+        session_words = mywords_get_session_words(user_id)
+        if passed >= session_words and queue:
+            await state.update_data(mywords_text_queue=queue, mywords_current_word_id=None)
+            await smart_reply(message, "Продолжим или домой?", reply_markup=ReplyKeyboardRemove())
+            await smart_reply(message, "Выбирай:", reply_markup=build_offer_continue_kb())
+            return await state.set_state(LessonStates.mywords_offer_continue)
+
+        await state.update_data(mywords_text_queue=queue, mywords_current_word_id=None)
+        return await mywords_send_next_text(message, state)
+
+
+    # 💬 неверно = возвращаем слово в конец очереди, learned не меняем
+    queue.append(word_id)
+    fb = await smart_reply(message, "❌ Ошибка. Попробуем ещё раз.")  # 💬 фидбек без XP
+
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 пауза перед зачисткой как в vocab
+
+    to_delete = [prompt_id, message.message_id]  # 💬 вопрос + ответ пользователя
+    if isinstance(fb, Message):
+        to_delete.append(fb.message_id)          # 💬 удаляем фидбек
+
+    for mid in to_delete:
+        if not mid:
+            continue
+        try:
+            await bot.delete_message(message.chat.id, mid)
+        except TelegramBadRequest:
+            pass  # 💬 если уже удалено/нельзя удалить
+
+
+    await state.update_data(mywords_text_queue=queue, mywords_current_word_id=None)
+    return await mywords_send_next_text(message, state)
+
+# ─────────────────────────────────────────────────────────────
+#   offer_continue: продолжить или домой
+# ─────────────────────────────────────────────────────────────
+
+@dp.callback_query(StateFilter(LessonStates.mywords_offer_continue), F.data == "mywords:continue")
+@track_handler
+async def mywords_continue_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await state.update_data(mywords_passed_in_session=0)  # 💬 новый блок из N слов
+    await smart_reply(callback.message, random.choice(vocab_quiz_success_phrases) if vocab_quiz_success_phrases else "✅")  # 💬 берём фразы как в vocab
+    return await mywords_send_next_text(callback.message, state)
+
+@dp.callback_query(StateFilter(LessonStates.mywords_offer_continue), F.data == "mywords:home")
+@track_handler
+async def mywords_home_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    data = await state.get_data()
+    mode = data.get("mywords_mode", "new")
+    await state.update_data(mywords_passed_in_session=0)
+    await smart_reply(callback.message, "Ок, домой.", reply_markup=ReplyKeyboardRemove())
+    return await mywords_show_categories(callback.message, state, mode)
+
+# ─────────────────────────────────────────────────────────────
+#   ✏️ Редактирование (MVP) = удалить / изменить / переименовать
+# ─────────────────────────────────────────────────────────────
+
+def mywords_words_nav_kb(page: int, total_words: int, back_cb: str) -> InlineKeyboardMarkup:
+    # 💬 навигация по страницам (10 слов)
+    per_page = 10
+    total_pages = (max(total_words, 1) - 1) // per_page + 1
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Пред", callback_data="mywords:page_prev"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="➡️ След", callback_data="mywords:page_next"))
+
+    rows = []
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+async def mywords_render_words_page(user_id: str, category: str, page: int) -> tuple[str, int]:
+    # 💬 возвращает текст страницы и общее кол-во слов
+    _, u = mywords_get_user_block(user_id)
+    words = list(u.get("categories", {}).get(category, []))
+    total = len(words)
+
+    if not words:
+        return "Список пуст.", 0
+
+    per_page = 10
+    start = page * per_page
+    end = start + per_page
+    chunk = words[start:end]
+
+    total_pages = (total - 1) // per_page + 1
+    lines = [f"{i}) {w.get('es','')} = {w.get('ru','')}" for i, w in enumerate(chunk, start=start+1)]
+    return f"Слова (страница {page+1}/{total_pages})\n" + "\n".join(lines), total
+
+async def mywords_open_edit_category_menu(message: Message, state: FSMContext, category: str):
+    # 💬 меню действий внутри выбранной категории
+    await state.update_data(mywords_category=category, mywords_edit_page=0)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 Удалить слово", callback_data="mywords:edit_delete")],
+        [InlineKeyboardButton(text="✏️ Изменить слово", callback_data="mywords:edit_change")],
+        [InlineKeyboardButton(text="🗂 Переименовать категорию", callback_data="mywords:edit_rename")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:edit_open")]
+    ])
+    txt = f"✏️ Категория: *{category}*\n\nВыбери действие:"
+    try:
+        await message.edit_text(txt, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        await smart_reply(message, txt, reply_markup=kb, parse_mode="Markdown")
+    await state.set_state(LessonStates.mywords_edit_menu)
+
+@dp.callback_query(F.data == "mywords:edit_open")
+@track_handler
+async def mywords_edit_open_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    user_id = str(callback.message.chat.id)
+    categories = mywords_get_categories(user_id)
+    await state.update_data(mywords_categories=categories)
+
+    kb = mywords_build_categories_kb(categories, cb_prefix="mywords:editcat", back_cb="mywords:menu")
+    txt = "✏️ Редактировать\n\nВыбери категорию:"
+    try:
+        await callback.message.edit_text(txt, reply_markup=kb)
+    except Exception:
+        await smart_reply(callback.message, txt, reply_markup=kb)
+
+    await state.set_state(LessonStates.mywords_edit_choose_category)
+
+@dp.callback_query(StateFilter(LessonStates.mywords_edit_choose_category), F.data.startswith("mywords:editcat:"))
+@track_handler
+async def mywords_edit_choose_cat_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    data = await state.get_data()
+    categories = data.get("mywords_categories", [])
+    idx = int(callback.data.split(":")[-1])
+    if idx < 0 or idx >= len(categories):
+        return await mywords_menu(callback.message, state)
+
+    return await mywords_open_edit_category_menu(callback.message, state, categories[idx])
+
+@dp.callback_query(StateFilter(LessonStates.mywords_edit_menu), F.data == "mywords:edit_delete")
+@track_handler
+async def mywords_edit_delete_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    data = await state.get_data()
+    category = data.get("mywords_category", "")
+    page = int(data.get("mywords_edit_page", 0) or 0)
+    user_id = str(callback.message.chat.id)
+
+    txt, total = await mywords_render_words_page(user_id, category, page)
+    kb = mywords_words_nav_kb(page, total, back_cb="mywords:edit_open")
+
+    await smart_reply(callback.message, txt + "\n\nНапиши номер строки для удаления.", reply_markup=kb)
+    await state.set_state(LessonStates.mywords_edit_delete_wait)
+
+@dp.callback_query(StateFilter(LessonStates.mywords_edit_delete_wait), F.data.in_({"mywords:page_prev", "mywords:page_next"}))
+@track_handler
+async def mywords_delete_nav_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    data = await state.get_data()
+    category = data.get("mywords_category", "")
+    page = int(data.get("mywords_edit_page", 0) or 0)
+    user_id = str(callback.message.chat.id)
+
+    _, total = await mywords_render_words_page(user_id, category, page)
+    max_page = max(0, (max(total, 1) - 1) // 10)
+
+    if callback.data == "mywords:page_prev":
+        page = max(0, page - 1)
+    else:
+        page = min(max_page, page + 1)
+
+    await state.update_data(mywords_edit_page=page)
+    txt, total = await mywords_render_words_page(user_id, category, page)
+    kb = mywords_words_nav_kb(page, total, back_cb="mywords:edit_open")
+    await smart_reply(callback.message, txt + "\n\nНапиши номер строки для удаления.", reply_markup=kb)
+
+@dp.message(StateFilter(LessonStates.mywords_edit_delete_wait))
+@track_handler
+async def mywords_delete_wait_index(message: Message, state: FSMContext):
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        return await smart_reply(message, "Напиши номер строки числом.")  # 💬 валидация индекса
+
+    idx = int(raw)
+    data = await state.get_data()
+    category = data.get("mywords_category", "")
+    user_id = str(message.chat.id)
+
+    _, u = mywords_get_user_block(user_id)
+    words = list(u.get("categories", {}).get(category, []))
+    if idx < 1 or idx > len(words):
+        return await smart_reply(message, "Такого номера нет.")
+
+    w = words[idx - 1]
+    await state.update_data(mywords_pending_index=idx)
+
+    txt = f"Удалить?\n\n{idx}) {w.get('es','')} = {w.get('ru','')}"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Удалить", callback_data="mywords:delete_confirm")],
+        [InlineKeyboardButton(text="🗑 Отмена", callback_data="mywords:edit_open")]
+    ])
+    await smart_reply(message, txt, reply_markup=kb)
+
+@dp.callback_query(StateFilter(LessonStates.mywords_edit_delete_wait), F.data == "mywords:delete_confirm")
+@track_handler
+async def mywords_delete_confirm_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    data = await state.get_data()
+    idx = int(data.get("mywords_pending_index", 0) or 0)
+    category = data.get("mywords_category", "")
+    user_id = str(callback.message.chat.id)
+
+    store, u = mywords_get_user_block(user_id)
+    words = u.get("categories", {}).get(category, [])
+    if 1 <= idx <= len(words):
+        words.pop(idx - 1)
+        save_my_words_data(store)
+
+    await smart_reply(callback.message, "✅ Удалено!")
+    return await mywords_open_edit_category_menu(callback.message, state, category)
+
+@dp.callback_query(StateFilter(LessonStates.mywords_edit_menu), F.data == "mywords:edit_change")
+@track_handler
+async def mywords_edit_change_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    data = await state.get_data()
+    category = data.get("mywords_category", "")
+    user_id = str(callback.message.chat.id)
+
+    txt, total = await mywords_render_words_page(user_id, category, page=0)
+    kb = mywords_words_nav_kb(0, total, back_cb="mywords:edit_open")
+    await state.update_data(mywords_edit_page=0)
+
+    await smart_reply(callback.message, txt + "\n\nНапиши номер строки для изменения.", reply_markup=kb)
+    await state.set_state(LessonStates.mywords_edit_edit_index_wait)
+
+@dp.message(StateFilter(LessonStates.mywords_edit_edit_index_wait))
+@track_handler
+async def mywords_edit_wait_index(message: Message, state: FSMContext):
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        return await smart_reply(message, "Напиши номер строки числом.")
+
+    idx = int(raw)
+    data = await state.get_data()
+    category = data.get("mywords_category", "")
+    user_id = str(message.chat.id)
+
+    _, u = mywords_get_user_block(user_id)
+    words = list(u.get("categories", {}).get(category, []))
+    if idx < 1 or idx > len(words):
+        return await smart_reply(message, "Такого номера нет.")
+
+    w = words[idx - 1]
+    await state.update_data(mywords_pending_index=idx)
+    await smart_reply(message, f"Текущее:\n{idx}) {w.get('es','')} = {w.get('ru','')}\n\nОтправь новое: ES - RU")
+    await state.set_state(LessonStates.mywords_edit_edit_pair_wait)
+
+@dp.message(StateFilter(LessonStates.mywords_edit_edit_pair_wait))
+@track_handler
+async def mywords_edit_wait_pair(message: Message, state: FSMContext):
+    es, ru = parse_es_ru_pair(message.text or "")
+    if not es or not ru:
+        return await smart_reply(message, "Формат такой: ES - RU")
+
+    await state.update_data(mywords_pending_pair={"es": es, "ru": ru})
+    data = await state.get_data()
+    idx = int(data.get("mywords_pending_index", 0) or 0)
+
+    txt = f"Сохранить изменения?\n\n{idx}) {es} = {ru}"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Сохранить", callback_data="mywords:edit_save")],
+        [InlineKeyboardButton(text="🗑 Отмена", callback_data="mywords:edit_open")]
+    ])
+    await smart_reply(message, txt, reply_markup=kb)
+
+@dp.callback_query(StateFilter(LessonStates.mywords_edit_edit_pair_wait), F.data == "mywords:edit_save")
+@track_handler
+async def mywords_edit_save_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    user_id = str(callback.message.chat.id)
+    data = await state.get_data()
+    category = data.get("mywords_category", "")
+    idx = int(data.get("mywords_pending_index", 0) or 0)
+    pair = data.get("mywords_pending_pair") or {}
+
+    store, u = mywords_get_user_block(user_id)
+    words = u.get("categories", {}).get(category, [])
+    if 1 <= idx <= len(words):
+        words[idx - 1]["es"] = pair.get("es", "")
+        words[idx - 1]["ru"] = pair.get("ru", "")
+        save_my_words_data(store)
+
+    await smart_reply(callback.message, "✅ Изменено!")
+    return await mywords_open_edit_category_menu(callback.message, state, category)
+
+@dp.callback_query(StateFilter(LessonStates.mywords_edit_menu), F.data == "mywords:edit_rename")
+@track_handler
+async def mywords_edit_rename_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    data = await state.get_data()
+    category = data.get("mywords_category", "")
+    await smart_reply(callback.message, f"🗂 Переименовать\n\nТекущее: {category}\nНапиши новое название.")
+    await state.set_state(LessonStates.mywords_edit_rename_wait)
+
+@dp.message(StateFilter(LessonStates.mywords_edit_rename_wait))
+@track_handler
+async def mywords_rename_wait(message: Message, state: FSMContext):
+    user_id = str(message.chat.id)
+    new_name = (message.text or "").strip()
+    if not new_name:
+        return await smart_reply(message, "Напиши новое название.")  # 💬 валидация
+
+    data = await state.get_data()
+    old_name = data.get("mywords_category", "")
+
+    store, u = mywords_get_user_block(user_id)
+    cats = u.get("categories", {})
+    if new_name in cats:
+        return await smart_reply(message, "Такая категория уже есть.")
+
+    cats[new_name] = cats.pop(old_name, [])
+    save_my_words_data(store)
+
+    await smart_reply(message, "✅ Переименовано!")
+    return await mywords_menu(message, state)
+
+
+
+
+# ================================================================================  
+#   🟡 3️⃣ Home (показываем прогресс + 5 кнопок)  
+# ================================================================================ 
+@track_handler 
+async def lesson_menu_handler(message: Message, state: FSMContext):
+    data = await state.get_data()
+    topic_key = data.get("selected_topic")
+    if not topic_key:
+        return await start_handler(message, state)
+
+    # Получаем структуру темы
+    import math
+    topic = topics.get(topic_key, {})
+
+
+    # 💬 Глобальный XP пользователя по теме (по всем фазам словаря)
+    xp_json   = load_xp_data()
+    total_usr = xp_json.get(str(message.chat.id), {})
+    topic_xp  = total_usr.get("by_topic", {}).get(topic_key, 0)
+
+    # 💬 Считаем ВСЕ квизы по теме:
+    #    • top-level в фазах,
+    #    • inline у text/photo (block.get("quiz")),
+    #    • пулы bulk: quiz_pool / textquiz_pool
+    base_quiz = sum(
+        1 for ph in topic.get("vocab", [])
+          for b in ph.get("vocab", [])
+          if b.get("type") in ("quiz", "textquiz")
+    )
+    inline_quiz = sum(
+        1 for ph in topic.get("vocab", [])
+          for b in ph.get("vocab", [])
+          if b.get("quiz")
+    )
+    pool_quiz = sum(
+        len(ph.get("quiz_pool", [])) + len(ph.get("textquiz_pool", []))
+        for ph in topic.get("vocab", [])
+    )
+    total_quizzes = base_quiz + inline_quiz + pool_quiz
+
+    # 💬 Порог: 30 XP × кол-во квизов × 0.8 (округление вниз десятками)
+    xp_threshold = math.floor(total_quizzes * 30 * 0.8 / 10) * 10
+    await state.update_data(
+        xp_threshold=xp_threshold,
+        total_quizzes=total_quizzes,  # 💬 сохраняем для прогресса по квизам
+    )
+
+    # 💬 Разблокировано, если глобальный XP по теме >= порога
+    unlocked = topic_xp >= xp_threshold
+    await state.update_data(unlocked=unlocked)
+
+
+    # 💬 Для отображения
+    display_threshold = (xp_threshold // 10) * 10
+
+
+
+    # ─────────────────────────────────────────────────────────────────────────────
+
+
+    # 📚 Словарь → считаем **фазы**, а значит “done phases / total phases”
+    phases = topic.get("vocab", [])
+    total_phases = len(phases)
+    per_phase    = data.get("vocab_done_per_phase", {})
+    # сколько фаз полностью пройдено?
+    completed_phases = sum(
+        1 for ph in phases
+        if per_phase.get(ph["phase_id"], 0)
+           >= len([b for b in ph.get("vocab", []) if "link" in b or "url" in b])
+    )
+    stars = "⭐" * completed_phases + "☆" * (total_phases - completed_phases)
+
+
+
+    # Упражнения
+    # 🎯 Упражнения (считаем только link-блоки)
+    ex_list = topic.get("exercises", [])                      # весь список упражнений
+    link_blocks_ex = [b for b in ex_list if "link" in b or "url" in b]  # фильтр link/url
+    total_ex_link = len(link_blocks_ex)                        # общее число ссылок
+    done_ex_link = data.get("ex_done", 0)                      # сколько уже пройдено
+    ex_stars = "⭐" * done_ex_link + "☆" * (total_ex_link - done_ex_link)  # строка звёзд
+
+
+    # Видео
+    total_video = len(topic.get("videos", []))
+    dv_idx      = data.get("video_index", 0)
+    video_stars = "⭐" * dv_idx + "☆" * (total_video - dv_idx)
+
+    # 4. Диалоги
+    total_dlg = len(topic.get("dialogs", []))
+    done_dlg  = data.get("done_dialog", 0)
+    dlg_stars = "⭐" * done_dlg + "☆" * (total_dlg - done_dlg)
+
+    # Всего выучено слов (legacy + per-phase)
+    done_vocab  = data.get("vocab_done", sum(data.get("vocab_done_per_phase", {}).values()))
+    # Всего слов во всех фазах
+    total_vocab = sum(len(ph.get("vocab", [])) for ph in topic.get("vocab", []))
+
+    # — Общий прогресс теперь по КВИЗАМ —
+    total_quizzes = data.get("total_quizzes", 0)
+
+    # 💬 Сумма правильных обычных квизов и текстовых квизов
+    quiz_correct_total = data.get("quiz_correct_total", 0) + data.get("textquiz_correct", 0)
+
+    if total_quizzes:
+        # 💬 режем сверху, чтобы из-за пересдач не было > 100%
+        capped_correct = min(total_quizzes, quiz_correct_total)
+        percent = capped_correct / total_quizzes * 100
+    else:
+        # 💬 fallback: старая логика по словарю + упражнениям/видео/диалогам
+        total_done = done_vocab + done_ex_link + dv_idx + done_dlg
+        total_all  = total_vocab + total_ex_link + total_video + total_dlg
+        percent    = (total_done / total_all * 100) if total_all else 0
+
+
+    # 💬 Эмоджи-бар прогресса из 10 сегментов
+    bar_len = 10
+
+    # 💬 Всегда показываем хотя бы один зелёный сегмент (минимальный прогресс в меню)
+    filled = int(percent / 100 * bar_len)
+    if filled == 0:
+        filled = 1
+    if filled > bar_len:
+        filled = bar_len
+
+    empty = bar_len - filled
+    bar2  = "🟩" * filled + "⬜️" * empty
+
+
+
+    # Эмоджи-медаль
+    if percent >= 90:
+        medal = "🥇"
+    elif percent >= 60:
+        medal = "🥈"
+    elif percent >= 30:
+        medal = "🥉"
+    else: 
+        medal = ""
+
+
+    # — Формируем единый текст меню, сохраняя условие блокировки —
+    parts: list[str] = []
+
+    # 1) Общий прогресс
+    # 💬 Сначала текст с процентом, ниже — визуальный бар
+    parts.append(
+        f"📊 <b>Прогресс:</b> {percent:.0f}% {medal}\n{bar2}"
+    )
+
+
+    # — Мотивационная цитата по прогрессу —
+    chosen_quotes = None
+    for thresh, quotes in sorted(motivational_quotes.items()):
+        if percent <= thresh:
+            chosen_quotes = quotes
+            break
+    if not chosen_quotes:
+        chosen_quotes = list(motivational_quotes.values())[-1]
+    quote = random.choice(chosen_quotes)
+    # 💬 Цитата в спойлере теперь и жирная, и наклонная
+    parts.append(f"<tg-spoiler><b><i>“{quote}”</i></b></tg-spoiler>")
+
+
+
+    # ─── ВСТАВКА: Learned Words в виде «печенек» ────────────────────────────
+    xp_data = load_xp_data()
+    user_id = str(message.chat.id)
+    user = xp_data.get(user_id, {})
+    reset_daily_words_if_needed(user)
+    today = user.get("words_learned_today", 0)
+    limit = user.get("words_daily_limit", 10)
+
+
+    # 4) Подробный прогресс по разделам
+    # 💬 Строим прогресс по разделам. Строку «Видео» показываем только,
+    #     если в теме реально есть хотя бы одно видео.
+    progress_lines = [
+        # 💬 «Словарь» — жирный + наклонный, звёзды и цифры — жирные
+        f"<b><i>📖 Словарь:</i></b>    <b>{stars}   {completed_phases}/{total_phases}</b>",
+    ]
+
+    if total_video > 0:
+        progress_lines.append(
+            # 💬 «Видео» — то же самое: название курсив+жирный, прогресс — жирный
+            f"<b><i>🎬 Видео:</i></b>      <b>{video_stars}   {dv_idx}/{total_video}</b>"
+        )
+
+    progress_lines.append(
+        # 💬 «Читать» — курсив+жирный, звёзды и счётчик — жирные
+        f"<b><i>🙊 Читать:</i></b>    <b>{dlg_stars}   {done_dlg}/{total_dlg}</b>"
+    )
+
+    # 💬 Блок по разделам в одну группу
+    parts.append("\n".join(progress_lines))
+
+    # 💬 Отдельная строка про дневной лимит слов:
+    #     «Слов выучено» — жирный+наклонный, счётчик — жирный,
+    #     текст перед эмодзи как ты просил.
+    parts.append(f"<b><i>Слов выучено</i> 🍪 {today}/{limit}</b>")
+
+    # 💬 Если видео нет (total_video == 0), строка «🎬 Видео» вообще не попадёт в текст
+
+
+
+    # 3) Если ещё не разблокировано — строка «Набери минимум display_threshold»
+    if not unlocked:
+        parts.append(
+            # 💬 просим добрать минимальный XP по этой теме (без сокращения «мин.»)
+            f"🔒 <b>Набери минимум {display_threshold} XP 🌟</b>"
+        )
+
+  
+    # ────────────────────────────────────────────────────────────────────────
+
+    # 5) XP по текущей теме
+    # 💬 показываем именно XP по выбранной теме (by_topic), а не общий total_xp
+    parts.append(f"🏆 <b>Сейчас опыта: {topic_xp} XP</b> 🌟")
+
+
+
+
+
+    # Отправляем всем блоком через bot.send_message, чтобы избежать NotMounted
+    menu_text = "\n\n".join(parts)
+    await bot.send_message(message.chat.id, menu_text, parse_mode="HTML")
+
+    # — Кнопки меню с блокировкой потоков по флагу unlocked —
+    category = data.get("chosen_category")
+
+    # 💬 Раздел «Лексика»: убираем «Упражнения» и показываем инлайн-кнопки
+    if category == "lex":
+        # ...
+        # 💬 Показываем кнопку «Видео» только если есть хотя бы одно видео в теме
+        has_videos = total_video > 0
+
+        if unlocked:
+            # 💬 Строим ряды так, чтобы КАЖДАЯ кнопка была на своей строке (полная ширина)
+            rows = [
+                [InlineKeyboardButton(text="📖 Учить слова", callback_data="lex_menu:learn")],
+                [InlineKeyboardButton(text="🙊 Читать", callback_data="lex_menu:read")],
+            ]
+            if has_videos:
+                rows.append(
+                    [InlineKeyboardButton(text="🎬 Видео", callback_data="lex_menu:video")]
+                )
+            rows.append(
+                [InlineKeyboardButton(text="🔄 Сменить тему", callback_data="lex_menu:change_topic")]
+            )
+
+            inline_kb = InlineKeyboardMarkup(inline_keyboard=rows)
+        else:
+            # 💬 Заблокированный вариант — тоже одна кнопка в строке
+            rows = [
+                [InlineKeyboardButton(text="📖 Учить слова", callback_data="lex_menu:learn")],
+                [InlineKeyboardButton(text="🔒 Читать", callback_data="lex_menu:locked_read")],
+            ]
+            if has_videos:
+                rows.append(
+                    [InlineKeyboardButton(text="🔒 Видео", callback_data="lex_menu:locked_video")]
+                )
+            rows.append(
+                [InlineKeyboardButton(text="🔄 Сменить тему", callback_data="lex_menu:change_topic")]
+            )
+
+            inline_kb = InlineKeyboardMarkup(inline_keyboard=rows)
+
+        # 💬 В результате, если videos пустой, в меню останутся только:
+        #     «Учить слова», «Читать» и «Сменить тему»
+
+        # Финальный follow-up
+        choice_text = random.choice(follow_up_phrases)
+
+        # 🤖 показываем IT-стикер перед меню (не блокируем поток)
+        try:
+            sticker_id = random.choice(IT_MENU_STICKERS)  # 💬 1 из 5
+            asyncio.create_task(
+                send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=1.7)
+            )  # 💬 task: показать и удалить через 1 сек без await
+        except Exception:
+            pass
+
+
+        # 💬 отправляем меню урока и запоминаем его message_id для последующего удаления
+        menu_msg = await smart_reply(
+            message,
+            f"<b>{choice_text}</b>",
+            reply_markup=inline_kb,
+            parse_mode="HTML"
+        )
+        await state.update_data(last_menu_msg_id=menu_msg.message_id)
+        # 💬 меню на экране, значит считаем его НЕ скрытым
+        await state.update_data(menu_hidden=False)
+
+        await state.set_state(LessonStates.waiting_lesson_action)
+        return
+
+    # 💬 Все остальные категории (в т.ч. «Грамматика») оставляем на ReplyKeyboard
+    buttons = [[KeyboardButton(text="📖 Учить слова")]]
+    if unlocked:
+        buttons.append([
+            KeyboardButton(text="🎲 Упражнения"),
+            KeyboardButton(text="🎬 Видео"),
+            KeyboardButton(text="🙊 Читать"),
+        ])
+    else:
+        buttons.append([
+            KeyboardButton(text="🔒 Упражнения"),
+            KeyboardButton(text="🔒 Видео"),
+            KeyboardButton(text="🔒 Читать"),
+        ])
+    buttons.append([KeyboardButton(text="🔄 Сменить тему")])
+    keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+    # Финальный follow-up
+    choice_text = random.choice(follow_up_phrases)
+    # 🤖 показываем IT-стикер перед меню (не блокируем поток)
+    try:
+        sticker_id = random.choice(IT_MENU_STICKERS)  # 💬 1 из 5
+        asyncio.create_task(
+            send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=1.7)
+        )  # 💬 task: показать и удалить через 1 сек без await
+    except Exception:
+        pass
+
+
+    # 💬 отправляем меню урока и запоминаем его message_id для последующего удаления
+    menu_msg = await smart_reply(
+        message,
+        f"<b>{choice_text}</b>",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await state.update_data(last_menu_msg_id=menu_msg.message_id)
+    await state.update_data(menu_hidden=False)  # 💬 флаг для защиты от двойного удаления
+
+    await state.set_state(LessonStates.waiting_lesson_action)
+    return
+
+
+
+
+
+# ─────────────────────────────────────────────────────────
+@dp.message(LessonStates.waiting_lesson_action, lambda m: m.text == "🔄 Сменить тему")
+@track_handler
+async def change_topic(message: Message, state: FSMContext):
+    # Сбрасываем все индексы и возвращаемся к выбору категории, но сохраняем done_dialog и xp
+    done_dialog = (await state.get_data()).get("done_dialog", 0)
+    xp = (await state.get_data()).get("xp", 0)
+    await state.clear()
+    # восстанавливаем накопленный прогресс по диалогам и xp
+    await state.update_data(done_dialog=done_dialog, xp=xp, level=xp//100)
+    return await start_handler(message, state)
+
+@dp.callback_query(LessonStates.waiting_lesson_action, F.data.startswith("lex_menu:"))
+@track_handler
+async def lex_lesson_menu_router(callback: CallbackQuery, state: FSMContext):
+    # 💬 маршрутизатор инлайн-кнопок меню «Лексика» (Учить слова / Читать / Видео / Сменить тему)
+    return await lex_lesson_menu_inline(callback, state)
+
+
+async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
+    """
+    💬 Инлайн-меню для раздела «Лексика»:
+        • lex_menu:learn        → поток «Учить слова»
+        • lex_menu:read         → поток «Читать диалоги» (самопроверка)
+        • lex_menu:video        → поток «Смотреть видео»
+        • lex_menu:change_topic → вернуться к выбору темы
+        • lex_menu:locked_*     → заблокированные кнопки (отказной стикер)
+    """
+    action = callback.data.split(":", 1)[1]
+
+    # 🔒 Заблокированные кнопки «Читать» / «Видео» из инлайн-меню
+    if action.startswith("locked_"):
+        await callback.answer()
+        # 💬 используем общий хендлер недоступных потоков (стикер + автоудаление)
+        return await handle_unavailable_buttons(callback.message, state)
+
+
+    # 📖 Учить слова — переиспользуем существующий хендлер
+    if action == "learn":
+        await callback.answer()
+        return await show_phase_menu(callback.message, state)
+
+    # 🔄 Сменить тему — тот же хендлер, что и у ReplyKeyboard
+    if action == "change_topic":
+        await callback.answer()
+        return await change_topic(callback.message, state)
+
+    # 🙊 Читать диалоги — новая логика
+    if action == "read":
+        await callback.answer()
+        # 🎲 Рандомный стикер при старте «Читать» из инлайн-меню (и авто-удаление)
+        try:
+            sticker_id = random.choice(READ_STICKERS)  # 💬 берём один из списка
+            await send_and_auto_delete_sticker(callback.bot, callback.message.chat.id, sticker_id)  # 💬 показываем и удаляем
+            await asyncio.sleep(AUTO_DELETE_STICKER_DELAY_S)  # 💬 ждём удаления, чтобы не мешал диалогам
+        except Exception:
+            pass
+        # 💬 Запуск потока чтения диалогов из инлайн-меню
+        return await start_dialog_reading(callback.message, state)
+
+    # 🎬 Смотреть видео — показываем ссылку в слове + галочка «готово»
+    if action == "video":
+        await callback.answer()
+
+        data = await state.get_data()
+        topic_key = data.get("selected_topic")
+        if not topic_key:
+            # 💬 подстраховка: если тема не выбрана, возвращаем в /start-меню
+            return await start_handler(callback.message, state)
+
+        topic = topics.get(topic_key, {})
+        videos = topic.get("videos", [])
+
+        # 💬 если видео нет, ведём себя как с недоступной кнопкой
+        if not videos:
+            return await handle_unavailable_buttons(callback.message, state)
+
+        idx = data.get("video_index", 0) or 0
+        if idx < 0:
+            idx = 0
+        if idx >= len(videos):
+            idx = len(videos) - 1
+
+        video_item = videos[idx]
+
+        # 💬 поддерживаем и dict, и просто строку-ссылку
+        if isinstance(video_item, dict):
+            link = video_item.get("link") or video_item.get("url") or ""
+            title = video_item.get("title") or f"Видео {idx + 1}"
+        else:
+            link = str(video_item)
+            title = f"Видео {idx + 1}"
+
+        if not link:
+            # 💬 если ссылки нет, считаем поток недоступным
+            return await handle_unavailable_buttons(callback.message, state)
+
+        # 💬 CTA-фраза, как в link-блоках словаря (типа «Жми сюда»)
+        cta = random.choice(link_cta_phrases)
+
+        # 💬 Текст: заголовок + кликабельное слово/фраза вместо голого линка
+        text = f"🎬 <b>{title}</b>\n\n👉 <a href=\"{link}\">{cta}</a>"
+
+        # 💬 Под текстом — только галочка, которая вернёт в меню и обновит прогресс по видео
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="✅", callback_data="video:done")]
+            ]
+        )
+
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        # 💬 состояние остаётся LessonStates.waiting_lesson_action,
+        # прогресс по видео обновим при нажатии на «✅»
+        return
+
+    # Остальное (locked_*) — недоступно, даём тот же отказной стикер
+    await callback.answer()
+    return await handle_unavailable_buttons(callback.message, state)
+
+
+
+@dp.callback_query(LessonStates.waiting_lesson_action, F.data == "video:done")
+@track_handler
+async def handle_video_done(callback: CallbackQuery, state: FSMContext):
+    """
+    💬 Обработчик галочки под видео:
+        • инкрементирует video_index в state
+        • возвращает пользователя в меню урока с обновлённым прогрессом по видео
+    """
+    data = await state.get_data()
+    topic_key = data.get("selected_topic")
+    if not topic_key:
+        await callback.answer()
+        return await start_handler(callback.message, state)
+
+    topic = topics.get(topic_key, {})
+    videos = topic.get("videos", [])
+    total_video = len(videos)
+
+    dv_idx = int(data.get("video_index", 0) or 0)
+
+    if total_video:
+        # 💬 не выходим за пределы количества видео:
+        # dv_idx == total_video → все видео уже просмотрены, звёздочки полные
+        new_idx = min(dv_idx + 1, total_video)
+        await state.update_data(video_index=new_idx)
+
+    await callback.answer("✅ Видео отмечено как просмотренное")
+    # 💬 Возвращаемся в меню урока — там пересчитается строка «🎬 Видео: ...»
+    return await lesson_menu_handler(callback.message, state)
+
+
+@dp.message(LessonStates.waiting_lesson_action, lambda m: m.text == "🙊 Читать")
+@track_handler
+async def handle_read_dialogs_button(message: Message, state: FSMContext):
+    # 💬 Прячем меню урока и клавиатуру перед запуском потока диалогов
+    data = await state.get_data()
+
+    if not data.get("menu_hidden"):
+        last_menu_msg_id = data.get("last_menu_msg_id")
+        if last_menu_msg_id:
+            try:
+                await bot.delete_message(chat_id=message.chat.id, message_id=last_menu_msg_id)
+            except Exception:
+                pass
+        # 💬 Помечаем меню как скрытое и очищаем id
+        await state.update_data(menu_hidden=True, last_menu_msg_id=None)
+
+    # 💬 Дополнительно убираем ReplyKeyboard и клик пользователя
+    try:
+        await message.answer("\u00AD", reply_markup=ReplyKeyboardRemove())
+    except Exception:
+        pass
+    try:
+        await message.delete()
+    except Exception:
+        pass
+        
+    # 🎲 Рандомный стикер при старте «Читать» (и авто-удаление)
+    try:
+        sticker_id = random.choice(READ_STICKERS)  # 💬 берём один из списка
+        await send_and_auto_delete_sticker(bot, message.chat.id, sticker_id)  # 💬 показываем и удаляем
+        await asyncio.sleep(AUTO_DELETE_STICKER_DELAY_S)  # 💬 ждём удаления, чтобы не мешал диалогам
+    except Exception:
+        pass
+
+    # 💬 Запускаем поток чтения диалогов
+    return await start_dialog_reading(message, state)
+
+
+# 📦 ID стикеров для заблокированных кнопок
+LOCKED_STICKERS = [
+    "CAACAgIAAxkBAAE2o0poV00UvQJOb5YVn_jgwz-AvPn6aQACKgEAAlKJkSM_2dC0M_P_EjYE", 
+    "CAACAgIAAxkBAAE2o05oV03D4cY4PL1miwaTIJkVesewoAACkxEAAvXroUgH6q_y069udjYE",
+    "CAACAgIAAxkBAAE2o1BoV03m9PlLTn4Z5mKDqnajd6c1_wACRwMAAm2wQgNSVSv5NcWAgjYE",
+    
+]
+
+# 🤖 IT-стикеры для показа перед меню урока (1 из 5, авто-удаление)
+IT_MENU_STICKERS = [
+    "CAACAgIAAxkBAAIQxGlEygsK1CDVEgABN6jOaVIBNjm1ogACYxAAAvaWQUmNof6XoMsbajYE",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQxmlEyhiFkQT7P9YSwAfd3Y8vg71nAAKrEgACGOJASeltNUEW4IxONgQ",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQymlEykJzr6fQAqvtgTTwaSLP55-UAALYLgACQ7nYSMxMa3UjThHMNgQ",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQsGlExWMckBjTRHgKTyp04F95eThGAAL9DAACBlBAS0k4CbFNG6-0NgQ",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQ0mlEypViSYH9C3sWzeF5VCQHvPYHAALkEgACOHUAAUoE0LZNVG4hoDYE",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQrmlExVAUmsZxZhqY6Q0sHedu9ArTAAJUXAACp2-AS1fkWR4Yo5d4NgQ",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQrGlExR9h-U-6mBmdpV3fI2VoD_D-AAKBAAPBnGAM6PbLODBd3jc2BA",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQ5GlEyzQYEAudwYG6_rO0dv5pmzRrAAJiAAPANk8TCvfTpUq3n5Q2BA",  # 💬 вставь ID
+    "CAACAgIAAxkBAAIQ7mlEy3qSidLYSqSvNY-Pl4ybYs69AALyEgAC8aOgSNoW844h2hMwNgQ",  # 💬 вставь ID
+]
+
+
+# 📦 ID стикеров для кнопки «🙊 Читать»
+READ_STICKERS = [
+    "CAACAgIAAxkBAAIQrGlExR9h-U-6mBmdpV3fI2VoD_D-AAKBAAPBnGAM6PbLODBd3jc2BA",  # 💬 сюда вставь ID стикера
+    "CAACAgIAAxkBAAIQrmlExVAUmsZxZhqY6Q0sHedu9ArTAAJUXAACp2-AS1fkWR4Yo5d4NgQ",  # 💬 сюда вставь ID стикера
+    "CAACAgIAAxkBAAIQsGlExWMckBjTRHgKTyp04F95eThGAAL9DAACBlBAS0k4CbFNG6-0NgQ",  # 💬 сюда вставь ID стикера
+    "CAACAgIAAxkBAAIQqmlExOTyYtYHvJFnaU8veDz7KCRdAAIPPAAC81LISNODlD5N8m0pNgQ",  # 💬 сюда вставь ID стикера
+]
+
+
+# 📦 Стикер для временно закрытого раздела «Грамматика»
+GRAMMAR_LOCKED_STICKER = "CAACAgIAAxkBAAINjmksZviqm03_fPbJTCZirDrJdVwhAALDEAACyy6YSWRm4_6tdy94NgQ"  # 💬 сюда вставь ID нужного стикера
+
+
+@dp.message(LessonStates.waiting_lesson_action, lambda m: m.text.startswith("🔒"))
+@track_handler
+async def locked_button_handler(message: Message, state: FSMContext):
+    """
+    При нажатии на любую «🔒 …» кнопку:
+    1) отправляем случайный сти­кер отказа (из refusal_stickers),
+       который сам удалится через 3 сек.
+    2) ждём 3 сек, а затем возвращаемся в меню урока.
+    """
+    # 1) выбираем случайный сти­кер из списка отказа
+    sticker_id = random.choice(LOCKED_STICKERS)
+    # 2) отправляем и авто-удаляем
+    await send_and_auto_delete_sticker(bot, message.chat.id, sticker_id)
+    # 3) ждём, чтобы не дергать меню раньше удаления
+    await asyncio.sleep(AUTO_DELETE_STICKER_DELAY_S)  # 💬 ждём удаления отказного стикера
+
+
+
+
+
+
+# 💬 Строит зачёркнутый текст через combining overlay
+def strike(text: str) -> str:
+    return "".join(ch + "\u0336" for ch in text)
+
+
+# ========= 📘📘📘НАЧАЛО ПОТОКА ПО СЛОВАРЮ или ПО СЛОВАМ 📘📘📘 =============
+# ================================================================================  
+#   🟡 4️⃣ Поток «Учить слова» (showing_vocab)  
+# ================================================================================  
+
+
+
+@dp.message(LessonStates.waiting_lesson_action, F.text == "📖 Учить слова")
+@track_handler
+async def show_phase_menu(message: Message, state: FSMContext):
+    data      = await state.get_data()
+
+    count = data.get("phase_entry_count", 0) + 1
+    await state.update_data(phase_entry_count=count)
+
+
+    # 💬 Спрятать клавиатуру и убрать предыдущее меню ДО показа рекламы
+    # 💬 Скрываем меню ОДИН раз и без «пустышек»
+    data = await state.get_data()
+    if not data.get("menu_hidden"):  # 💬 защита от двойного удаления
+        last_menu_msg_id = data.get("last_menu_msg_id")
+        if last_menu_msg_id:
+            try:
+                await bot.delete_message(chat_id=message.chat.id, message_id=last_menu_msg_id)
+            except Exception:
+                pass
+        # 💬 помечаем как скрыто и чистим id
+        await state.update_data(menu_hidden=True, last_menu_msg_id=None)
+    # 💬 ReplyKeyboardRemove отдаём в СЛЕДУЮЩЕМ полезном сообщении (список фаз)
+
+
+
+
+    # 💬 Если ранее уже показали рекламный блок (ad_shown) — не показываем его снова,
+    # 💬 а продолжаем показывать выбор фаз (код ниже). В противном случае — ставим флаг
+    # 💬 и отправляем рекламу (send_ad_block) — затем функция завершится (return).
+    if data.get("ad_shown"):
+        # 💬 Реклама уже была показана — очищаем маркер и продолжаем дальше (покажем фазы)
+        await state.update_data(ad_shown=False, pending_phase=False)
+    else:
+        # 💬 Реклама ещё не показана — пометим и отправим её
+        await state.update_data(ad_shown=True, pending_phase=True)
+        return await send_ad_block(message, state)
+
+
+
+    topic_key = data.get("selected_topic")
+    phases    = topics.get(topic_key, {}).get("vocab", [])
+
+    # ── Скрыть старую Reply-клавиатуру ОДИН раз, без дублей ──
+    # 💬 что делает эта часть: если клавиатура ещё не скрыта — отправляем «пустышку» и сразу удаляем
+    data = await state.get_data()
+    if not data.get("menu_hidden"):
+        try:
+            blank = await message.answer('Загружаю...⏳', reply_markup=ReplyKeyboardRemove())
+            await blank.delete()
+        except Exception:
+            pass
+        await state.update_data(menu_hidden=True)  # 💬 фиксируем, чтобы не повторять
+
+
+
+    # … внутри show_phase_menu …
+    buttons = []
+    for ph in phases:
+        blocks     = ph.get("vocab", [])
+        # отбираем только link-блоки (те, что имеют ключ "link" или "url")
+        link_blocks = [b for b in blocks if "link" in b or "url" in b]
+        total       = len(link_blocks)
+        passed      = data.get("vocab_done_per_phase", {}).get(ph["phase_id"], 0)
+        # порог 80%, округляем вверх (если блоков нет — считаем, что фаза не заполнена)
+        threshold   = math.ceil(total * 0.8) if total else 0
+        mark = " ✅" if total and passed >= threshold else ""
+        if mark:
+            # зачёркиваем название фазы и добавляем галочку
+            name = strike(ph["phase_name"])
+            btn_text = f"{name}{mark}"
+        else:
+            btn_text = ph["phase_name"]
+
+        buttons.append(
+            InlineKeyboardButton(
+                text=btn_text,
+                callback_data=f"topic_phase:{ph['phase_id']}"  # 💬 теперь только ID фазы
+        )
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[btn] for btn in buttons])
+
+    # 💬 Легенда по цветам книг и выбор фазы
+    await message.answer(
+        "Выбери фазу для изучения:",
+        reply_markup=kb
+    )
+
+    await state.set_state(LessonStates.waiting_vocab_phase)
+
+
+# ─────────────────────────────────────────────────────────
+# 4️⃣ Поток «Учить слова» (start_vocab)
+
+@track_handler  # 💬 теперь это просто обёртка для логирования
+async def start_vocab(message: Message, state: FSMContext):
+
+        # 💬 попытка удалить предыдущее меню урока, если мы его показывали
+    data = await state.get_data()
+    last_menu_msg_id = data.get("last_menu_msg_id")
+    if last_menu_msg_id:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=last_menu_msg_id)
+        except Exception:
+            pass
+        await state.update_data(last_menu_msg_id=None)
+
+    # 💬 дополнительно прячем клавиатуру, чтобы кнопки меню исчезли
+    await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    try:
+        # 💬 можно убрать и сам пользовательский клик «Учить слова» для чистоты
+        await message.delete()
+    except Exception:
+        pass
+
+
+    # 1) Регистрируем пользователя (имя, время и т.п.)
+    await register_or_update_user(message)
+    # 2) Дайс-анимация
+    dice_msg = await message.answer_dice(reply_markup=ReplyKeyboardRemove())
+    await asyncio.sleep(DICE_DELETE_DELAY_S)  # 💬 короткая задержка под анимацию
+
+    try: await dice_msg.delete()
+    except: pass
+
+    data = await state.get_data()
+    # 3) Если фаза уже выбрана — get_vocab_list вернёт только словарь по фазе
+    #    иначе — весь список (legacy)
+    vocab_list = get_vocab_list(data)
+
+    # 4) Инициализация указателя и “failed_vocab” при первом заходе
+    if "vocab_index" not in data:
+        await state.update_data(vocab_index=0,
+                                failed_vocab=[],
+                                vocab_done=0)
+    idx = data.get("vocab_index", 0)
+
+    # 5) Если всё пройдено → Просто сообщаем и выходим в меню (без лишних кнопок)
+    if idx >= len(vocab_list):
+        await smart_reply(message, "🎉 Все задания в этой фазе пройдены!", reply_markup=ReplyKeyboardRemove())
+        return await lesson_menu_handler(message, state)
+    # 6) Сохраняем в state stats по текст-квизам (печеньки)
+    max_cookies = sum(1 for b in vocab_list if b.get("type") == "textquiz")
+    xp_all = load_xp_data().get(str(message.chat.id), {})
+    initial_cookies = xp_all.get("stats", {}).get("words_learned", 0)
+    await state.update_data(max_cookies=max_cookies,
+                            initial_cookies=initial_cookies)
+
+    # 7) Вступительная фраза
+    if idx == 0:
+        phrase = random.choice(vocab_start_phrases)
+    else:
+        phrase = random.choice(vocab_return_phrases)
+    await smart_reply(message, phrase, reply_markup=ReplyKeyboardRemove())
+
+    # 8) Переходим в showing_vocab и идём в send_one_vocab
+    await state.set_state(LessonStates.showing_vocab)
+    return await send_one_vocab(message, state)
+
+
+
+
+
+@dp.callback_query(
+    lambda c: c.data and c.data.startswith("topic_phase:"),
+    StateFilter(LessonStates.waiting_vocab_phase)
+)
+@track_handler
+async def topic_phase_chosen(cb: CallbackQuery, state: FSMContext):
+    _, ph_str = cb.data.split(":", 1)
+    phase_id = int(ph_str)                      # 💬 получаем только ID фазы
+    data      = await state.get_data()
+    topic_key = data.get("selected_topic")       # 💬 берём topic_key из state
+
+    data  = await state.get_data()
+    topic = topics.get(topic_key, {})
+    # найдём нужную фазу
+    phase = next((ph for ph in topic.get("vocab", []) if ph["phase_id"] == phase_id), None)
+    blocks      = phase.get("vocab", []) if phase else []
+    link_blocks = [b for b in blocks if "link" in b or "url" in b]
+    total       = len(link_blocks)
+    passed      = data.get("vocab_done_per_phase", {}).get(phase_id, 0)
+    threshold   = math.ceil(total * 0.8) if total else 0
+
+
+    # 💬 считаем общее число квизов внутри выбранной фазы (для прогресс-бара OfferContinue)
+    total_quizzes_phase = 0
+    if phase:
+        total_quizzes_phase += len(phase.get("quiz_pool", [])) + len(phase.get("textquiz_pool", []))
+    total_quizzes_phase += sum(1 for b in blocks if b.get("type") in ("quiz", "textquiz"))
+    total_quizzes_phase += sum(1 for b in blocks if b.get("quiz"))
+
+    # 1) фаза уже пройдена?
+    if total and passed >= threshold:
+        # 💬 Пытаемся показать pop-up, но не падаем, если callback уже «протух»
+        try:
+            await cb.answer("🎉 Фаза уже пройдена, ты красавчик!", show_alert=True)
+        except TelegramBadRequest as e:
+            # 💬 Игнорируем только ситуацию «query is too old», остальные ошибки пробрасываем
+            if "query is too old" not in str(e):
+                raise
+        # обновим inline-клавиатуру (зачёркнутые + ✅ остались)
+        return
+
+    # 2) иначе — сначала быстро отвечаем на callback, потом удаляем prompt и стартуем/возобновляем словарь
+    try:
+        await cb.answer()   # 💬 убираем «часики» на кнопке
+    except TelegramBadRequest as e:
+        if "query is too old" not in str(e):
+            # 💬 если другая ошибка Telegram — не молчим
+            raise
+
+    try:
+        await cb.message.delete()  # 💬 удаляем сообщение с фазами, если оно ещё существует
+    except TelegramBadRequest:
+        # 💬 сообщение уже удалено/устарело — продолжаем без падения
+        pass
+
+    data = await state.get_data()
+    prev_phase = data.get("selected_phase_id")
+
+    # Если переключаемся на новую фазу — инициализируем счётчики
+    if prev_phase != phase_id:
+        await state.update_data(
+            selected_phase_id       = phase_id,
+            vocab_index             = 0,
+            failed_vocab            = [],
+            total_quizzes_phase     = total_quizzes_phase,  # 💬 total квизов именно в этой фазе
+            quiz_correct_phase      = 0,                     # 💬 правильные poll-quiz внутри фазы
+            textquiz_correct_phase  = 0,                     # 💬 правильные textquiz внутри фазы
+        )
+
+    else:
+        # если возвращаемся в ту же фазу — просто обновляем ID фазы, остальные данные сохраняем
+        await state.update_data(
+            selected_phase_id   = phase_id,
+            total_quizzes_phase = total_quizzes_phase,  # 💬 чтобы всегда был актуальный total по фазе
+        )
+
+
+    # 💬 показываем «загрузку» и удаляем её через 5 сек (не блокируем переход)
+    asyncio.create_task(
+        send_and_auto_delete_text(
+            bot,
+            cb.message.chat.id,
+            "Гружу...🙄",
+            delay=5
+        )
+    )
+
+    return await start_vocab(cb.message, state)
+
+
+# ─────────────────────────────────────────────────────────
+
+
+
+# ─────────────────────────────────────────────────────────
+@track_handler
+async def send_one_vocab(message: Message, state: FSMContext):
+    data      = await state.get_data()
+    # защита от отсутствия выбранной темы (во избежание KeyError)
+    topic_key = data.get("selected_topic")
+    if not topic_key:
+        # вернём пользователя в главное меню урока
+        return await lesson_menu_handler(message, state)
+
+    idx       = data.get("vocab_index", 0)
+    vocab_list= get_vocab_list(data)
+
+
+   
+# 🚩 ПРОВЕРКА ЗАВЕРШЕНИЯ СПИСКА
+    if idx >= len(vocab_list):
+        data = await state.get_data()
+        failed = data.get("failed_vocab", [])
+        
+        # 1. Если есть ошибки — идем в ревью
+        if failed:
+            await state.set_state(LessonStates.review_failed_vocab)
+            chat_id = message.chat.id if hasattr(message, "chat") else message.id
+            return await send_failed_vocab(chat_id, state)
+
+        # 2. Если ошибок нет — финализируем
+        chat_id = message.chat.id if hasattr(message, "chat") else message.id
+        
+        if not data.get("vocab_finished_once"):
+            await bot.send_message(chat_id, "🎉 Ты красавчик, все задания пройдены!")
+            await state.update_data(vocab_finished_once=True)
+            
+        # 💬 Прямой выход в меню урока
+        return await lesson_menu_handler(message, state)
+    
+    # 📦 Берём текущий блок – сразу, один раз
+    block = vocab_list[idx]
+    btype = block.get("type", "link")
+
+
+
+    # ——— Фото-блок ———
+    if btype == "photo":
+        return await send_one_vocab_photo(message, state)
+
+    # ——— Quiz-блок ———
+    if btype == "quiz":
+        return await send_one_vocab_quiz(message, state)
+
+    # ——— TextQuiz-блок ———
+    if btype == "textquiz":
+
+        # 💬 Всегда откладываем textquiz, пока остались обычные quiz
+        vocab_list = get_vocab_list(await state.get_data())
+        next_quiz_idx = next(
+            (i for i in range(idx + 1, len(vocab_list)) if vocab_list[i].get("type") == "quiz"),
+            None
+        )
+        if next_quiz_idx is not None:
+            # 💬 сбрасываем «липкий» маркер мини-сессии, чтобы не прыгать в textquiz
+            await state.update_data(vocab_index=next_quiz_idx, pending_textquiz=[])
+            return await send_one_vocab(message, state)
+
+        # 💬 1) Проверяем, есть ли активная мини-сессия textquiz (после сета quiz)
+        data = await state.get_data()
+        pending = data.get("pending_textquiz") or []
+        vocab_list = get_vocab_list(data)
+
+        # 💬 2) Откладываем textquiz ВСЕГДА, если впереди ещё есть обычные quiz
+        next_quiz_idx = next(
+            (i for i in range(idx + 1, len(vocab_list)) if vocab_list[i].get("type") == "quiz"),
+            None
+        )
+        if next_quiz_idx is not None:
+            await state.update_data(vocab_index=next_quiz_idx, pending_textquiz=[])
+            return await send_one_vocab(message, state)
+
+
+        # 🔽 поддержка \n в JSON как переноса строки
+        q = block.get("question", "")
+        q = q.replace("\\n", "\n")
+
+        # 💬 Спойлеры [[...]] → tg-spoiler
+        q = q.replace("[[", '<span class="tg-spoiler">').replace("]]", "</span>")
+
+        # 💬 Отмечаем, что этот textquiz уже показывался (для выбора НОВЫХ в следующих сетах)
+        textquiz_seen = data.get("textquiz_seen", [])
+        if idx not in textquiz_seen:
+            textquiz_seen.append(idx)
+            await state.update_data(textquiz_seen=textquiz_seen)
+
+        msg = await smart_reply(message, q, reply_markup=ReplyKeyboardRemove())
+        await state.update_data(last_prompt_id=msg.message_id)
+
+        # ✍️ маленький маркер «пора писать» с авто-удалением
+        asyncio.create_task(
+            send_and_auto_delete_text(bot, message.chat.id, "✍️", delay=1)
+        )
+        return await state.set_state(LessonStates.vocab_textquiz)
+
+
+
+
+
+
+    # ——— Text-блок ———
+    if btype == "text":
+        return await send_one_vocab_text(message, state)
+    else:
+        # 💬 default: link-блок
+        # ——— Дальше обычный link-блок (без изменений) ———
+
+        # ——— Link-блок: Title + кнопка-ссылка ———
+        title = block.get("title", "Без названия")
+        link  = block.get("link", "")
+
+        # 💬 Анимированный эмодзи перед выдачей ссылки (не блокируем поток)
+        chat_id = message.chat.id if hasattr(message, 'chat') else message.id
+        asyncio.create_task(send_and_auto_delete_random_text(bot, chat_id, LINK_HINT_TEXTS, delay=LINK_HINT_DELETE_S))  # 💬 единая настройка
+
+        await asyncio.sleep(LINK_HINT_DELETE_S)  # 💬 ждём пока подсказка «подышит»
+
+        # 💬 чистим и валидируем ссылку, чтобы не падать на битом JSON
+        link = str(link or "").strip().strip('"')
+        if not (link.startswith("http://") or link.startswith("https://")):
+            await state.update_data(vocab_index=idx + 1)  # 💬 пропускаем битый link-блок
+            return await send_one_vocab(message, state)
+
+
+        cta = random.choice(link_cta_phrases)
+        link_kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=cta, url=link)]
+            ]
+        )
+        await bot.send_message(chat_id, f"<b>{title}</b>", reply_markup=link_kb, parse_mode="HTML")
+
+        # 💬 Inline Confirm Done (через 2 сек после ссылки)
+        scene = random.choice(scenarios["confirm_done"])
+        await state.update_data(current_stage="confirm_done", current_scene=scene)
+        await state.set_state(LessonStates.showing_vocab)
+
+        inline_kb = InlineKeyboardMarkup(
+            inline_keyboard=[[
+                InlineKeyboardButton(text=btn, callback_data=f"confirm_done:{btn}")
+                for btn in scene["buttons"]
+            ]]
+        )
+        chat_id = message.chat.id if hasattr(message, 'chat') else (await state.get_data())["last_chat_id"]
+        return await bot.send_message(chat_id, scene["text"], reply_markup=inline_kb)  # 💬 отправляем кнопки
+
+
+@track_handler
+async def send_ad_block(message: Message, state: FSMContext):
+    ads = load_ads_data()
+    if not ads:
+        # 💬 если рекламы нет — покажем предупреждение на 1с и продолжим поток (в фазу)
+        warn = await message.answer("⚠️ Реклама не найдена.")
+        await asyncio.sleep(1)
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=warn.message_id)
+        except Exception:
+            pass
+    
+        await state.update_data(pending_phase=False)  # 💬 важно: снимаем флаг ожидания рекламы
+        return await show_phase_menu(message, state)  # 💬 продолжаем дальше, не стопаемся
+    
+
+    data = await state.get_data()
+    next_idx = data.get("ad_index", 0)
+    ad = ads[next_idx % len(ads)]
+    await state.update_data(ad_index=next_idx + 1)
+
+    # 💬 форвардим, чтобы была шапка/глазки (не copy!)
+    ad_msg = await bot.forward_message(
+        chat_id=message.chat.id,
+        from_chat_id=ad["channel_id"],
+        message_id=ad["message_id"]
+    )
+
+    # 💬 одна кнопка OK, без вопросов/реакций
+    ok_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅", callback_data="ad_ok")]
+    ])
+
+    # 💬 пробуем повесить кнопку прямо на форвард
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=message.chat.id,
+            message_id=ad_msg.message_id,
+            reply_markup=ok_kb
+        )
+        ok_msg_id = None
+    except Exception:
+        # 💬 fallback: если нельзя редактировать форвард — шлём отдельную кнопку
+        ok_msg = await message.answer("✅", reply_markup=ok_kb)
+        ok_msg_id = ok_msg.message_id
+
+    await state.update_data(
+        current_ad_msg_id=ad_msg.message_id,
+        current_ad_ok_msg_id=ok_msg_id,
+        current_ad_question_id=None  # 💬 больше не используем
+    )
+
+
+@track_handler
+@dp.callback_query(lambda c: c.data and c.data.startswith("ad_answer:"))
+async def ad_reaction_handler(callback: CallbackQuery, state: FSMContext):
+    # 💬 Обработчик клика по кнопке рекламы: показать реакцию, подождать 2с, удалить весь ad-блок, продолжить поток
+    await callback.answer()  # 💬 acknowledge callback to avoid loading spinner
+    data = await state.get_data()
+
+    # 💬 Разбираем индексы из callback_data
+    try:
+        _, ad_idx_str, btn_idx_str = callback.data.split(":")
+        ad_idx, btn_idx = int(ad_idx_str), int(btn_idx_str)
+    except Exception:
+        # 💬 некорректный формат — просто выйдем
+        return
+
+    ads = load_ads_data()
+    reaction = None
+    try:
+        reaction = ads[ad_idx]["btns"][btn_idx]["reaction"]
+    except Exception:
+        reaction = "✅"  # 💬 fallback реакция
+
+    chat_id = callback.message.chat.id
+    bot_obj = callback.bot
+
+    # 1) Показываем реакцию (видимое сообщение), сохраняем его id для удаления
+    try:
+        reaction_msg = await callback.message.answer(reaction)  # 💬 что увидит пользователь
+        reaction_msg_id = reaction_msg.message_id
+    except Exception:
+        reaction_msg_id = None
+
+    # 2) Ждём 2 секунды перед удалением всего рекламного блока
+    await asyncio.sleep(AD_REACTION_DELETE_S)  # 💬 единая настройка задержки для рекламы
+
+
+    # 3) Удаляем пост из канала (forwarded), вопрос с кнопками и саму реакцию (если есть)
+    #    Используем те ключи, которые send_ad_block записывает в FSM: current_ad_msg_id, current_ad_question_id
+    ad_msg_id = data.get("current_ad_msg_id")
+    ad_q_id   = data.get("current_ad_question_id")
+
+    for mid in (ad_msg_id, ad_q_id, reaction_msg_id):
+        if mid:
+            try:
+                # 💬 удаляем без фатала (произойдёт молча, если сообщение уже удалено)
+                await bot_obj.delete_message(chat_id=chat_id, message_id=mid)
+            except Exception:
+                # 💬 игнорируем ошибки удаления (например, сообщение уже удалено)
+                pass
+
+    # 4) Очистим маркеры в state, чтобы логика дальше была корректной
+    await state.update_data(pending_phase=False,
+                            current_ad_msg_id=None,
+                            current_ad_question_id=None)
+        # 💬 что делает эта часть: фиксируем флаг до апдейта, чтобы избежать гонок и повторных вызовов меню
+    was_pending = data.get("pending_phase")
+
+
+    # 5) Продолжаем поток: если это был предфазный ad — возвращаемся в меню фаз, иначе — продолжаем vocab
+    if was_pending:
+        return await show_phase_menu(callback.message, state)
+
+
+    return await send_one_vocab(callback.message, state)
+
+
+
+@dp.callback_query(lambda c: c.data == "ad_ok")
+@track_handler 
+async def ad_ok_handler(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+
+    data = await state.get_data()
+    chat_id = callback.message.chat.id
+
+    ad_msg_id = data.get("current_ad_msg_id")
+    ok_msg_id = data.get("current_ad_ok_msg_id")
+
+    # 💬 сначала пробуем убрать inline-кнопку (если удаление вдруг не сработает)
+    for mid in (ad_msg_id, ok_msg_id):
+        if mid:
+            try:
+                await bot.edit_message_reply_markup(chat_id=chat_id, message_id=mid, reply_markup=None)
+            except Exception:
+                pass
+
+    # 💬 удаляем сообщения рекламы (сам пост + отдельная кнопка, если была fallback)
+    for mid in (ad_msg_id, ok_msg_id):
+        if mid:
+            try:
+                await bot.delete_message(chat_id, mid)
+            except Exception:
+                pass
+
+    was_pending_phase = data.get("pending_phase", False)
+
+    # 💬 чистим state сразу, чтобы повторный тап не ломал логику
+    await state.update_data(
+        pending_phase=False,
+        current_ad_msg_id=None,
+        current_ad_ok_msg_id=None,
+        current_ad_question_id=None
+    )
+
+    # 💬 имитация “гружу материал…” на 2 секунды и авто-удаление
+    loading_msg = await bot.send_message(chat_id, "⏳ Гружу материал…")
+    await asyncio.sleep(2)
+    try:
+        await bot.delete_message(chat_id, loading_msg.message_id)
+    except Exception:
+        pass
+
+    # 💬 возвращаемся в тот же поток, что и раньше
+    if was_pending_phase:
+        return await show_phase_menu(callback.message, state)
+    return await send_one_vocab(callback.message, state)
+
+
+
+
+
+
+@track_handler
+async def send_failed_vocab(chat_id: int, state: FSMContext):
+    data       = await state.get_data()
+    # 💬 защитный сброс: при входе в ревью ошибок никаких запланированных textquiz быть не должно
+    await state.update_data(pending_textquiz=[])
+
+    topic_key  = data["selected_topic"]
+    vocab_list = get_vocab_list(data)
+    failed     = data.get("failed_vocab", [])
+    idx        = failed[0]
+    block      = vocab_list[idx]
+
+
+
+    # ——— Повтор TEXTQUIZ и запоминаем ID сообщения для удаления
+    if block.get("type") == "textquiz":
+        # 1) подтягиваем вопрос, поддерживаем \n из JSON
+        q = block.get("question", "").replace("\\n", "\n")
+
+        # 2) конвертируем псевдо-спойлер [[...]] → HTML-формат Telegram
+        #    [[PAGAR CON]] → <span class="tg-spoiler">PAGAR CON</span>
+        q_html = re.sub(r"\[\[(.+?)\]\]", r'<span class="tg-spoiler">\1</span>', q)
+
+        # 3) шлём отдельным сообщением и сохраняем message_id
+        sent = await bot.send_message(chat_id, q_html, parse_mode="HTML")
+        await state.update_data(last_failed_textquiz_message_id=sent.message_id)
+
+        # 4) переходим в поток разбора ошибок textquiz
+        await state.set_state(LessonStates.review_failed_textquiz)
+        return
+
+
+
+    # ——— Повтор встроенного quiz и запоминаем message_id для удаления
+    if block.get("type") == "quiz":
+        opts = block["options"].copy()
+        random.shuffle(opts)
+        correct_id = opts.index(block["correct_answer"])
+        # 💬 В повторе тоже используем explanation (тот же text из JSON)
+        poll_msg = await bot.send_poll(
+            chat_id=chat_id,
+            question=block["question"],
+            options=opts,
+            type="quiz",
+            correct_option_id=correct_id,
+            is_anonymous=False,
+            explanation=block.get("explanation_wrong", "")
+        )
+
+        # 💾 сохраняем poll.id и message_id, чтобы потом удалить и отследить ответ
+        await state.update_data(
+            current_poll_id=poll_msg.poll.id,
+            current_poll_message_id=poll_msg.message_id,
+            current_correct_option_id=correct_id
+        )
+        # 🔄 переключаем FSM в разбор ошибок quiz
+        await state.set_state(LessonStates.review_failed_vocab)
+        return
+
+
+    # создаём «фейковый» Message с нужным chat.id
+    fake_chat = Chat(id=chat_id, type="private")
+    fake_user = User(id=poll_answer.user.id, is_bot=False, first_name=poll_answer.user.first_name or "")
+    fake_msg  = Message(
+        message_id=0,
+        date=datetime.datetime.now(),   # 💬 берём now() у класса datetime
+        chat=fake_chat,
+        from_user=fake_user,
+        text=""
+    )
+
+    return await lesson_menu_handler(fake_msg, state)
+
+
+
+
+
+
+
+# ------------------------------  
+#   ПОТОК по показу type: quiz по VOCAB 📘📘📘
+# ------------------------------
+@track_handler
+async def send_one_vocab_quiz(message: Message, state: FSMContext):
+    data      = await state.get_data()
+    topic_key = data["selected_topic"]
+    vocab_list = get_vocab_list(data)
+    idx       = data.get("vocab_index", 0)
+
+    # 1) Если вышли за пределы — сначала ревью ошибок, потом меню
+    if idx >= len(vocab_list):
+        failed = data.get("failed_vocab", [])
+        if failed:
+            await state.set_state(LessonStates.review_failed_vocab)
+            # 💬 передаём chat_id вместо объекта Message
+            return await send_failed_vocab(message.chat.id, state)
+        return await lesson_menu_handler(message, state)
+
+
+    # 2) Берём текущий блок – гарантированно в диапазоне
+    block = vocab_list[idx]
+
+        # Если это не Quiz-блок — перенаправляем в общий отправщик
+    if block.get("type") != "quiz":
+        return await send_one_vocab(message, state)
+
+
+
+
+
+    # 4) Собираем и отправляем Quiz
+    opts = block["options"].copy()
+    random.shuffle(opts)
+    correct_id = opts.index(block["correct_answer"])
+# — Отправляем Quiz через bot, чтобы не вызывать методы у ChatFullInfo —
+    chat_id = message.chat.id if hasattr(message, "chat") else message.id
+    # 💬 explanation показываем через встроенный механизм Telegram Quiz
+    poll_message = await bot.send_poll(
+        chat_id=chat_id,
+        question=block["question"].replace("\\n", "\n"),   # 💬 конвертируем литерал "\n" из JSON в реальный перенос строки
+        options=opts,
+        type="quiz",
+        correct_option_id=correct_id,
+        open_period=QUIZ_OPEN_PERIOD_S,  # 💬 единая константа времени жизни квиза
+        is_anonymous=False,
+        explanation=block.get("explanation_wrong", "")
+    )
+
+    # 💬 убрали объяснение «правильного» — оставляем только объяснение ошибки отдельно
+
+    # 💾 сохраняем poll и message_id
+    await state.update_data(
+        current_poll_id=poll_message.poll.id,
+        current_poll_message_id=poll_message.message_id,
+        current_correct_option_id=correct_id
+    )
+    # 🚨 запускаем таймаут на ответ
+    asyncio.create_task(_vocab_quiz_timeout_handler(
+        poll_message.poll.id, chat_id, state, delay=int(QUIZ_TIMEOUT_TASK_S)
+    ))  # 💬 единый таймаут watchdog
+
+    await state.set_state(LessonStates.vocab_exercise)
+
+
+
+
+@dp.poll_answer(StateFilter(LessonStates.review_failed_vocab))
+@track_handler
+async def handle_review_failed_vocab(poll_answer: PollAnswer, state: FSMContext):
+    data = await state.get_data()
+    # 1) Отфильтровываем чужие poll’ы
+    if poll_answer.poll_id != data.get("current_poll_id"):
+        return
+    # 2) Сразу сбрасываем текущий poll_id, чтобы таймаут не сел
+    await state.update_data(current_poll_id=None)
+
+    # 3) Достаём индекс и блок
+    idx = data.get("failed_vocab", [])[0]
+    vocab_list = get_vocab_list(data)
+    block      = vocab_list[idx]
+
+    # 4) Проверяем, правильно ли ответили
+    selected = poll_answer.option_ids[0] if poll_answer.option_ids else None
+    correct = data["current_correct_option_id"]
+    is_correct = (selected == correct)
+
+    # 💬 при верном ответе в ревью — чистим обе очереди для этого индекса
+    failed = [i for i in data.get("failed_vocab", []) if i != idx]
+    redo   = [i for i in data.get("redo_stack", [])   if i != idx]
+    await state.update_data(failed_vocab=failed, redo_stack=redo)
+
+
+    # 💬 при верном ответе в ревью — чистим обе очереди для этого индекса
+    failed = data.get("failed_vocab", [])
+    if failed:
+        failed = [i for i in failed if i != idx]   # 💬 убрать текущий из списка ошибок
+    redo = data.get("redo_stack", [])
+    if idx in redo:
+        redo = [i for i in redo if i != idx]       # 💬 и из стека пересдач
+    await state.update_data(failed_vocab=failed, redo_stack=redo)
+
+
+    # 💬 Реакция на правильный ответ при ревью (внутри текущего сета)
+    if is_correct:
+        try:
+            msg_id = data.get("current_poll_message_id")
+            if msg_id:
+                await bot.set_message_reaction(
+                    chat_id=poll_answer.user.id,
+                    message_id=msg_id,
+                    reaction=[ReactionTypeEmoji(emoji="🎉")],
+                    is_big=True
+                )
+        except Exception:
+            pass
+
+
+    # 5) Начисляем XP по старой логике
+    delta = random.randint(15, 25) if is_correct else -10
+    await award_xp(delta, state)
+    user_id = poll_answer.user.id
+    topic_key = data["selected_topic"]
+
+    xp_before = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
+    await add_xp(user_id, topic_key, delta)
+    xp_after = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
+    if xp_after // XP_PER_LEVEL > xp_before // XP_PER_LEVEL:
+        lvl_idx = min(xp_after // XP_PER_LEVEL, len(LEVELS)-1)
+        medal_idx = min((xp_after % XP_PER_LEVEL) // (XP_PER_LEVEL // 3), 2)
+        await bot.send_message(
+            poll_answer.user.id,
+            f"🎉 Поздравляем! Ты достиг уровня {LEVELS[lvl_idx]}{MEDALS[medal_idx]}!"
+        )
+
+    # 6) Сообщаем об изменении XP
+    xp = (await state.get_data())["xp"]
+
+
+    # 💬 Новый: показываем правильный ответ или фразу похвалы перед XP
+    if is_correct:
+        await send_and_auto_delete_text(
+            bot,
+            user_id,
+            random.choice(vocab_quiz_success_phrases),
+            delay=SLEEP_BEFORE_FEEDBACK_S
+        )  # 💬 короткий показ
+        await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)  # 💬 пауза перед XP/штрафом
+    else:
+        # 💬 при ошибке: правильный ответ 2 сек + иногда «негативный» стикер
+        asyncio.create_task(_maybe_send_negative_sticker(bot, user_id))  # 💬 шанс/тайминги в константах
+        await send_and_auto_delete_text(
+            bot,
+            user_id,
+            f"✅ {block['correct_answer']}",
+            delay=WRONG_FB_TEXT_TOTAL_S
+        )
+
+
+    xp_fb = await bot.send_message(
+        user_id,
+        f"{'🎉 +' + str(delta) + ' XP' if delta > 0 else '⚠️ ' + str(delta) + ' XP'}"
+    )  # 💬 закрыли f-string, чтобы не падало на синтаксисе
+
+
+    # 7) Подождать 1.5 с, чтобы успели прочесть
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 единая пауза перед удалением
+
+
+    # 8) Удаляем сообщение-poll и XP-фидбэк
+    chat_id = poll_answer.user.id
+    to_del = [
+        data.get("current_poll_message_id"),
+        xp_fb.message_id
+    ]
+    for mid in to_del:
+        if mid:
+            try: await bot.delete_message(chat_id, mid)
+            except: pass
+
+    # 9) Обновляем очередь ошибок:
+    failed = data.get("failed_vocab", [])
+    if is_correct:
+        failed.pop(0)
+    else:
+        failed.append(failed.pop(0))
+    await state.update_data(failed_vocab=failed)
+
+    # 🔄 Если остались ошибки — снова повторяем
+    if failed:
+        return await send_failed_vocab(chat_id, state)
+
+    # ✅ Иначе — возвращаемся в главное меню темы
+    chat = await bot.get_chat(chat_id)
+    fake_message = Message(
+        message_id=0,
+        date=datetime.datetime.now(),
+        chat=chat,
+        from_user=poll_answer.user,
+        text=""
+    )
+    return await lesson_menu_handler(fake_message, state)
+
+
+import types
+
+
+@track_handler
+async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMContext, delay: int = QUIZ_TIMEOUT_TASK_S):
+    await asyncio.sleep(delay)
+
+    # 💬 если мы уже НЕ в основном квизе — таймаут не срабатывает
+    if await state.get_state() != LessonStates.vocab_exercise:
+        return
+
+    data = await state.get_data()
+    if data.get("current_poll_id") != poll_id:
+        return
+
+    # сброс poll_id
+    await state.update_data(current_poll_id=None)
+
+        # ── Время вышло! ──
+    asyncio.create_task(send_and_auto_delete_text(bot, chat_id, "⏱ Время вышло!", delay=AUTO_DELETE_TEXT_DELAY_S))  # 💬 авто-удаление
+
+
+    data = await state.get_data()
+    idx  = data.get("vocab_index", 0)
+    block = get_vocab_list(data)[idx]
+    await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)  # 💬 короткая пауза перед штрафом
+
+    # ── Далее оригинальный код: снимаем XP, показываем штраф, удаляем, переход к следующему
+
+    # 💬 Синхронизируем штраф в xp_data (чтобы меню и файл совпадали)
+    topic_key = (await state.get_data()).get("selected_topic", "unknown")
+    await add_xp(chat_id, topic_key, -20)
+
+
+    xp = (await state.get_data()).get("xp", 0)
+    fb = await bot.send_message(chat_id, f"⚠️ -20 XP")
+
+    # ── Сохраняем этот индекс в failed_vocab ──
+    idx    = data.get("vocab_index", 0)
+    failed = data.get("failed_vocab", [])
+    if idx not in failed:
+        failed.append(idx)
+        await state.update_data(failed_vocab=failed)
+
+    # ── Ждём и удаляем опрос + фидбек ──
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 время на чтение перед зачисткой
+
+    try: await bot.delete_message(chat_id, data.get("current_poll_message_id"))
+    except: pass
+    try: await bot.delete_message(chat_id, fb.message_id)
+    except: pass
+
+    # 💬 Таймаут считаем ОШИБКОЙ и повторяем её внутри текущего сета (6)
+    data = await state.get_data()
+    vocab_list = get_vocab_list(data)
+    BLOCK = 6  # фиксированный размер сета
+
+    # позиции только для обычных quiz
+    q_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "quiz"]
+    try:
+        q_idx = q_positions.index(idx)  # idx у нас уже получен выше из state
+    except ValueError:
+        # защитный кейс: если вдруг таймаут пришёл не по quiz — прыгаем к ближ. quiz
+        nxt_q = next((i for i in range(idx + 1, len(vocab_list))
+                      if vocab_list[i].get("type") == "quiz"), None)
+        from aiogram.types import Chat, User, Message, KeyboardButton, ReplyKeyboardMarkup
+        chat = Chat(id=chat_id, type="private")
+        fu   = User(id=chat_id, is_bot=False, first_name="")
+        fake = Message(message_id=0, date=datetime.datetime.now(), chat=chat, from_user=fu, text="")
+        if nxt_q is None:
+            oc_scene = random.choice(scenarios["offer_continue"])
+            kb = ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]],
+                resize_keyboard=True
+            )
+            await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
+            await state.set_state(LessonStates.showing_vocab)
+            return await smart_reply(fake, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+        else:
+            await state.update_data(vocab_index=nxt_q, current_poll_id=None)
+            return await send_one_vocab(fake, state)
+
+    block_start_q = (q_idx // BLOCK) * BLOCK
+    block_end_q   = min(block_start_q + BLOCK, len(q_positions))
+
+    # добавляем текущий индекс в стек повторов
+    redo = data.get("redo_stack", [])
+    if idx not in redo:
+        redo.append(idx)
+
+    # линейный следующий внутри текущего сета (если есть)
+    next_linear = q_positions[q_idx + 1] if (q_idx + 1) < block_end_q else None
+
+    from aiogram.types import Chat, User, Message
+    chat = await bot.get_chat(chat_id)
+    fake = Message(
+        message_id=0,
+        date=datetime.datetime.now(),
+        chat=chat,
+        from_user=User(id=chat_id, is_bot=False, first_name=""),
+        text=""
+    )
+
+    # 💬 приоритет пересдач: если уже в redo — НЕ возвращаемся в линейку
+    data = await state.get_data()
+    redo = data.get("redo_stack", [])
+
+    # 💬 таймаут = неправильный ответ: кладём в пересдачу и в общий ревью
+    redo = data.get("redo_stack", [])
+    if idx not in redo:
+        redo.append(idx)  # 💬 пересдача внутри текущего сета
+
+    failed = data.get("failed_vocab", [])
+    if idx not in failed:
+        failed.append(idx)  # 💬 общий ревью-пул только из таймаутов
+
+    await state.update_data(redo_stack=redo, failed_vocab=failed)
+
+
+    if data.get("redo_active"):
+        # остаёмся в режиме пересдач, пока очередь не опустеет
+        if redo:
+            nxt = redo.pop(0)
+            await state.update_data(vocab_index=nxt, redo_stack=redo, redo_active=True, current_poll_id=None)  # 💬 держим redo
+            return await send_one_vocab(fake, state)  # 💬 используем уже созданное fake-сообщение
+
+        else:
+            # редо пуста — СЕТ ЗАКРЫТ → пробуем мини-сессию textquiz
+            await state.update_data(redo_active=False)
+
+            pending = await _select_pending_textquiz_for_set(state)  # 💬 вернёт 0–2 после сета или «финальный хвост»
+            if pending:
+                next_idx = pending[0]
+                await state.update_data(
+                    vocab_index=next_idx,
+                    pending_textquiz=pending,
+                    current_poll_id=None,   # 💬 сбрасываем poll
+                )
+                return await send_one_vocab(fake, state)
+
+            # 💬 textquiz нет — обычный offer_continue
+            oc_scene = random.choice(scenarios["offer_continue"])
+            buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
+            kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+            await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
+            await state.set_state(LessonStates.showing_vocab)
+            return await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+
+
+    if next_linear is not None:
+        # идём дальше по сету, ошибку оставляем в redo_stack
+        await state.update_data(
+            vocab_index=next_linear,
+            redo_stack=redo,
+            redo_active=False,
+            current_poll_id=None
+        )
+        return await send_one_vocab(fake, state)
+    else:
+        # край сета: сначала доигрываем ошибки, потом interleave с textquiz / offer_continue
+        if redo:
+            nxt = redo.pop(0)
+            await state.update_data(
+                vocab_index=nxt,
+                redo_stack=redo,
+                current_poll_id=None
+            )
+            return await send_one_vocab(fake, state)
+        else:
+            # 💬 пробуем запустить мини-сессию textquiz
+            pending = await _select_pending_textquiz_for_set(state)
+
+            if pending:
+                next_idx = pending[0]
+                await state.update_data(
+                    vocab_index=next_idx,
+                    pending_textquiz=pending,
+                    current_poll_id=None
+                )
+                return await send_one_vocab(fake, state)
+
+            # 💬 textquiz нет — обычный offer_continue
+            oc_scene = random.choice(scenarios["offer_continue"])
+            from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+            kb = ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]],
+                resize_keyboard=True
+            )
+            await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
+            await state.set_state(LessonStates.showing_vocab)
+            return await smart_reply(fake, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+
+
+
+
+
+# 💬 Выбираем textquiz: по умолчанию 2 (мини-сессия), но можно запросить больше (финал)
+async def _select_pending_textquiz_for_set(state: FSMContext, limit: int = 2) -> list[int]:
+    """
+    Логика выбора:
+    1. Сохраняем якорь (last_main_quiz_index).
+    2. Если limit == 2 (мини-сессия):
+       - 1-й слот: Redo (или Новый).
+       - 2-й слот: Всегда Новый.
+    3. Если limit > 2 (финал/хвост):
+       - Наполняем список сначала из Redo, затем из Новых, пока не наберем limit.
+    """
+    data = await state.get_data()
+    vocab_list = get_vocab_list(data)
+    
+    # --- Сохранение якоря для обычных квизов ---
+    current_idx = data.get("vocab_index", 0)
+    block_type = vocab_list[current_idx].get("type", "link")
+    if block_type == "quiz":
+        await state.update_data(last_main_quiz_index=current_idx)
+
+    # Позиции textquiz
+    t_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "textquiz"]
+    if not t_positions:
+        return []
+
+    redo_t = data.get("redo_stack_text", [])
+    cursor = data.get("textquiz_new_cursor", 0)
+    pending = []
+
+    # === ВЕТКА 1: Мини-сессия (строго 2 вопроса: 1 redo/new + 1 new) ===
+    if limit == 2:
+        # Слот 1:
+        if redo_t:
+            pending.append(redo_t.pop(0))
+            await state.update_data(redo_stack_text=redo_t)
+        elif cursor < len(t_positions):
+            pending.append(t_positions[cursor])
+            cursor += 1
+        
+        # Слот 2: (Всегда новый)
+        if len(pending) < 2 and cursor < len(t_positions):
+            pending.append(t_positions[cursor])
+            cursor += 1
+
+    # === ВЕТКА 2: Большой пакет (Финал, limit=6) ===
+    else:
+        # Сначала выгребаем ошибки (сколько влезет)
+        while len(pending) < limit and redo_t:
+            pending.append(redo_t.pop(0))
+        
+        # Обновляем стек ошибок (если что-то забрали)
+        await state.update_data(redo_stack_text=redo_t)
+
+        # Затем добираем новыми
+        while len(pending) < limit and cursor < len(t_positions):
+            pending.append(t_positions[cursor])
+            cursor += 1
+
+    # Сохраняем курсор новых
+    await state.update_data(textquiz_new_cursor=cursor)
+
+    return pending
+
+async def _pick_textquiz_round(state: FSMContext, count: int = 2):
+    """
+    # 💬 Берём до 2 textquiz: один из ошибок, один новый (с сохранением курсора)
+    """
+    data = await state.get_data()
+    textquiz_pool = data.get("textquiz_pool", [])
+    wrong_q = data.get("textquiz_wrong_queue", [])[:]  # локальная копия
+    cursor = data.get("textquiz_cursor", 0)
+
+    picked = []
+
+    # 1) из ошибок
+    if wrong_q:
+        picked.append(wrong_q.pop(0))
+
+    # 2) новый по курсору
+    while len(picked) < count and cursor < len(textquiz_pool):
+        picked.append(textquiz_pool[cursor])
+        cursor += 1
+
+    # обновляем только если что-то взяли
+    if picked:
+        await state.update_data(
+            textquiz_wrong_queue=wrong_q,
+            textquiz_cursor=cursor
+        )
+    return picked
+
+
+async def _pick_textquiz_fullpass(state: FSMContext):
+    """
+    # 💬 Когда обычные квизы закончились: вернуть ВСЁ, что осталось:
+    # сначала все НОВЫЕ (с курсора до конца), затем весь хвост ошибок
+    """
+    data = await state.get_data()
+    textquiz_pool = data.get("textquiz_pool", [])
+    wrong_q = data.get("textquiz_wrong_queue", [])[:]
+    cursor = data.get("textquiz_cursor", 0)
+
+    new_rest = textquiz_pool[cursor:] if cursor < len(textquiz_pool) else []
+    full = new_rest + wrong_q
+
+    # курсор ставим в конец, ошибки очищаем (уйдут в pending_textquiz)
+    if full:
+        await state.update_data(
+            textquiz_cursor=len(textquiz_pool),
+            textquiz_wrong_queue=[]
+        )
+    return full
+
+
+@dp.poll_answer(StateFilter(LessonStates.vocab_exercise))
+@track_handler
+async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
+    data = await state.get_data()
+    # 💬 Был ли доступ уже открыт ДО начисления XP?
+    was_unlocked = data.get("unlocked", False)
+    # 1) Фильтруем чужие ответы
+    if poll_answer.poll_id != data.get("current_poll_id"):
+        return
+
+    # 2) Отменяем таймаут
+    await state.update_data(current_poll_id=None)
+
+    # 3) Правильность и начисление XP
+    idx = data.get("vocab_index", 0)
+    selected = poll_answer.option_ids[0] if poll_answer.option_ids else None
+    correct  = data["current_correct_option_id"]
+    is_correct = (selected == correct)
+
+
+
+    # 💬 Реакция на правильный ответ к самому квизу (🎉)
+    if is_correct:
+        try:
+            msg_id = data.get("current_poll_message_id")  # id квиза-полла, который мы показывали
+            if msg_id:
+                await bot.set_message_reaction(
+                    chat_id=poll_answer.user.id,
+                    message_id=msg_id,
+                    reaction=[ReactionTypeEmoji(emoji="🎉")],  # боты могут ставить 1 обычный эмоджи
+                    is_big=True  # большая анимация
+                )
+        except Exception:
+            # без паники — если реакции запрещены/нет прав/временной лаг, просто пропускаем
+            pass
+
+
+    delta = random.randint(28, 37) if is_correct else -10
+    await award_xp(delta, state)
+
+    # 💬 Счётчики правильных квизов: общий (для меню) + по фазе (для OfferContinue)
+    if is_correct:
+        quiz_correct_total = data.get("quiz_correct_total", 0) + 1
+        quiz_correct_phase = data.get("quiz_correct_phase", 0) + 1  # 💬 прогресс именно внутри фазы
+        await state.update_data(
+            quiz_correct_total=quiz_correct_total,
+            quiz_correct_phase=quiz_correct_phase
+        )
+
+
+
+    # 🔥 Level-Up: сохраняем прошлый глобальный XP
+    user_id = poll_answer.user.id
+    topic   = data.get("selected_topic", "unknown")
+    xp_before = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
+
+    # 4) Запись XP в общее накопление (один раз)
+    await add_xp(user_id, topic, delta)
+
+    # 🔥 Проверяем, перешли ли на новый уровень
+    xp_after = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
+    prev_lvl = xp_before // XP_PER_LEVEL
+    new_lvl  = xp_after  // XP_PER_LEVEL
+
+    if new_lvl > prev_lvl:
+        # 💬 Определяем безопасные индексы уровня и медали (не выходим за границы массивов)
+        lvl_idx = min(new_lvl, len(LEVELS) - 1)
+        medal_idx = min(
+            (xp_after % XP_PER_LEVEL) // (XP_PER_LEVEL // 3),
+            len(MEDALS) - 1,
+        )
+
+        # 💬 Короткий прогресс по новой системе уровней
+        progress_text = render_short_level_progress(user_id)
+
+        await bot.send_message(
+            user_id,
+            f"🎉 Поздравляем! Вы достигли уровня {LEVELS[lvl_idx]}{MEDALS[medal_idx]}!\n\n"
+            f"{progress_text}"
+        )
+
+
+
+    # 4) Сохраняем ошибку для ревью
+    if not is_correct:
+        failed = data.get("failed_vocab", [])
+        if idx not in failed:
+            failed.append(idx)
+            await state.update_data(failed_vocab=failed)
+
+    # 5) Получаем обновлённый XP
+    new_data = await state.get_data()
+    xp = new_data.get("xp", 0)
+
+    vocab_list= get_vocab_list(data)
+    block     = vocab_list[idx]
+
+    # 💬 Новый: показываем правильный ответ или фразу похвалы перед XP
+  
+    # 💬 Новый: показываем правильный ответ или фразу похвалы перед XP
+    if is_correct:
+        # 💬 20% шанс — показать стикер, 80% — фразу поддержки
+        if random.random() < 0.2:
+            from scenarios_estiloso8_1 import exercise_stickers  # 💬 стикеры для успеха в упражнениях
+            sticker_id = random.choice(exercise_stickers)
+            await send_and_auto_delete_sticker(bot, user_id, sticker_id)
+        else:
+            await send_and_auto_delete_text(
+                bot,
+                user_id,
+                random.choice(vocab_quiz_success_phrases),
+                delay=SLEEP_BEFORE_FEEDBACK_S,  # 💬 короткий показ текста
+            )
+    else:
+        # 💬 при ошибке: держим правильный ответ 2 сек + иногда даём «негативный» стикер поверх
+        asyncio.create_task(_maybe_send_negative_sticker(bot, user_id))  # 💬 шанс/тайминги в константах
+        await send_and_auto_delete_text(
+            bot,
+            user_id,
+            f"✅ {block['correct_answer']}",
+            delay=WRONG_FB_TEXT_TOTAL_S,  # 💬 чтобы успели прочитать
+        )
+
+    if is_correct:
+        await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)  # 💬 пауза перед XP только для «быстрого» фидбэка
+
+
+
+
+    # ─── Рандомное оформление сообщения об изменении XP ─────────────────────────
+    xp_variants = [
+        lambda d, x: f"➕ <b>{d}</b> XP · 🏆 <b>{x}</b>",        # 💬 позитив
+        lambda d, x: f"➖ <b>{abs(d)}</b> XP · 🏆 <b>{x}</b>",   # 💬 негатив
+    ]
+
+
+    # 💬 XP-фидбэк показываем раз в 3 ответа для обычных квизов
+    cnt = (data.get("quiz_fb_counter", 0) + 1)
+    await state.update_data(quiz_fb_counter=cnt)
+    fb = None
+    if cnt % 3 == 0:
+        # 💬 выбираем шаблон строго по знаку (без рандома)
+        text = xp_variants[0](delta, xp) if delta > 0 else xp_variants[1](delta, xp)
+        fb = await bot.send_message(poll_answer.user.id, text, parse_mode="HTML")
+
+
+
+
+    # 6) Ждём и удаляем опрос + feedback
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 пауза, затем удаляем poll/фидбек
+    chat_id = poll_answer.user.id
+    try: await bot.delete_message(chat_id, data.get("current_poll_message_id"))
+    except: pass
+    try: await bot.delete_message(chat_id, fb.message_id)
+    except: pass
+
+
+
+    # 7) Переход по сетам (6) ТОЛЬКО по обычным quiz, с повтором ошибок внутри сета + offer_continue
+
+    # 💬 если это пересдача и ответ верный — убираем индекс из redo_stack
+    _cur = await state.get_data()
+    _redo = _cur.get("redo_stack", [])
+    if is_correct and idx in _redo:
+        _redo = [i for i in _redo if i != idx]   # 💬 вычистили текущий индекс
+        await state.update_data(redo_stack=_redo)
+
+    # 💬 если исправили в пересдаче — чистим и очередь ошибок
+    _failed = _cur.get("failed_vocab", [])
+    if is_correct and idx in _failed:
+        _failed = [i for i in _failed if i != idx]
+        await state.update_data(failed_vocab=_failed)
+
+    data = await state.get_data()
+    vocab_list = get_vocab_list(data)
+    BLOCK = 6  # фиксированный размер сета
+    # 👇 строим карту позиций только для type=="quiz"
+    q_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "quiz"]
+    # текущая позиция внутри q_positions (handle_vocab_poll_answer всегда обрабатывает quiz)
+    try:
+        q_idx = q_positions.index(idx)
+    except ValueError:
+        # на всякий случай: если попали сюда не с quiz — ищем ближайший следующий quiz
+        nxt_q = next((i for i in range(idx + 1, len(vocab_list)) if vocab_list[i].get("type") == "quiz"), None)
+        if nxt_q is None:
+            # нет quiz → сразу в offer_continue
+            oc_scene = random.choice(scenarios["offer_continue"])
+            buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
+            kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+            await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
+            await state.set_state(LessonStates.showing_vocab)
+
+            # 💬 1) Сначала задаём вопрос/кнопки offer_continue
+            oc_msg = await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+
+            # 💬 2) Затем считаем прогресс и показываем его на 5 сек
+            data2 = await state.get_data()
+            total_q = data2.get("total_quizzes_phase", data2.get("total_quizzes", 0))  # 💬 total по фазе
+            correct_q = (
+                data2.get("quiz_correct_phase", data2.get("quiz_correct_total", 0)) +
+                data2.get("textquiz_correct_phase", data2.get("textquiz_correct", 0))
+            )  # 💬 correct по фазе
+
+
+            correct_q = min(correct_q, total_q)
+            perc = int((correct_q / total_q) * 100) if total_q else 0
+
+            filled = perc // 10
+            empty  = 10 - filled
+            bar = "🟩" * filled + "⬜️" * empty
+
+            progress_text = f"📝 Прогресс по квизам:\n{bar} {perc}%\n{correct_q}/{total_q}"
+
+            # 💬 используем тот же chat_id, что и для _fake_msg()
+            asyncio.create_task(
+                send_and_auto_delete_text(
+                    bot,
+                    chat_id,
+                    progress_text,
+                    delay=5.0,  # ⏳ держим прогресс 5 секунд
+                )
+            )
+
+            return oc_msg
+
+        else:
+            await state.update_data(vocab_index=nxt_q, current_poll_id=None)
+            return await send_one_vocab(_fake_msg(), state)
+
+    block_start_q = (q_idx // BLOCK) * BLOCK
+    block_end_q   = min(block_start_q + BLOCK, len(q_positions))
+
+    redo = data.get("redo_stack", [])
+    # 💬 симметрично: снимаем из redo при успехе, добавляем при ошибке
+    if is_correct and idx in redo:
+        redo = [i for i in redo if i != idx]    # 💬 удалить текущий из очереди
+    elif not is_correct and idx not in redo:
+        redo.append(idx)                         # 💬 добавить в конец
+
+
+
+    # следующий quiz по прямой внутри текущего сета
+    next_linear = q_positions[q_idx + 1] if (q_idx + 1) < block_end_q else None
+
+    def _fake_msg():
+        fc = Chat(id=chat_id, type="private")
+        fu = User(id=poll_answer.user.id, is_bot=False, first_name="")
+        return Message(
+            message_id=0,
+            date=datetime.datetime.now(),
+            chat=fc,
+            from_user=fu,
+            text=""
+        )
+
+    # 💬 если уже в режиме пересдач — игнорируем линейку и крутим ТОЛЬКО redo
+    if data.get("redo_active"):
+        if is_correct:
+            # 💬 на верный ответ чистим текущий индекс из redo и берём следующий (или выходим)
+            if idx in redo:
+                redo = [i for i in redo if i != idx]
+
+            if redo:
+                # 💬 ещё есть ошибки в очереди — продолжаем пересдачи внутри ТЕКУЩЕГО сета
+                nxt = redo.pop(0)
+                await state.update_data(
+                    vocab_index=nxt,
+                    redo_stack=redo,
+                    redo_active=True,
+                    current_poll_id=None,
+                )
+                return await send_one_vocab(_fake_msg(), state)
+            else:
+                # 💬 очередь пересдач пуста — СЕТ ЗАКРЫТ → пробуем мини-сессию textquiz
+                await state.update_data(redo_active=False)
+                pending = await _select_pending_textquiz_for_set(state)  # 💬 выбираем 0–2 textquiz / финальный хвост
+
+                if pending:
+                    next_idx = pending[0]
+                    await state.update_data(
+                        vocab_index=next_idx,
+                        pending_textquiz=pending,
+                        current_poll_id=None,
+                    )
+                    return await send_one_vocab(_fake_msg(), state)
+
+                # 💬 textquiz нет — обычный offer_continue
+                oc_scene = random.choice(scenarios["offer_continue"])
+                buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
+                kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+                await state.update_data(
+                    current_stage="offer_continue",
+                    current_scene=oc_scene,
+                )
+                await state.set_state(LessonStates.showing_vocab)
+                return await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+        else:
+            # 💬 на неверный в redo — повторяем ТОТ ЖЕ квиз (ставим idx в голову очереди без дублей)
+            redo = [i for i in redo if i != idx]
+            redo.insert(0, idx)
+            await state.update_data(redo_stack=redo, current_poll_id=None)
+            # ВАЖНО: не меняем vocab_index — остаёмся на этом же idx
+            return await send_one_vocab(_fake_msg(), state)
+
+
+
+    if next_linear is not None:
+        await state.update_data(
+            vocab_index=next_linear,
+            redo_stack=redo,
+            redo_active=False,
+            current_poll_id=None
+        )  # 💬 явно НЕ redo
+        return await send_one_vocab(_fake_msg(), state)
+    else:
+        # дошли до края линейного прохода по сету
+        if redo:
+            # есть ошибки — повторяем их внутри того же сета
+            nxt = redo.pop(0)
+            await state.update_data(
+                vocab_index=nxt,
+                redo_stack=redo,
+                redo_active=True,
+                current_poll_id=None
+            )  # 💬 остаёмся в redo
+            return await send_one_vocab(_fake_msg(), state)
+        else:
+            # 💬 сет закрыт — пробуем показать 0–2 textquiz, затем offer_continue
+            pending = await _select_pending_textquiz_for_set(state)
+
+            if pending:
+                # 💬 есть textquiz (ошибки и/или новые) → запускаем мини-сессию
+                next_idx = pending[0]
+                await state.update_data(
+                    vocab_index=next_idx,
+                    pending_textquiz=pending,
+                    redo_stack=redo,
+                    redo_active=False,
+                    current_poll_id=None
+                )
+                return await send_one_vocab(_fake_msg(), state)
+
+            # 💬 textquiz тоже нет — обычный offer_continue
+            oc_scene = random.choice(scenarios["offer_continue"])
+            buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
+            kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+            await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
+            await state.set_state(LessonStates.showing_vocab)
+            return await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+
+
+
+
+# ---------------- КОНЕЦ по показу type: quiz📘📘📘 -----------------
+
+
+
+
+
+
+# ---------------- НАЧАЛО по показу type: text_quiz📘📘📘 -----------------
+@dp.message(LessonStates.vocab_textquiz)
+@track_handler
+async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
+    # 💬 Нормализуем ответ пользователя и правильный ответ из JSON
+    data = await state.get_data()
+    topic_key = data["selected_topic"]
+    idx = data.get("vocab_index", 0)
+    vocab_list= get_vocab_list(data)
+    block     = vocab_list[idx]
+    user_norm = normalize_textquiz(message.text)
+
+    # Берём либо список correct_answers, либо строку correct_answer (в т.ч. с ';')
+    answers_raw = block.get("correct_answers") or block.get("correct_answer", "")
+
+    if isinstance(answers_raw, list):
+        variants = [a for a in answers_raw if a]
+    else:
+        variants = [p.strip() for p in str(answers_raw).split(";") if p.strip()]
+
+    norm_variants = [normalize_textquiz(v) for v in variants]
+    is_correct = user_norm in norm_variants
+
+
+    # 🎉 1) Начисляем XP в сессии
+    delta = random.randint(25, 35) if is_correct else -10
+    await award_xp(delta, state)
+
+    # 🔥 Level-Up: сохраняем прошлый глобальный XP
+    user_id   = message.chat.id
+    xp_before = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
+    topic_key = data["selected_topic"]
+
+    await add_xp(user_id, topic_key, delta)  # 💬 XP за ответ; слова считаем отдельно ниже
+
+
+    # 🔥 Проверяем, перешли ли на новый уровень
+    xp_after = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
+    prev_lvl = xp_before // XP_PER_LEVEL
+    new_lvl  = xp_after  // XP_PER_LEVEL
+    if new_lvl > prev_lvl:
+        medal_idx = min((xp_after % XP_PER_LEVEL) // (XP_PER_LEVEL // 3), 2)
+        await message.answer(
+            f"🎉 Поздравляем! Вы достигли уровня {LEVELS[new_lvl]}{MEDALS[medal_idx]}!"
+        )
+
+    
+    # 💬 3) Показываем XP-фидбэк (или стикер 30% при верном ответе)
+    xp_total = (await state.get_data())["xp"]
+    xp_fb = None  # 💬 по умолчанию текстового фидбэка может не быть
+
+    if is_correct and random.random() < 0.3:
+        # 💬 30% случаев — вместо текста XP показываем позитивный стикер, как в обычном квизе
+        from scenarios_estiloso8_1 import exercise_stickers
+        sticker_id = random.choice(exercise_stickers)
+        await send_and_auto_delete_sticker(bot, message.chat.id, sticker_id)
+    else:
+        # 💬 остальные случаи (и все неверные ответы) — обычный текстовый XP-фидбэк
+        xp_fb = await message.answer(
+            f"{'🏆' if delta > 0 else '⚠️'} <b>{delta:+}</b> XP · 📊 <b>{xp_total}</b>",  # 💬 1 строка, без "Всего XP"
+            parse_mode="HTML"
+        )
+
+
+    # 🔐 Новый критерий разблокировки:
+    #   1) глобальный XP по теме >= порога xp_threshold
+    #   2) минимум 6 ПРАВИЛЬНЫХ TEXTQUIZ в рамках текущего урока
+    data2 = await state.get_data()
+
+    # 💬 берём текущий счётчик правильных TEXTQUIZ из state (по умолчанию 0)
+    correct_cnt = data2.get("textquiz_correct", 0)
+
+ 
+    if is_correct:
+        correct_cnt += 1
+        phase_cnt = data2.get("textquiz_correct_phase", 0) + 1  # 💬 прогресс именно внутри фазы
+        await state.update_data(
+            textquiz_correct=correct_cnt,
+            textquiz_correct_phase=phase_cnt
+        )
+        data2["textquiz_correct"] = correct_cnt
+        data2["textquiz_correct_phase"] = phase_cnt
+
+
+    threshold = data2.get("xp_threshold", 0)
+    topic_xp = (
+        load_xp_data()
+        .get(str(user_id), {})
+        .get("by_topic", {})
+        .get(topic_key, 0)
+    )
+
+    MIN_TEXTQUIZ_FOR_UNLOCK = 6
+
+    if (
+        not data2.get("unlocked")
+        and topic_xp >= threshold
+        and data2.get("textquiz_correct", 0) >= MIN_TEXTQUIZ_FOR_UNLOCK
+    ):
+        await state.update_data(unlocked=True)
+        await message.answer("🔐 <b>Блоки разблокированы! 🎉</b>", parse_mode="HTML")
+
+
+    # 💬 4) Дополнительный фидбэк: печенька или правильный ответ
+    # 💬 Сколько уже дали за этот урок?
+    data = await state.get_data()
+    given = (load_xp_data()
+             .get(str(user_id), {})
+             .get("stats", {})
+             .get("words_learned", 0)
+         ) - data.get("initial_cookies", 0)
+
+    if is_correct and given < data.get("max_cookies", 0):
+        # 📌 даём +1 «слово выучено», если не исчерпан лимит
+        await add_xp(user_id, topic_key, 0, action="words_learned")
+
+        # 💬 каждые 3 правильных TEXTQUIZ показываем батч "+3 слова выучено"
+        given_after = given + 1  # текущее количество в рамках урока
+        if given_after % 3 == 0:
+            extra_fb = await message.answer("+3 слова выучено", parse_mode="HTML")
+        else:
+            extra_fb = None
+
+    elif not is_correct:
+        # 📌 показываем правильный ответ заглавными
+        correct_str = " или ".join(variants).upper()
+        extra_fb = await message.answer(f"👉 {correct_str}", parse_mode="HTML")
+
+    else:
+        # 📌 лимит печенек достигнут — пропускаем
+        extra_fb = None
+
+
+     # 💬 Ждём перед удалением всех сообщений
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)
+    # 💬 5) Удаляем всё: вопрос, ответ пользователя, XP-фидбэк и (если есть) extra-фидбэк
+    chat_id   = message.chat.id
+    prompt_id = (await state.get_data()).get("last_prompt_id")
+    # собираем ID (учитываем, что xp_fb может быть None, если был только стикер)
+    to_delete = [prompt_id, message.message_id]  # 💬 базовый набор: вопрос + ответ
+    if isinstance(xp_fb, Message):
+        to_delete.append(xp_fb.message_id)       # 💬 удаляем текстовый XP-фидбэк, если он был
+    if isinstance(extra_fb, Message):
+        to_delete.append(extra_fb.message_id)    # 💬 удаляем доп. фидбэк (печенька / правильный ответ)
+    for mid in to_delete:
+        if not mid:
+            continue
+        try:
+            await bot.delete_message(chat_id, mid)
+        except TelegramBadRequest:
+            # например, уже удалили
+            pass
+
+
+
+    # 💬 6) Убираем этот элемент из очереди ошибок
+    failed = data.get("failed_vocab", [])
+    if not is_correct and idx not in failed:
+        failed.append(idx)
+    await state.update_data(failed_vocab=failed)
+
+
+    # 💬 7) Интерливинг: упрощённая логика, если активна мини-сессия pending_textquiz
+    data = await state.get_data()
+    pending = data.get("pending_textquiz") or []
+
+    if pending:
+        # 💬 берём текущий стек ошибок для textquiz
+        redo_t = data.get("redo_stack_text", [])
+
+        # симметрия: снимаем при успехе, добавляем при ошибке
+        if is_correct and idx in redo_t:
+            redo_t = [i for i in redo_t if i != idx]
+        elif not is_correct and idx not in redo_t:
+            redo_t.append(idx)
+
+        # 💬 убираем текущий индекс из pending, чтобы не повторять его в этой мини-сессии
+        pending = [i for i in pending if i != idx]
+
+        await state.update_data(
+            redo_stack_text=redo_t,
+            pending_textquiz=pending,
+            redo_active_text=False,  # 💬 пересдачи textquiz — только между сетами, не внутри пары
+        )
+
+        if pending:
+            # 💬 есть ещё один textquiz в текущей мини-сессии → показываем его
+            next_idx = pending[0]
+            await state.update_data(vocab_index=next_idx)
+            return await send_one_vocab(message, state)
+        else:
+            # 💬 мини-сессия textquiz закончилась → обычный offer_continue
+            oc_scene = random.choice(scenarios["offer_continue"])
+            buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
+            kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+            await state.update_data(
+                current_stage="offer_continue",
+                current_scene=oc_scene,
+            )
+            await state.set_state(LessonStates.showing_vocab)
+
+            # 💬 1) Сначала задаём вопрос «Ну что, продолжим?» с кнопками
+            oc_msg = await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+
+            # 💬 2) Считаем прогресс по квизам и показываем его на 5 сек, затем авто-удаляем
+            data2 = await state.get_data()
+            total_q = data2.get("total_quizzes_phase", data2.get("total_quizzes", 0))  # 💬 total по фазе
+            correct_q = (
+                data2.get("quiz_correct_phase", data2.get("quiz_correct_total", 0)) +
+                data2.get("textquiz_correct_phase", data2.get("textquiz_correct", 0))
+            )  # 💬 correct по фазе
+
+
+            # 💬 режем сверху, чтобы не было >100% из-за пересдач
+            correct_q = min(correct_q, total_q)
+            perc = int((correct_q / total_q) * 100) if total_q else 0
+
+            filled = perc // 10
+            empty  = 10 - filled
+            bar = "🟩" * filled + "⬜️" * empty
+
+            progress_text = f"📝 Прогресс по квизам:\n{bar} {perc}%\n{correct_q}/{total_q}"
+
+            # 💬 не блокируем поток: показываем прогресс и удаляем его через 5 секунд
+            asyncio.create_task(
+                send_and_auto_delete_text(
+                    bot,
+                    message.chat.id,
+                    progress_text,
+                    delay=5.0,  # ⏳ держим прогресс 5 секунд
+                )
+            )
+
+            return oc_msg
+
+
+
+    # Разбиваем TEXTQUIZ блоки по 6, повторяем ошибки внутри сета, печенька уже дана выше
+    # 💬 TEXTQUIZ сет: считаем ТОЛЬКО позиции type=="textquiz", по 6 в сете
+    data = await state.get_data()
+    vocab_list = get_vocab_list(data)
+    BLOCK = 6  # размер сета
+
+    # 1) позиции всех textquiz
+    t_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "textquiz"]
+
+    # 2) индекс текущего textquiz внутри t_positions (если не нашли — ищем ближайший следующий textquiz)
+    try:
+        t_idx = t_positions.index(idx)
+    except ValueError:
+        nxt_t = next(
+            (i for i in range(idx + 1, len(vocab_list)) if vocab_list[i].get("type") == "textquiz"),
+            None
+        )
+        if nxt_t is None:
+            # нет textquiz → сразу offer_continue
+            oc_scene = random.choice(scenarios["offer_continue"])
+            buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
+            kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+            await state.update_data(
+                current_stage="offer_continue",
+                current_scene=oc_scene,
+                redo_stack_text=[],
+                redo_active_text=False,  # 💬 выходим из redo-режима
+            )
+            await state.set_state(LessonStates.showing_vocab)
+            return await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+        else:
+            await state.update_data(vocab_index=nxt_t)
+            return await send_one_vocab(message, state)
+
+    # 3) границы текущего textquiz-сета в пространстве t_positions
+    block_start_t = (t_idx // BLOCK) * BLOCK
+    block_end_t   = min(block_start_t + BLOCK, len(t_positions))
+
+    # 4) стек пересдач для textquiz + флаг режима пересдач
+    redo_t       = data.get("redo_stack_text", [])
+    redo_active  = data.get("redo_active_text", False)
+
+    # симметрия: снимаем при успехе, добавляем при ошибке
+    if is_correct and idx in redo_t:
+        redo_t = [i for i in redo_t if i != idx]
+    elif not is_correct and idx not in redo_t:
+        redo_t.append(idx)
+
+    # 5) следующий textquiz по прямой внутри текущего сета (используем только в линейном режиме)
+    next_linear = t_positions[t_idx + 1] if (t_idx + 1) < block_end_t else None
+
+    # 6) Если мы уже в режиме пересдач — игнорируем next_linear, пока очередь не опустеет
+    if redo_active:
+        if is_correct:
+            # верный ответ в redo: идём к следующему из очереди
+            if redo_t:
+                nxt = redo_t.pop(0)
+                await state.update_data(
+                    vocab_index=nxt,
+                    redo_stack_text=redo_t,
+                    redo_active_text=True,
+                )
+                return await send_one_vocab(message, state)
+            else:
+                # очередь пересдач пуста — выходим в offer_continue
+                oc_scene = random.choice(scenarios["offer_continue"])
+                buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
+                kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+                await state.update_data(
+                    current_stage="offer_continue",
+                    current_scene=oc_scene,
+                    redo_stack_text=[],
+                    redo_active_text=False,
+                )
+                await state.set_state(LessonStates.showing_vocab)
+                return await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+        else:
+            # неверный ответ в redo — повторяем ТОТ ЖЕ textquiz, ставим его в голову очереди
+            redo_t = [i for i in redo_t if i != idx]
+            redo_t.insert(0, idx)
+            await state.update_data(
+                redo_stack_text=redo_t,
+                redo_active_text=True,
+            )
+            # ВАЖНО: vocab_index не меняем — остаёмся на этом же idx
+            return await send_one_vocab(message, state)
+
+    # 7) Линейный проход (redo_active_text == False): сначала проходим сет, потом пересдачи
+    if next_linear is not None:
+        # идём дальше по сету, ошибки остаются в redo_t
+        await state.update_data(
+            vocab_index=next_linear,
+            redo_stack_text=redo_t,
+            redo_active_text=False,
+        )
+        return await send_one_vocab(message, state)
+    else:
+        # дошли до конца линейки в сете
+        if redo_t:
+            # есть ошибки — повторяем их внутри этого же сета, включаем redo-режим
+            nxt = redo_t.pop(0)
+            await state.update_data(
+                vocab_index=nxt,
+                redo_stack_text=redo_t,
+                redo_active_text=True,
+            )
+            return await send_one_vocab(message, state)
+        else:
+            # сет textquiz завершён — теперь offer_continue
+            oc_scene = random.choice(scenarios["offer_continue"])
+            buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
+            kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+            await state.update_data(
+                current_stage="offer_continue",
+                current_scene=oc_scene,
+                redo_stack_text=[],
+                redo_active_text=False,
+            )
+            await state.set_state(LessonStates.showing_vocab)
+            return await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+
+
+
+
+
+
+
+# ---------------- КОНЕЦ по показу type: text_quiz📘📘📘 -----------------
+
+
+
+
+# ------------------------------  
+#   ПОТОК по показу type: text по VOCAB
+# ------------------------------
+
+# 1) Хендлер отправки текстового блока словаря
+@track_handler
+async def send_one_vocab_text(message: Message, state: FSMContext):
+    """
+    💬 После текстового блока словаря бот теперь отправляет inline-кнопки.
+    """
+    data       = await state.get_data()
+    topic_key  = data["selected_topic"]
+    idx        = data.get("vocab_index", 0)
+    vocab_list= get_vocab_list(data)
+    block     = vocab_list[idx]
+
+    # 💬 отправляем текст как quote-блок вместо pre (TypeText)
+    await send_quotedtext(message, block["text"], expandable=True)
+
+
+    # Выбираем сцену after_text
+    scene = random.choice(after_text)
+    await state.update_data(current_stage="after_text", current_scene=scene)
+
+    # Строим InlineKeyboardMarkup
+    # 💬 Кнопки “прочитал/пропустить” в одну строку
+    inline_kb = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text=btn,
+                callback_data=f"after_text:{btn}"
+            ) for btn in scene["buttons"]
+        ]]
+    )
+
+
+    chat_id = message.chat.id if hasattr(message, "chat") else (await state.get_data())["last_chat_id"]
+    await bot.send_message(chat_id, scene["text"], reply_markup=inline_kb)
+
+    # Переходим в состояние ожидания inline callback
+    await state.set_state(LessonStates.vocab_text_continue)
+
+# 💬 Это отправляет текст + inline-кнопки вместо обычных клавиш.
+
+
+@dp.callback_query(StateFilter(LessonStates.vocab_text_continue), lambda cb: cb.data.startswith("after_text:"))
+@track_handler
+async def handle_vocab_text_continue_cb(cb: CallbackQuery, state: FSMContext):
+    """
+    💬 Inline-ответ после текстового блока словаря:
+    1) Удаляет текст и кнопки
+    2) Если есть реакция — показывает её (всегда отдельным сообщением)
+    3) Через паузу отправляет следующий блок (новое слово)
+    """
+    await cb.answer()
+    await cb.message.delete()
+
+    data   = await state.get_data()
+    scene  = data["current_scene"]
+    choice = cb.data.split(":",1)[1]
+    reply_cfg = scene["replies"].get(choice)
+
+    # 1. Показываем реакцию (если не пусто)
+    reaction = reply_cfg.get("reaction", "")
+    if reaction:
+        await cb.message.answer(reaction)
+        await asyncio.sleep(REPLY_REACTION_READ_DELAY_S)
+
+
+    # 2. Всегда инкрементируем индекс и отправляем следующий блок
+    if reply_cfg.get("next") == "next_item":
+        # 1) если у текущего текст-блока есть quiz → показываем его
+        block = get_vocab_list(data)[data["vocab_index"]]
+        if block.get("quiz"):
+            return await send_optional_vocab_quiz(cb.message, state)
+        # 2) иначе – просто переходим к следующему
+        return await proceed_to_next(cb.message, state)
+
+
+
+
+
+
+
+
+# ---------------- КОНЕЦ по показу type: text 📘📘📘 -----------------
+
+
+
+# ---------------- НАЧАЛО по показу type: photo по VOCAB -----------------
+
+
+
+@track_handler
+async def send_one_vocab_photo(message, state: FSMContext):
+    data      = await state.get_data()
+    topic_key = data["selected_topic"]
+    idx       = data.get("vocab_index", 0)
+    vocab_list= get_vocab_list(data)
+    block     = vocab_list[idx]
+
+    # 1) Если есть текст-подпись перед фото, шлём её
+    if block.get("text"):
+        await smart_reply(message, block["text"])
+
+    # 💬 определяем chat_id для Message или SimpleNamespace
+    chat_id = message.chat.id if hasattr(message, "chat") else message.id
+
+    # 2) Отправляем медиа — фото, анимацию или стикер
+    # 💬 безопасная отправка медиа с поддержкой: локальный файл / URL / file_id
+    mt     = block.get("media_type", "photo")
+    source = str(block.get("photo", "")).strip()
+
+    try:
+        if mt == "photo":
+            # фото: локальный путь → FSInputFile; URL → строкой; file_id → строкой
+            if source and os.path.exists(source):
+                await bot.send_photo(chat_id, photo=FSInputFile(source))
+            elif _is_url(source):
+                await bot.send_photo(chat_id, photo=source)
+            else:
+                await bot.send_photo(chat_id, photo=source)  # допускаем file_id
+        elif mt == "animation":
+            # gif/mp4: локальный файл / URL / file_id
+            if source and os.path.exists(source):
+                await bot.send_animation(chat_id, animation=FSInputFile(source))
+            elif _is_url(source):
+                await bot.send_animation(chat_id, animation=source)
+            else:
+                await bot.send_animation(chat_id, animation=source)  # допускаем file_id
+        elif mt == "sticker":
+            # стикер: только валидный file_id или URL; заглушки пропускаем
+            if source and source not in (".", "-", "none", "None"):
+                await bot.send_sticker(chat_id=chat_id, sticker=source)
+            else:
+                # 💬 пустой/невалидный стикер — пропускаем блок и идём дальше
+                logging.warning("⚠️ Пустой sticker в vocab, блок пропущен.")
+                return await proceed_to_next(message, state)
+    except TelegramBadRequest as e:
+        # 💬 если файл битый/URL неверный — не падаем, а идём дальше
+        logging.exception("⚠️ Ошибка отправки медиа: %s", e)
+        await bot.send_message(chat_id, "⚠️ Пропустил битый медиа-блок.")
+        return await proceed_to_next(message, state)
+
+
+    # 3) Выбираем сцену «after_photo» и сохраняем в state
+    scene = random.choice(after_photo)
+    await state.update_data(current_stage="after_photo", current_scene=scene)
+
+    # 4) Строим inline-кнопки на основе scene["buttons"] — бок о бок
+    inline_kb = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text=scene["buttons"][0],
+                callback_data=f"after_photo:{scene['buttons'][0]}"
+            ),
+            InlineKeyboardButton(
+                text=scene["buttons"][1],
+                callback_data=f"after_photo:{scene['buttons'][1]}"
+            )
+        ]]
+    )
+
+    # 5) Отправляем текст сцены с inline-кнопками
+    await bot.send_message(message.chat.id, scene["text"], reply_markup=inline_kb)
+
+    # 6) Переходим в состояние обработки callback
+    await state.set_state(LessonStates.vocab_photo_continue)
+
+
+
+# ─────────────────────────────────────────────────────────
+
+@dp.callback_query(StateFilter(LessonStates.vocab_photo_continue),
+                   lambda cb: cb.data.startswith("after_photo:"))
+@track_handler
+async def handle_vocab_photo_continue_cb(cb: CallbackQuery, state: FSMContext):
+    """
+    💬 После фото — показываем реакцию, ждем 1.5 сек и только потом отправляем следующий блок.
+    """
+    await cb.answer()
+    await cb.message.delete()
+
+    data  = await state.get_data()
+    scene = data["current_scene"]
+    choice = cb.data.split(":",1)[1]
+
+    reply_cfg = scene["replies"].get(choice)
+
+    # 1. Показываем реакцию, если она есть
+    reaction = reply_cfg.get("reaction", "")
+    if reaction:
+        await asyncio.sleep(REPLY_REACTION_READ_DELAY_S)  # ⏳ Задержка, чтобы пользователь увидел реакцию
+
+   # 2. Переход к следующему слову (с проверкой на опциональный квиз)
+    if reply_cfg.get("next") == "next_item":
+       # Если у текущего блока после фото есть свой quiz — показываем его
+       block = get_vocab_list(data)[data["vocab_index"]]
+       if block.get("quiz"):
+           return await send_optional_vocab_quiz(cb.message, state)
+       # Иначе просто инкремент и следующий элемент
+       return await proceed_to_next(cb.message, state)
+# 💬 Теперь бот ждет 1.5 сек после реакции на фото, всё видно как надо!
+
+
+
+# ---------------- КОНЕЦ по показу type: photo 📘📘📘 -----------------
+
+
+@dp.poll_answer(StateFilter(LessonStates.vocab_optional_quiz))
+@track_handler
+async def handle_optional_vocab_quiz(poll_answer: PollAnswer, state: FSMContext):
+    data = await state.get_data()
+    # 1) фильтруем чужие опросы
+    if poll_answer.poll_id != data.get("current_optional_poll_id"):
+        return
+    # сразу сбрасываем, чтобы таймауты не мешали
+    await state.update_data(current_optional_poll_id=None)
+
+    user_id = poll_answer.user.id
+    selected = poll_answer.option_ids[0] if poll_answer.option_ids else None
+    correct = data["current_optional_correct_id"]
+    is_correct = (selected == correct)
+
+
+    # 💬 Реакция на правильный ответ в optional-quiz
+    if is_correct:
+        try:
+            msg_id = data.get("current_optional_message_id")  # уже сохраняется при отправке
+            if msg_id:
+                await bot.set_message_reaction(
+                    chat_id=poll_answer.user.id,
+                    message_id=msg_id,
+                    reaction=[ReactionTypeEmoji(emoji="🎉")],
+                    is_big=True
+                )
+        except Exception:
+            pass
+
+
+    # 2) фидбэк без XP
+    if is_correct:
+        await send_and_auto_delete_text(bot, user_id, "🎉 Правильно!", delay=AUTO_DELETE_TEXT_DELAY_S)
+    else:
+        correct_text = get_vocab_list(data)[data["vocab_index"]]["quiz"]["correct_answer"]
+        await send_and_auto_delete_text(bot, user_id, f"✅ {correct_text}", delay=AUTO_DELETE_TEXT_DELAY_S)
+
+    # 3) удаляем сам poll
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 унификация паузы
+
+    try:
+        await bot.delete_message(user_id, data.get("current_optional_message_id"))
+    except:
+        pass
+
+     # 4) идём к следующему блоку через fake_msg
+    import types  # 💬 для создания объекта с chat.id
+    fake_msg = types.SimpleNamespace(
+        chat=types.SimpleNamespace(id=poll_answer.user.id)
+    )
+    return await proceed_to_next(fake_msg, state)
+
+
+
+
+
+
+@dp.message(LessonStates.showing_vocab, is_confirm_done_vocab)
+@track_handler
+async def handle_confirm_done_vocab(message: Message, state: FSMContext):
+    # 💬 Стираем старую клавиатуру сразу после нажатия
+ 
+  
+    await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    data = await state.get_data()
+    scene = data["current_scene"]
+
+
+    # 🚫 Если ответ не из кнопок — восстанавливаем клавиатуру
+    if not await ensure_valid_choice(message, scene["buttons"]):
+        return
+
+    # 💬 UX: короткая псевдозагрузка перед следующим сетом
+    loading_msg = await message.answer("Гружу... 🙄")        # 💬 что делает эта часть: имитация загрузки
+    asyncio.create_task(send_and_auto_delete_text(bot, message.chat.id, "Гружу... 🙄", delay=5))
+
+
+    params     = scene["replies"][message.text]
+    reaction   = params.get("reaction")
+    next_stage = params.get("next")
+    if reaction:
+        await smart_reply(message, reaction, parse_mode="HTML")
+
+    # 🎉 Если подтвердили выполнение блока «Учить слова»
+    if next_stage == "feedback_difficulty":
+        # 1) Собираем все link-блоки словаря (игнорируем quiz/text/photo)
+        topic_key = data["selected_topic"]
+        vocab_list     = get_vocab_list(data)
+        link_blocks = [b for b in vocab_list if "link" in b]
+        total = len(link_blocks)
+
+        # 2) Обновляем общий счётчик link‐блоков (legacy, чтобы старую логику не сломать)
+        passed = data.get("vocab_done", 0) + 1
+        await state.update_data(vocab_done=passed, refusal_count=0)
+
+        # 💬 А ещё обновляем per‐phase счётчик
+        phase_id        = data.get("selected_phase_id")
+        per_phase       = data.get("vocab_done_per_phase", {})
+        phase_passed    = per_phase.get(phase_id, 0) + 1
+        per_phase[phase_id] = phase_passed
+        await state.update_data(vocab_done_per_phase=per_phase)
+
+
+
+        # 3) Формируем строку звёздочек
+        stars = "⭐" * passed + "☆" * (total - passed)
+
+
+
+
+
+        # 💬 40% шанс отправить случайный стикер или MP4 из папки gif/
+        if random.random() < 0.4:
+
+            # 1) Собираем список file_id для стикеров
+            stickers = [item["file_id"] for item in congrats_media if item["type"] == "sticker"]
+            # 2) Собираем список локальных MP4 из папки gif/
+            mp4_files = [f for f in os.listdir("gif") if f.lower().endswith(".mp4")]
+
+            # 3) Объединяем в общий список
+            media_choices = []
+            media_choices += [("sticker", sid) for sid in stickers]
+            media_choices += [("animation", os.path.join("gif", mp4)) for mp4 in mp4_files]
+
+            # 4) Выбираем случайный элемент
+            kind, val = random.choice(media_choices)
+            
+            # 5) Отправляем
+            try:
+                if kind == "sticker":
+                    await send_and_auto_delete_sticker(bot, message.chat.id, val)
+                else:
+                    await send_and_auto_delete_gif(bot, message.chat.id, val)
+            except TelegramBadRequest:
+                # Невалидный ID — просто пропускаем
+                pass
+
+
+
+
+        await smart_reply(message, f"{stars} {passed}/{total} игр пройдено!")
+
+        # 💬 Подсказка после 3-го слова
+        if passed == 3:
+            await smart_reply(message, "Если ты чувствуешь, что готов, можешь перейти к упражнениям.")
+
+
+        # 🎲 Выбираем случайный вариант вопроса о сложности из списка сценариев
+        fb_scene = random.choice(scenarios["feedback_difficulty"])
+    
+        # 🖲 Готовим кнопки: для каждой строки из fb_scene["buttons"] создаём KeyboardButton
+        buttons = [[KeyboardButton(text=btn)] for btn in fb_scene["buttons"]]
+    
+        # 🗂 Собираем клавиатуру с нашими кнопками 
+        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+    
+        # 💾 Сохраняем в память FSM, что мы сейчас в этапе feedback_difficulty и какую сцену показали
+        await state.update_data(current_stage="feedback_difficulty", current_scene=fb_scene)
+    
+        # 📤 Отправляем пользователю текст вопроса и прикрепляем нашу клавиатуру
+        await smart_reply(
+            message,
+            fb_scene["text"],
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+
+
+    # 🚫 Если отказались — показываем отказную ветку
+    if next_stage == "refusal":
+
+        # 💬 40% шанс отправить случайный стикер или MP4 из папки с отказами
+
+        # 1) Стикеры отказа
+        stickers = os.path.join("gif", "animanions_refusual")
+        # 2) Локальные MP4 из папки animanions_refusual
+        mp4_files = [f for f in os.listdir("animanions_refusual") if f.lower().endswith(".mp4")]
+
+        # 3) Объединяем в общий список
+        media_choices = [("sticker", sid) for sid in stickers] + \
+                        [("animation", os.path.join("animanions_refusual", m)) for m in mp4_files]
+
+        # 4) Выбираем и отправляем
+        kind, val = random.choice(media_choices)
+        try:
+            if kind == "sticker":
+                await send_and_auto_delete_sticker(bot, message.chat.id, val)
+            else:
+                await send_and_auto_delete_gif(bot, message.chat.id, val)
+        except TelegramBadRequest:
+            # если вдруг невалидный ID — просто пропускаем
+            pass
+
+
+        # 🚫 Если отказались — показываем отказную ветку из сценария
+        ref_scene = random.choice(scenarios["refusal"])
+        buttons = [[KeyboardButton(text=btn)] for btn in ref_scene["buttons"]]
+        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+        await state.update_data(current_stage="refusal", current_scene=ref_scene)
+        return await smart_reply(message, ref_scene["text"], reply_markup=kb, parse_mode="HTML")
+
+
+
+
+
+
+
+
+# ─────────────────────────────────────────────────────────
+@dp.message(LessonStates.showing_vocab, is_feedback_difficulty_vocab)
+@track_handler
+
+async def handle_feedback_difficulty_vocab(message: Message, state: FSMContext):
+    # 💬 Стираем старую клавиатуру сразу после нажатия
+    await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    data = await state.get_data()
+    scene = data["current_scene"]
+
+    # 🚫 Неправильный ввод — восстанавливаем клавиатуру
+    if not await ensure_valid_choice(message, scene["buttons"]):
+        return
+
+    # 1️⃣ Получаем реакцию и следующий этап
+    params = scene["replies"][message.text]
+    reaction = params.get("reaction")
+    next_stage = params.get("next")
+
+    # 2️⃣ Отправляем реакцию из сценария (если есть)
+    if reaction:
+        await smart_reply(message, reaction, parse_mode="HTML")
+
+    # 3️⃣ Если следующий элемент — quiz, сразу переходим к квиз-блоку
+
+    # 💬 НЕ перепрыгиваем в textquiz; пропускаем только если следующий — обычный quiz
+    next_idx = data.get("vocab_index", 0) + 1
+    vocab_list = topics.get(topic_key, {}).get("vocab", [])
+    if next_idx < len(vocab_list) and vocab_list[next_idx].get("type") == "quiz":
+        # 🎭 небольшой префейс перед квизом
+        prefix = random.choice(["👮‍♂️","👮‍♀️","🚓"])           # 💬 что делает эта часть: эмодзи-префейс
+        await smart_reply(message, prefix, reply_markup=ReplyKeyboardRemove())  # 💬 скрываем клавиатуру
+        phrase = random.choice(vocab_quiz_intro_phrases)
+        await smart_reply(message, phrase, reply_markup=ReplyKeyboardRemove())
+        await state.update_data(vocab_index=next_idx)
+        return await send_one_vocab(message, state)
+
+# 💬 иначе — стандартный offer_continue (код ниже без изменений)
+
+    data = await state.get_data()
+    topic_key = data["selected_topic"]
+    vocab_list= get_vocab_list(data)
+    next_idx = data.get("vocab_index", 0) + 1
+
+    # ➕ Пропускаем textquiz, пока есть обычные quiz впереди
+    if next_idx < len(vocab_list):
+        nt = vocab_list[next_idx].get("type")
+        # 💬 если попался textquiz, но дальше ещё есть хотя бы один quiz — прыгаем к ближайшему quiz
+        if nt == "textquiz":
+            q_idx = next((i for i in range(next_idx, len(vocab_list)) 
+                          if vocab_list[i].get("type") == "quiz"), None)
+            if q_idx is not None:
+                next_idx = q_idx
+                nt = "quiz"
+        if nt == "quiz":
+            # 💬 рандомный эмодзи перед фразой квиза
+            emojis = ["👮‍♂️", "👮‍♀️", "🚓"]
+            prefix = random.choice(emojis)
+            await smart_reply(message, prefix, reply_markup=ReplyKeyboardRemove())
+
+            # 💬 промежуточная фраза перед квизом
+            phrase = random.choice(vocab_quiz_intro_phrases)
+            await smart_reply(message, phrase, reply_markup=ReplyKeyboardRemove())
+
+            # 💾 обновляем индекс и прыгаем в send_one_vocab
+            await state.update_data(vocab_index=next_idx)  # 💬 индекс на старт нужного quiz
+            return await send_one_vocab(message, state)
+    # иначе — падаем в offer_continue ниже по коду (без изменений)
+
+
+
+    # 4️⃣ Иначе — стандартное “offer_continue”
+    oc_scene = random.choice(scenarios["offer_continue"])
+    buttons = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
+    kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+    await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
+    return await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+
+
+
+
+# ─────────────────────────────────────────────────────────
+@dp.message(LessonStates.showing_vocab, is_offer_continue_vocab)
+@track_handler
+async def handle_offer_continue_vocab(message: Message, state: FSMContext):
+    # 💬 Стираем старую клавиатуру сразу после нажатия
+    await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+
+    data = await state.get_data()
+    scene = data["current_scene"]
+
+    # 🚫 Если ответ не из кнопок — восстанавливаем клавиатуру
+    if not await ensure_valid_choice(message, scene["buttons"]):
+        return
+
+    params     = scene["replies"][message.text]
+    reaction   = params.get("reaction")
+    next_stage = params.get("next")
+
+    if reaction:
+        await smart_reply(message, reaction, parse_mode="HTML")
+
+    # 💬 Если пользователь выбрал выход в меню — сразу уходим в меню урока
+    if next_stage == "home":
+        return await lesson_menu_handler(message, state)
+
+
+# 💬 Если продолжаем — сначала сдвигаем индекс, потом отправляем следующий блок
+    if next_stage == "next_item":
+
+        phrase, sticker_id = random.choice(go_next_phrases)
+        await smart_reply(message, phrase)
+        # 💬 отправка стикера без await, чтобы не блочить поток
+        asyncio.create_task(send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=3))
+
+        # 🚀 Переход к следующему сету или textquiz
+        vocab_list = get_vocab_list(data)
+
+        # --- 1️⃣ ищем первый quiz следующего сета ---
+        # 💬 ВАЖНО: Ищем относительно последнего пройденного ОБЫЧНОГО квиза (якоря), а не текущего TextQuiz
+        last_quiz_idx = data.get("last_main_quiz_index", -1)
+        
+        q_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "quiz"]
+        next_quiz_set_start = None
+
+        if q_positions:
+            # Пытаемся найти позицию последнего квиза в списке всех квизов
+            try:
+                if last_quiz_idx == -1:
+                    # Если якоря нет (первый запуск или баг), берем начало списка
+                    current_q_pos_index = -1
+                else:
+                    current_q_pos_index = q_positions.index(last_quiz_idx)
+                
+                # Нам нужен следующий сет. Просто берем СЛЕДУЮЩИЙ квиз по списку.
+                # Так как мы идем блоками по 6, следующий после последнего пройденного — это начало нового блока.
+                if current_q_pos_index + 1 < len(q_positions):
+                    next_quiz_set_start = q_positions[current_q_pos_index + 1]
+                    
+            except ValueError:
+                # Если вдруг индекс потерялся, ищем первый квиз, который больше последнего сохраненного
+                next_val = next((p for p in q_positions if p > last_quiz_idx), None)
+                if next_val is not None:
+                    next_quiz_set_start = next_val
+                elif last_quiz_idx == 0:
+                    # 💬 если последний был самый первый, пробуем взять следующий (если он есть)
+                    next_quiz_set_start = q_positions[1] if len(q_positions) > 1 else None
+
+
+        # 💬 Fallback: если якорь last_main_quiz_index не сохранён,
+        # или не удалось вычислить старт следующего сета — берём следующий quiz от текущего индекса
+        if next_quiz_set_start is None:
+            cur_idx = data.get("vocab_index", -1)
+            nxt_from_cur = next((p for p in q_positions if p > cur_idx), None)
+            if nxt_from_cur is not None:
+                next_quiz_set_start = nxt_from_cur  # 💬 гарантируем переход к 7-му и дальше
+
+
+        if next_quiz_set_start is not None:
+            # 💬 есть ещё quiz — двигаемся к следующему сету
+            await state.update_data(
+                vocab_index=next_quiz_set_start,
+                redo_stack=[],
+                redo_active=False,
+                refusal_count=0
+            )
+            return await send_one_vocab(message, state)
+
+# --- 2️⃣ если quiz больше нет — пробуем запустить мини-сессию textquiz ---
+        # 💬 Если мы тут — значит обычные квизы кончились. Запускаем пакет по 6 штук (limit=6).
+        pending = await _select_pending_textquiz_for_set(state, limit=6)
+
+        if pending:
+            next_idx = pending[0]
+            await state.update_data(
+                vocab_index=next_idx,
+                pending_textquiz=pending,
+                redo_stack=[],
+                redo_active=False,
+                refusal_count=0
+            )
+            return await send_one_vocab(message, state)
+
+        # --- 3️⃣ если нет ни quiz, ни textquiz — финал урока ---
+        # 💬 Удален дубликат кода, теперь выход только один раз
+        await smart_reply(message, "🔥 Красавчик, на этом всё! Возвращаемся в меню ✌️")
+        await state.update_data(redo_stack=[], redo_active=False, refusal_count=0)
+        return await lesson_menu_handler(message, state)
+
+
+
+
+# ─────────────────────────────────────────────────────────
+@dp.message(LessonStates.showing_vocab, is_refusal_vocab)
+@track_handler
+async def handle_refusal_vocab(message: Message, state: FSMContext):
+    await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    data = await state.get_data()
+    scene = data["current_scene"]
+
+    if message.text not in scene["buttons"]:
+        return await smart_reply(message, "Пожалуйста, нажми одну из кнопок.")
+
+    params = scene["replies"][message.text]
+    reaction = params.get("reaction")
+    next_stage = params.get("next")
+    if reaction:
+        # 💬 Проверяем, есть ли анимированный эмодзи
+        if reaction:
+            await smart_reply(message, reaction, parse_mode="HTML")
+
+
+    # 💬 Повтор текущего элемента или домой
+    if next_stage == "repeat_current":
+        return await send_one_vocab(message, state)
+    if next_stage == "home":
+        return await lesson_menu_handler(message, state)
+
+
+
+
+
+
+# ─────────────────────────────────────────────────────────
+@dp.message(LessonStates.waiting_lesson_action, lambda m: m.text == "🏠 Home")
+@track_handler
+async def go_home(message: Message, state: FSMContext):
+    # Просто возвращаемся в меню урока, сохраняя прогресс
+    await register_or_update_user(message)
+    return await lesson_menu_handler(message, state)
+
+
+# ─ review quiz ошибок ─────────────────────────────────
+@dp.message(LessonStates.review_failed_textquiz)
+@track_handler
+async def handle_failed_textquiz(message: Message, state: FSMContext):
+    # 💬 Получаем данные FSM и индекс текущего вопроса
+    data = await state.get_data()
+    idx = data.get("failed_vocab", [])[0]
+    # Новая логика: берём список блоков конкретной фазы через helper
+    vocab_list = get_vocab_list(data)
+    block      = vocab_list[idx]
+
+
+
+    # 💬 Поддержка нескольких вариантов ответа через «;» или списком
+    user_ans = normalize_textquiz(message.text)
+    answers_raw = block.get("correct_answers") or block.get("correct_answer", "")
+    if isinstance(answers_raw, list):
+        variants = [v for v in answers_raw if v]
+    else:
+        variants = [p.strip() for p in str(answers_raw).split(";") if p.strip()]
+    norm_variants = [normalize_textquiz(v) for v in variants]
+    is_correct = user_ans in norm_variants
+
+
+    # 💬 Начисляем XP в сессии
+    delta = random.randint(15, 25) if is_correct else -10
+    await award_xp(delta, state)
+
+    # 🔥 Level-Up: предыдущий глобальный XP
+    user_id = message.from_user.id
+    xp_before = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
+    topic_key = data.get("selected_topic", "unknown")
+
+    # 💬 Запись XP в общее накопление
+    await add_xp(user_id, topic_key, delta)  # 💬 XP; слова считаем отдельно (ниже)
+
+
+    # 🔥 Проверка перехода на новый уровень
+    xp_after = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
+
+    if xp_after // XP_PER_LEVEL > xp_before // XP_PER_LEVEL:
+        # 💬 что делает эта часть: безопасно берём индекс уровня, не выходим за пределы LEVELS
+        lvl_idx = min(xp_after // XP_PER_LEVEL, len(LEVELS) - 1)
+
+        # 💬 что делает эта часть: безопасно берём индекс медали, не выходим за пределы MEDALS
+        medal_idx = min(
+            (xp_after % XP_PER_LEVEL) // (XP_PER_LEVEL // 3),
+            len(MEDALS) - 1,
+        )
+
+        # 💬 что делает эта часть: строим короткий прогресс по новой системе уровней
+        progress_text = render_short_level_progress(user_id)
+
+        await message.answer(
+            f"🎉 Поздравляем! Вы достигли уровня {LEVELS[lvl_idx]}{MEDALS[medal_idx]}!\n\n"
+            f"{progress_text}"
+        )
+
+
+        # 💬 Короткий прогресс по новой системе уровней
+        progress_text = render_short_level_progress(user_id)
+
+        await message.answer(
+            f"🎉 Поздравляем! Вы достигли уровня {LEVELS[lvl_idx]}{MEDALS[medal_idx]}!\n\n"
+            f"{progress_text}"
+        )
+
+
+
+    # 💬 Сообщаем XP-фидбэк
+    xp_total = (await state.get_data()).get("xp", 0)
+    xp_fb = await message.answer(
+        f"{'🎉 +'+str(delta)+' XP' if delta>0 else '⚠️ '+str(delta)+' XP'}\n"
+        f"Всего XP: {xp_total}",
+        parse_mode="HTML"
+    )
+
+    # 💬 Дополнительный фидбэк:  
+    #   – 🍪 +1 если правильно  
+    #   – ❌ ПРАВИЛЬНЫЙ_ОТВЕТ (заглавными) если нет  
+    # 💬 Сколько уже дали за этот урок?
+    data = await state.get_data()
+    given = (load_xp_data()
+             .get(str(user_id), {})
+             .get("stats", {})
+             .get("words_learned", 0)
+         ) - data.get("initial_cookies", 0)
+
+    if is_correct and given < data.get("max_cookies", 0):
+        # 📌 даём +1 «слово выучено», если не исчерпан лимит
+        await add_xp(user_id, topic_key, 0, action="words_learned")
+
+        # 💬 каждые 3 правильных TEXTQUIZ (включая ревью) показываем батч "+3 слова выучено"
+        given_after = given + 1
+        if given_after % 3 == 0:
+            extra_fb = await message.answer("+3 слова выучено", parse_mode="HTML")
+        else:
+            extra_fb = None
+
+    elif not is_correct:
+        # 📌 показываем все допустимые ответы заглавными, через «или»
+        correct_str = " или ".join(variants).upper()
+        extra_fb = await message.answer(f"👉 {correct_str}", parse_mode="HTML")
+        extra_fb = await message.answer(f"👉 {block['correct_answer'].upper()}", parse_mode="HTML")
+    else:
+        # 📌 лимит печенек достигнут — пропускаем
+        extra_fb = None
+
+
+
+    # 💬 Ждём 1.5 секунды перед удалением
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 единая пауза перед зачисткой
+
+
+    # …после sleep…
+    # 💬 Удаляем из чата всё: вопрос, ответ пользователя, оба фидбэка
+    chat_id = message.chat.id
+    try:
+        # вопрос из send_failed_vocab сохранили в state  
+        qid = data.get("last_failed_textquiz_message_id")
+        if qid:
+            await bot.delete_message(chat_id, qid)
+        await bot.delete_message(chat_id, message.message_id)      # ответ пользователя
+        await bot.delete_message(chat_id, xp_fb.message_id)       # XP-фидбэк
+        # вместо cookie_fb используем extra_fb
+        if isinstance(extra_fb, Message):
+            await bot.delete_message(chat_id, extra_fb.message_id)  # печенька/правильный ответ
+    except:
+        pass
+
+
+    # 💬 Обновляем очередь ошибок:
+    failed = data.get("failed_vocab", [])
+    if is_correct:
+        # при правильном ответе убираем текущий индекс
+        failed.pop(0)
+    else:
+        # при неверном — сдвигаем его в конец, чтобы повторять снова
+        failed.append(failed.pop(0))
+    await state.update_data(failed_vocab=failed)
+
+    # 🔄 Если ещё остались ошибки — повторяем, иначе — возвращаемся в меню
+    if failed:
+        return await send_failed_vocab(chat_id, state)
+    return await lesson_menu_handler(message, state)
+
+
+
+
+
+
+# ========= 📘📘📘КОНЕЦ ПОТОКА ПО СЛОВАРЮ или ПО СЛОВАМ 📘📘📘 ====================
+
+
+# ────────────────────────────────────────────────────────────────────
+# 🏠 Хендлер «Домой» для возврата в меню урока
+# ────────────────────────────────────────────────────────────────────
+@dp.message(LessonStates.waiting_lesson_action, lambda m: m.text == "🏠 Home")
+@track_handler
+async def go_home(message: Message, state: FSMContext):
+    # 💬 Возвращаем в главное меню урока, сохраняя прогресс
+    return await lesson_menu_handler(message, state)
+
+# ────────────────────────────────────────────────────────────────────
+# 🎬 Поток «Смотреть видео» — выдаём ссылки по теме
+# ────────────────────────────────────────────────────────────────────
+
+async def start_video_viewing(message: Message, state: FSMContext):
+    # 💬 Показываем следующее видео для текущей темы
+    data = await state.get_data()
+    topic_key = data.get("selected_topic")
+    if not topic_key:
+        # 💬 если тема не выбрана, возвращаем пользователя к старту
+        return await start_handler(message, state)
+
+    topic = topics.get(topic_key, {})
+    videos = topic.get("videos", [])
+
+    # 💬 На всякий случай: если кнопка появилась, а видео нет
+    if not videos:
+        await smart_reply(
+            message,
+            "Пока для этой темы нет видео 🙈",
+            parse_mode="HTML",
+        )
+        return
+
+    # 💬 Берём текущий индекс видео из FSM, если вышли за предел — начинаем сначала
+    dv_idx = data.get("video_index", 0) or 0
+    if dv_idx >= len(videos):
+        dv_idx = 0
+
+    video = videos[dv_idx]
+    title = video.get("title") or "Видео"
+    link  = video.get("link") or ""
+
+    text = f"🎬 <b>{title}</b>"
+    if link:
+        text += f"\n{link}"
+
+    # 💬 Инлайн-кнопка «галочка», чтобы отметить видео как просмотренное
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅", callback_data=f"video_done:{dv_idx}")]
+        ]
+    )
+
+    await smart_reply(
+        message,
+        text,
+        parse_mode="HTML",
+        reply_markup=kb,
+        # 💬 превью ссылки оставляем включённым
+    )
+
+
+@dp.callback_query(
+    StateFilter(LessonStates.waiting_lesson_action),
+    F.data.startswith("video_done:")
+)
+@track_handler
+async def handle_video_done_inline(callback: CallbackQuery, state: FSMContext):
+    # 💬 Отмечаем видео как просмотренное из инлайн-кнопки и возвращаем в меню
+    data = await state.get_data()
+    topic_key = data.get("selected_topic")
+    if not topic_key:
+        await callback.answer()
+        return await start_handler(callback.message, state)
+
+    topic = topics.get(topic_key, {})
+    videos = topic.get("videos", [])
+
+    # если вдруг кнопка есть, а видео нет — просто уводим домой
+    if not videos:
+        await callback.answer()
+        return await lesson_menu_handler(callback.message, state)
+
+    # парсим индекс из callback_data вида "video_done:0"
+    try:
+        _, idx_str = callback.data.split(":", 1)
+        done_idx = int(idx_str)
+    except Exception:
+        done_idx = data.get("video_index", 0) or 0
+
+    current_idx = data.get("video_index", 0) or 0
+
+    # 💬 двигаем прогресс: минимум — current_idx, максимум — len(videos)
+    new_idx = max(current_idx, done_idx + 1)
+    if new_idx > len(videos):
+        new_idx = len(videos)
+
+    await state.update_data(video_index=new_idx)
+
+    # 💬 убираем инлайн-клавиатуру под сообщением с ссылкой
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    await callback.answer("✅ Видео отмечено как просмотренное")
+
+    # 💬 возвращаем в меню урока, где пересчитаются звёздочки по видео
+    await state.set_state(LessonStates.waiting_lesson_action)
+    return await lesson_menu_handler(callback.message, state)
+
+
+
+# ────────────────────────────────────────────────────────────────────
+# 🙊 Поток «Читать диалоги» — новая версия (самопроверка по ✅ / ❌)
+# ────────────────────────────────────────────────────────────────────
+
+async def start_dialog_reading(message: Message, state: FSMContext):
+    # 💬 Стартуем чтение диалогов для текущей темы
+
+    # 1️⃣ Скрываем меню урока и Reply-клавиатуру (как в потоке «Учить слова»)
+    data = await state.get_data()
+    last_menu_msg_id = data.get("last_menu_msg_id")
+    if last_menu_msg_id:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=last_menu_msg_id)
+        except Exception:
+            pass
+        # 💬 меню убрали, больше его не существует
+        await state.update_data(last_menu_msg_id=None)
+
+    # 💬 отправляем краткую «пустышку», чтобы убрать Reply-клавиатуру
+    try:
+        tmp = await message.answer("Загружаю...⏳", reply_markup=ReplyKeyboardRemove())
+        await tmp.delete()
+    except Exception:
+        pass
+
+    # 2️⃣ Проверяем, что выбрана тема и в ней есть диалоговые фазы
+    data = await state.get_data()  # перечитываем после апдейта
+    topic_key = data.get("selected_topic")
+    if not topic_key:
+        # 💬 если тема потерялась — возвращаем пользователя в старт
+        return await start_handler(message, state)
+
+    topic = topics.get(topic_key, {})
+    dialog_phases = topic.get("dialogs", [])
+
+    if not dialog_phases:
+        await smart_reply(message, "Пока в этой теме нет диалогов 🙈", parse_mode="HTML")
+        return await lesson_menu_handler(message, state)
+
+    # 3️⃣ Показываем выбор фазы диалогов (даже если она одна)
+    buttons = [
+        [InlineKeyboardButton(
+            text=phase.get("phase_name", f"Фаза {phase.get('phase_id')}"),
+            callback_data=f"dialog_phase:{phase.get('phase_id')}"
+        )]
+        for phase in dialog_phases
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await smart_reply(
+        message,
+        "Выбери фазу диалогов:",
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+    await state.set_state(LessonStates.waiting_dialog_phase)
+
+
+@dp.callback_query(
+    StateFilter(LessonStates.waiting_dialog_phase),
+    F.data.startswith("dialog_phase:")
+)
+@track_handler
+async def handle_dialog_phase_choice(callback: CallbackQuery, state: FSMContext):
+    # 💬 Пользователь выбрал фазу диалогов
+    data = await state.get_data()
+    topic_key = data.get("selected_topic")
+    if not topic_key:
+        await callback.answer()
+        return await start_handler(callback.message, state)
+
+    try:
+        phase_id = int(callback.data.split(":", 1)[1])
+    except ValueError:
+        await callback.answer()
+        return
+
+    topic = topics.get(topic_key, {})
+    dialog_phases = topic.get("dialogs", [])
+    phase = next((p for p in dialog_phases if p.get("phase_id") == phase_id), None)
+    if not phase:
+        await callback.answer("Не нашёл такую фазу диалогов 😕", show_alert=True)
+        return
+
+    blocks = [b for b in phase.get("blocks", []) if b.get("lines")]
+    if not blocks:
+        await callback.answer("В этой фазе пока нет блоков диалога 🙈", show_alert=True)
+        return
+
+    await state.update_data(
+        dialog_phase_id=phase_id,
+        dialog_blocks=blocks,
+        dialog_index=0,
+        dialog_failed=[],
+        dialog_redo_stack=[],
+        dialog_current_index=None,
+        dialog_current_mode=None,
+    )
+
+    await callback.answer()
+    try:
+        # 💬 Удаляем сообщение с выбором фазы
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    # 💬 Небольшое вступление перед запуском диалогов фазы
+    phase_title = phase.get("phase_name", f"Фаза {phase_id}")
+    intro_text = (
+        f"🙊 Ок, читаем диалоги по фазе:\n"
+        f"<b>{phase_title}</b>\n\n"
+        f"Переводи в голове и честно жми "
+        f"✅ если ок, или ❌ если было тяжело."
+    )
+
+    # 💬 Отправляем интро и ставим авто-удаление на 10 секунд
+    intro_msg = await smart_reply(callback.message, intro_text, parse_mode="HTML")
+
+    async def _delete_intro_later(chat_id: int, msg_id: int, delay: float = 10.0):
+        await asyncio.sleep(delay)
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except Exception:
+            pass
+
+    asyncio.create_task(_delete_intro_later(intro_msg.chat.id, intro_msg.message_id))
+
+    # 💬 Между интро и первым диалогом оставляем постоянный маркер «Читаем…»
+    await smart_reply(callback.message, "Читаем...", parse_mode="HTML")
+
+    await state.set_state(LessonStates.showing_dialog)
+    return await send_one_dialog_block(callback.message, state)
+
+
+
+
+
+
+
+async def send_one_dialog_block(message: Message, state: FSMContext):
+    """
+    💬 Показывает один блок диалога с кнопками самопроверки.
+    """
+    data = await state.get_data()
+    blocks = data.get("dialog_blocks") or []
+    index = data.get("dialog_index", 0)
+    redo_stack = data.get("dialog_redo_stack") or []
+
+    if not blocks:
+        await smart_reply(message, "Пока в этой фазе нет диалогов 🙈", parse_mode="HTML")
+        await state.set_state(LessonStates.waiting_lesson_action)
+        return await lesson_menu_handler(message, state)
+
+    # 💬 Всё пройдено и повтора не осталось — завершаем фазу
+    if index >= len(blocks) and not redo_stack:
+        delta = 30  # 💬 XP за одну пройденную фазу диалогов
+        await award_dialog(delta, state)
+
+        data = await state.get_data()
+        topic_key = data.get("selected_topic", "unknown")
+        user_id = message.from_user.id
+        await add_xp(user_id, topic_key, delta)
+
+        await smart_reply(
+            message,
+            "🎉 Ты прошёл(а) все диалоги в этой фазе!\n\nВозвращаю в меню темы.",
+            parse_mode="HTML",
+        )
+        await state.set_state(LessonStates.waiting_lesson_action)
+        return await lesson_menu_handler(message, state)
+
+    # 💬 Определяем, какой индекс показываем: основной проход или redo_stack
+    mode = "main"
+    if index >= len(blocks) and redo_stack:
+        current_index = redo_stack[0]
+        mode = "redo"
+    else:
+        current_index = index
+
+    block = blocks[current_index]
+    lines = block.get("lines", [])
+
+    # 💬 Конвертируем [[...]] → HTML-спойлеры Telegram
+    rendered_lines = []
+    for ln in lines:
+        ln = ln.replace("\\n", "\n")
+        html = re.sub(r"\[\[(.+?)\]\]", r'<span class="tg-spoiler">\1</span>', ln)
+        rendered_lines.append(html)
+    text = "\n".join(rendered_lines)
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(text="✅", callback_data="dialog:ok"),
+            InlineKeyboardButton(text="❌", callback_data="dialog:fail"),
+        ]]
+    )
+
+    # 💬 Запоминаем, какой блок сейчас показан
+    await state.update_data(
+        dialog_current_index=current_index,
+        dialog_current_mode=mode,
+    )
+
+    await smart_reply(message, text, reply_markup=kb, parse_mode="HTML")
+
+
+@dp.callback_query(
+    StateFilter(LessonStates.showing_dialog),
+    F.data.in_(["dialog:ok", "dialog:fail"])
+)
+@track_handler
+async def handle_dialog_selfcheck(callback: CallbackQuery, state: FSMContext):
+    # 💬 Обработка нажатия ✅ / ❌ в диалогах
+    data = await state.get_data()
+    blocks = data.get("dialog_blocks") or []
+    if not blocks:
+        await callback.answer()
+        await state.set_state(LessonStates.waiting_lesson_action)
+        return await lesson_menu_handler(callback.message, state)
+
+    current_index = data.get("dialog_current_index", 0)
+    mode = data.get("dialog_current_mode", "main")
+    index = data.get("dialog_index", 0)
+    redo_stack = data.get("dialog_redo_stack") or []
+    failed = data.get("dialog_failed") or []
+
+    is_ok = (callback.data == "dialog:ok")
+
+    if is_ok:
+        # 💬 Убираем из списков ошибок
+        if current_index in failed:
+            failed = [i for i in failed if i != current_index]
+        if current_index in redo_stack:
+            redo_stack = [i for i in redo_stack if i != current_index]
+        if mode == "main":
+            index = max(index, current_index + 1)
+        else:
+            if redo_stack and redo_stack[0] == current_index:
+                redo_stack = redo_stack[1:]
+    else:
+        # 💬 Добавляем в redo_stack
+        if current_index not in failed:
+            failed.append(current_index)
+        if current_index not in redo_stack:
+            redo_stack.append(current_index)
+        if mode == "main":
+            index = max(index, current_index + 1)
+        else:
+            if redo_stack and redo_stack[0] == current_index:
+                redo_stack = redo_stack[1:]
+            redo_stack.append(current_index)
+
+    await state.update_data(
+        dialog_index=index,
+        dialog_redo_stack=redo_stack,
+        dialog_failed=failed,
+    )
+
+    await callback.answer()
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    # 💬 Переходим к следующему блоку (или завершаем фазу)
+    return await send_one_dialog_block(callback.message, state)
+
+# ——————— Конец «🙊Читать диалог» ———————
+
+
+@dp.callback_query(
+    lambda c: c.data and c.data.startswith("check_subscription:"),
+    StateFilter(LessonStates.waiting_subscription)
+)
+async def check_subscription(query: CallbackQuery, state: FSMContext):
+    await query.answer()
+    # 💬 получаем тему и канал из state
+    data = await state.get_data()
+    topic_key = data.get("selected_topic")
+
+    # 💬 Берём полный список каналов из state (новая логика)
+    required = data.get("required_channels") or []
+
+    uid = str(query.from_user.id)
+
+    # 💬 Восстанавливаем список каналов из state
+    required = data.get("required_channels") or []
+    if not required:
+        # на всякий случай поддерживаем старый формат с одним каналом
+        ch = data.get("required_channel")
+        if ch:
+            required = [ch]
+
+
+
+    import time
+    now = int(time.time())
+    uid = str(query.from_user.id)
+
+    # 1) Проверяем каждый канал; при ошибке считаем НЕподписанным
+    for ch in required:
+        try:
+            member = await bot.get_chat_member(chat_id=ch, user_id=query.from_user.id)
+            is_member = member.status in ("member", "administrator", "creator")
+        except TelegramBadRequest:
+            is_member = False
+
+        if not is_member:
+            # фиксируем отписку в последней сессии
+            data     = load_user_data()
+            u        = data.setdefault(uid, {})
+            sessions = u.setdefault("channels", {}).setdefault(ch, [])
+            if sessions and sessions[-1].get("unsubscribed_at") is None:
+                sessions[-1]["unsubscribed_at"] = now
+                save_user_data(data)
+
+            # удаляем старое сообщение и reply-кейборд
+            await query.message.delete()
+            blank = await query.message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+            await blank.delete()
+
+
+            # показываем список каналов и inline-кнопку «Проверить подписку»
+            channels_str = ", ".join(required)
+            return await query.message.answer(
+                "🔒 Для бесплатного доступа\n"
+                "👇🏼 Подпишись на спонсорские каналы:",  # 💬 повторяем оффер при провале проверки
+                reply_markup=check_subscription_kb(topic_key, required)
+            )
+
+
+
+
+
+
+    # 2) Всё ок — удаляем сообщение с кнопкой «Проверить подписку»
+    await query.message.delete()
+    # 💬 Оповещаем об открытии доступа
+    await query.message.answer("✅ Доступ к теме открыт!")
+    data    = load_user_data()
+    u       = data.setdefault(uid, {})
+
+    unlocked = u.setdefault("unlocked_topics", [])
+    if topic_key not in unlocked:
+        unlocked.append(topic_key)
+
+    # — добавляем новую сессию подписки по каждому каналу из набора
+    for ch in required:
+        sessions = u.setdefault("channels", {}).setdefault(ch, [])
+        if not sessions or sessions[-1].get("unsubscribed_at") is not None:
+            sessions.append({"subscribed_at": now, "unsubscribed_at": None})
+
+    # 💬 отключаем таймерный доступ = подписку проверяем каждый раз при входе в тему
+    u.pop("ad_subscription", None)
+    
+
+    save_user_data(data)
+
+    try:
+        bonus_try_qualify_referral(uid, required)  # 💬 если пришёл по реф-ссылке = засчитываем приглашение
+    except Exception:
+        logging.exception("bonus_try_qualify_referral failed")
+
+
+    # 3) Возвращаемся в меню урока
+    return await lesson_menu_handler(query.message, state)
+
+
+
+
+
+@dp.message(LessonStates.waiting_subscription)
+@track_handler
+async def handle_subscription_invalid_input(message: Message, state: FSMContext):
+    # 💬 Если пользователь пишет что-то вместо нажатия кнопки — просим нажать inline-кнопку
+    data         = await state.get_data()
+    topic_key    = data.get("selected_topic")
+    required_ch  = data.get("required_channel")  # 💬 канал, сохранённый при показе блока подписки
+    required     = [required_ch] if required_ch else []
+
+    # убираем reply-кейборд (лексика/грамматика)
+    await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    await message.answer(
+        "Пожалуйста, нажмите кнопку «Проверить подписку».",
+        reply_markup=check_subscription_kb(topic_key, required)  # 💬 та же инлайн-клавиатура с каналом
+    )
+
+
+
+
+
+
+
+
+
+@dp.callback_query(
+    lambda c: c.data and c.data.split(":",1)[0] in 
+        ("confirm_done","feedback_difficulty","offer_continue","refusal"),
+    StateFilter(LessonStates.showing_vocab)
+)
+@track_handler
+async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    data = await state.get_data()
+    scene = data["current_scene"]
+    stage, choice = cb.data.split(":", 1)
+    params = scene["replies"][choice]
+
+    # 1) реакция
+    if params.get("reaction"):
+        await cb.message.edit_text(params["reaction"], parse_mode="HTML")
+    # 2) пауза
+    await asyncio.sleep(REPLY_REACTION_READ_DELAY_S)
+
+
+    # 3) обработка по веткам — сначала confirm_done
+    if stage == "confirm_done":
+        next_stage = params["next"]
+        if next_stage == "next_item":
+            # 💬 после “Продолжить” прыгаем на ближайший следующий обычный quiz, а не на textquiz
+            curr = data.get("vocab_index", 0)                 # 💬 что делает эта часть: текущий индекс
+            vocab_list = get_vocab_list(data)                  # 💬 общий список блоков
+            candidate = curr + 1
+
+            # 💬 если следующий — textquiz, ищем следующий quiz вперёд
+            if candidate < len(vocab_list) and vocab_list[candidate].get("type") == "textquiz":
+                q_idx = next((i for i in range(candidate, len(vocab_list))
+                              if vocab_list[i].get("type") == "quiz"), None)
+                if q_idx is not None:
+                    candidate = q_idx
+
+            await state.update_data(vocab_index=candidate, refusal_count=0)  # 💬 сбрасываем счётчик отказов
+            return await send_one_vocab(cb.message, state)
+
+
+        if next_stage == "feedback_difficulty":
+            # 1) Собираем все link-блоки **текущей фазы**
+            link_blocks = [b for b in get_vocab_list(data) if "link" in b or "url" in b]
+
+            # 2) **Legacy-счётчик** (можно оставить, чтобы не сломать прочие места)
+            passed = data.get("vocab_done", 0) + 1
+            await state.update_data(vocab_done=passed, refusal_count=0)
+
+            # 3) **Per-phase-счётчик**  
+            phase_id    = data["selected_phase_id"]
+            per_phase   = data.get("vocab_done_per_phase", {})
+            phase_done  = per_phase.get(phase_id, 0) + 1
+            per_phase[phase_id] = phase_done
+            await state.update_data(vocab_done_per_phase=per_phase)
+
+            # 4) Звёздочки по фазе
+            stars = "⭐" * phase_done + "☆" * (len(link_blocks) - phase_done)
+            await cb.message.edit_text(
+                f"{stars} {phase_done}/{len(link_blocks)} выполнено!",
+                parse_mode="HTML"
+            )
+            # — сама кнопка feedback_difficulty
+            fb = random.choice(scenarios["feedback_difficulty"])
+            await state.update_data(current_stage="feedback_difficulty", current_scene=fb)
+            # 💬 Inline-кнопки “Оценка сложности” в одну строку
+            kb = InlineKeyboardMarkup(
+                inline_keyboard=[[
+                    InlineKeyboardButton(text=btn, callback_data=f"feedback_difficulty:{btn}")
+                    for btn in fb["buttons"]
+                ]]
+            )
+            await asyncio.sleep(REPLY_REACTION_READ_DELAY_S)
+
+            return await cb.message.edit_text(fb["text"], reply_markup=kb, parse_mode="HTML")
+
+        if next_stage == "refusal":
+            rf = random.choice(scenarios["refusal"])
+            await state.update_data(current_stage="refusal", current_scene=rf)
+            kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text=btn, callback_data=f"refusal:{btn}")]
+                    for btn in rf["buttons"]
+                ]
+            )
+            return await cb.message.edit_text(rf["text"], reply_markup=kb, parse_mode="HTML")
+
+    # 4) stage = feedback_difficulty → копируем логику handle_feedback_difficulty_vocab
+    elif stage == "feedback_difficulty":
+        # снимаем старую клавиатуру уже сделали выше через edit_text
+        topic_key = data["selected_topic"]
+        vocab_list = get_vocab_list(data)
+        next_idx = data.get("vocab_index", 0) + 1
+
+        # ➕ Сначала пробуем найти ближайший обычный quiz (чтобы не запускать textquiz раньше времени)
+        if next_idx < len(vocab_list):
+            nt = vocab_list[next_idx].get("type")
+            if nt == "textquiz":
+                q_idx = next((i for i in range(next_idx, len(vocab_list)) 
+                              if vocab_list[i].get("type") == "quiz"), None)
+                if q_idx is not None:
+                    next_idx = q_idx
+                    nt = "quiz"
+            if nt == "quiz":
+                prefix = random.choice(["👮‍♂️","👮‍♀️","🚓"])
+                await cb.message.answer(prefix)
+                await asyncio.sleep(0.5)
+                phrase = random.choice(vocab_quiz_intro_phrases)
+                await cb.message.answer(phrase)
+                await state.update_data(vocab_index=next_idx)
+                return await send_one_vocab(cb.message, state)
+        # иначе — рисуем inline-offer_continue как сейчас
+
+
+        # иначе — inline-offer_continue
+        oc = random.choice(scenarios["offer_continue"])
+        await state.update_data(current_stage="offer_continue", current_scene=oc)
+        # 💬 Inline-кнопки “Продолжить/Домой” в одну строку
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[
+                InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
+                for btn in oc["buttons"]
+            ]]
+        )
+        return await cb.message.edit_text(oc["text"], reply_markup=kb, parse_mode="HTML")
+
+    # 5) stage = offer_continue → копируем логику handle_offer_continue_vocab
+    elif stage == "offer_continue":
+
+
+        # Получаем параметры выбора
+        params     = scene["replies"][choice]
+        next_stage = params.get("next")
+
+        # 1) Показываем реакцию (если есть)
+        if params.get("reaction"):
+            try:
+                await cb.message.edit_text(params["reaction"], parse_mode="HTML")
+            except TelegramBadRequest:
+                pass
+
+        # 2) Небольшая пауза для чтения реакции
+        await asyncio.sleep(REPLY_REACTION_READ_DELAY_S)
+
+
+        # 3) Убираем inline-кнопки
+        try:
+            await cb.message.edit_reply_markup()
+        except TelegramBadRequest:
+            pass
+
+        # Переход по результату
+        if next_stage == "next_item":
+            curr = data.get("vocab_index", 0)
+            vocab_list = get_vocab_list(data)
+            candidate = curr + 1
+
+            if candidate < len(vocab_list) and vocab_list[candidate].get("type") == "textquiz":
+                q_idx = next((i for i in range(candidate, len(vocab_list)) 
+                              if vocab_list[i].get("type") == "quiz"), None)
+                if q_idx is not None:
+                    candidate = q_idx
+
+            await state.update_data(vocab_index=candidate, refusal_count=0)
+            return await send_one_vocab(cb.message, state)
+
+        if next_stage == "home":
+            return await lesson_menu_handler(cb.message, state)
+
+
+
+
+        # Фолбэк: отрисовать кнопки снова
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")]
+                for btn in scene["buttons"]
+            ]
+        )
+        return await cb.message.edit_text(scene["text"], reply_markup=kb, parse_mode="HTML")
+
+
+    # 6) stage = refusal → копируем логику handle_refusal_vocab
+    elif stage == "refusal":
+        # 💬 Удаляем сообщение с кнопками, чтобы больше не пытаться редактировать одно и то же
+        await cb.message.delete()
+        # Небольшая пауза для UX
+        await asyncio.sleep(0.5)
+        # Повтор текущего элемента или возврат в меню
+        if params.get("next") == "repeat_current":
+            return await send_one_vocab(cb.message, state)
+        if params.get("next") == "home":
+            return await lesson_menu_handler(cb.message, state)
+
+
+
+    # 7) всё прочее — домой
+    return await lesson_menu_handler(cb.message, state)
+
+
+
+
+
+
+
+
+
+#================================================================================
+#   🚀 Запуск бота
+# ================================================================================
+
+if __name__ == '__main__':
+    async def main():
+        # 💬 Регистрируем команды бота (в меню Telegram: /start, /addtopic, /edittopic, /menu)
+        # 💬 Обычному пользователю показываем только эти команды
+        await bot.set_my_commands([
+            BotCommand(command="start", description="Запустить бота"),
+            BotCommand(command="menu",  description="Главное меню")
+        ])
+
+        migrate_runtime_files_to_volume()  # 💬 выполняется один раз при старте
+
+
+        print("🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀 Бот запущен!")
+        await dp.start_polling(bot)
+
+    import asyncio
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # 💬 последние два хендлера
+        curr = handler_history[-1] if handler_history else "unknown"
+        prev = handler_history[-2] if len(handler_history) >= 2 else "none"
+        # 💬 три последних кадра стека
+        snippet = "".join(traceback.format_list(last_stack[-3:]))
+        msg = (
+            f"⏹️ Остановлено по KeyboardInterrupt\n"
+            f"Last handler: {curr}\n"
+            f"Previous: {prev}\n"
+            f"Stack:\n```{snippet}```"
+        )
+        logging.info(msg)
+        print(msg)
+        sys.exit(0)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
