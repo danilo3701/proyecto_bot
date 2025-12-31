@@ -33,6 +33,17 @@ from aiogram.exceptions import TelegramRetryAfter  # 💬 чтобы не пад
 
 router = Router()
 
+def _track(name: str) -> None:
+    # 💬 фиксируем текущий хендлер в handler_history (чтобы при падении Telegram показал где именно)
+    try:
+        import __main__ as main
+        hh = getattr(main, "handler_history", None)
+        if hh is not None:
+            hh.append(name)
+    except Exception:
+        pass
+
+
 # 💬 Ссылки из core8_1 (чтобы не делать круговой импорт)
 CONTACT_URL: str = ""
 MATERIALS_POST_URL: str = ""
@@ -610,6 +621,8 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
 # ✅ Публичный вход из core8_1 (кнопка в меню "Лексика")
 # ─────────────────────────────────────────────────────────
 async def start_battle_from_lex_menu(message: Message, state: FSMContext) -> None:
+    _track("start_battle_from_lex_menu")  # 💬 записываем хендлер для админ-логов
+
     # 💬 отменяем предыдущий бой если вдруг уже был
     await _cancel_battle(message.from_user.id)
 
@@ -707,6 +720,8 @@ async def battle_choose_topic(callback: CallbackQuery, state: FSMContext, bot: B
 # ─────────────────────────────────────────────────────────
 @router.message(StateFilter(Battle.Running), F.text == STOP_TEXT)
 async def battle_stop(message: Message, state: FSMContext, bot: Bot):
+    _track("battle_stop")  # 💬 записываем хендлер для админ-логов
+
     # 💬 останавливаем бой и возвращаем в меню битвы
     await _cancel_battle(message.from_user.id)
 
@@ -752,6 +767,8 @@ async def battle_poll_answer(poll_answer, state: FSMContext):
 # ─────────────────────────────────────────────────────────
 @router.callback_query(StateFilter(Battle.Result), F.data == "battle:rematch")  # 💬 ловим правильный callback_data
 async def battle_rematch(callback: CallbackQuery, state: FSMContext):
+    _track("battle_rematch")  # 💬 записываем хендлер для админ-логов
+
     await callback.answer()
 
     # 💬 убираем inline чтобы не нажали 2 раза
@@ -775,6 +792,8 @@ async def battle_rematch(callback: CallbackQuery, state: FSMContext):
 # ─────────────────────────────────────────────────────────
 @router.callback_query(StateFilter(Battle.Result), F.data == "battle:menu")
 async def battle_menu(callback: CallbackQuery, state: FSMContext):
+    _track("battle_menu")  # 💬 записываем хендлер для админ-логов
+
     await callback.answer()
 
     # 💬 убираем inline чтобы не нажали 2 раза
@@ -789,6 +808,8 @@ async def battle_menu(callback: CallbackQuery, state: FSMContext):
 
 @router.message(Command("battle_topics"))
 async def battle_topics_admin_start(message: Message, state: FSMContext):
+    _track("battle_topics_admin_start")  # 💬 записываем хендлер для админ-логов
+
     await _cancel_battle(message.from_user.id)  # 💬 если бой шёл, останавливаем чтобы не тикал в фоне
     # 💬 что делает эта часть: вход в админку battle тем отдельным FSM, не ломает бой
     await state.clear()
@@ -798,6 +819,8 @@ async def battle_topics_admin_start(message: Message, state: FSMContext):
 
 @router.message(StateFilter(BattleTopicsAdmin.menu))
 async def battle_topics_admin_menu(message: Message, state: FSMContext):
+    _track("battle_topics_admin_menu")  # 💬 записываем хендлер для админ-логов
+
     text = (message.text or "").strip()
 
     if text == "⬅️ Назад":
@@ -838,6 +861,8 @@ async def battle_topics_admin_menu(message: Message, state: FSMContext):
 
 @router.message(StateFilter(BattleTopicsAdmin.adding_category))
 async def battle_topics_add_category(message: Message, state: FSMContext):
+    _track("battle_topics_add_category")  # 💬 записываем хендлер для админ-логов
+
     text = (message.text or "").strip()
 
     if text == "⬅️ Назад":
@@ -957,6 +982,8 @@ async def battle_topics_bulk_quiz(message: Message, state: FSMContext):
 
 @router.message(StateFilter(BattleTopicsAdmin.choose_edit))
 async def battle_topics_choose_edit(message: Message, state: FSMContext):
+    _track("battle_topics_choose_edit")  # 💬 записываем хендлер для админ-логов
+
     key = (message.text or "").strip().lower()
     data = load_battle_topics()
 
@@ -1031,6 +1058,8 @@ async def battle_topics_choose_delete(message: Message, state: FSMContext):
 # ─────────────────────────────────────────────────────────
 @router.callback_query(F.data == "battle:close")
 async def battle_close(callback: CallbackQuery, state: FSMContext):
+    _track("battle_close")  # 💬 записываем хендлер для админ-логов
+
     await callback.answer()
 
     # 💬 удаляем экран выбора темы/битвы
