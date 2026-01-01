@@ -666,6 +666,47 @@ async def bonus_test_cmd(message: Message, state: FSMContext):
     await message.answer(f"✅ Тест выставлен: friends = {fake_q}, stars = {rb['stars']}⭐")
     return await bonuses_open(message, state)
 
+@router.message(Command("bonus_reset"))
+async def bonus_reset_cmd(message: Message, state: FSMContext):
+    # 💬 что делает эта часть: админ может обнулить бонусы конкретного пользователя (сам пользователь не может)
+
+    if _admin_chat_id is None:
+        return await message.answer("⚠️ ADMIN_CHAT_ID не настроен.")
+
+    # 💬 доступ только админу (как у /refstats и /bonus_test)
+    if str(message.chat.id) != str(_admin_chat_id) and str(message.from_user.id) != str(_admin_chat_id):
+        return await message.answer("⛔ Команда доступна только админу.")
+
+    if not callable(_load_user_data) or not callable(_save_user_data):
+        return await message.answer("⚠️ load_user_data/save_user_data не подключены.")
+
+    parts = (message.text or "").split(maxsplit=1)
+    target_uid = parts[1].strip() if len(parts) > 1 else ""
+
+    if not target_uid or not target_uid.isdigit():
+        return await message.answer("🧹 Использование:\n/bonus_reset <user_id>\nПример:\n/bonus_reset 123456789")
+
+    data = _load_user_data() or {}
+    u = data.setdefault(str(target_uid), {})
+    rb = _ensure_ref_bonus(u)
+
+    # 💬 что делает эта часть: полный сброс ref_bonus пользователя
+    rb["cycle_started_at"] = 0
+    rb["qualified"] = 0
+    rb["qualified_users"] = []
+    rb["stars"] = 0
+
+    rb["claim_status"] = "none"
+    rb["pending_stars"] = 0
+    rb["claim_requested_at"] = 0
+
+    _save_user_data(data)
+
+    await message.answer(f"✅ Обнулено для user_id={target_uid}")
+
+    # 💬 удобно сразу показать экран бонусов админу (если сбрасывал себя)
+    if str(target_uid) == str(message.from_user.id):
+        return await bonuses_open(message, state)
 
 
 @router.message(Command("refstats"))
