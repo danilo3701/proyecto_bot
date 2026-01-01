@@ -34,17 +34,30 @@ async def _safe_cb_answer(callback: CallbackQuery, text: str | None = None, *, s
 
 
 async def _safe_edit_or_answer(message: Message, text: str, reply_markup=None) -> None:
-    # 💬 что делает эта часть: пробуем edit_text, иначе answer, и игнорируем сетевые лаги Telegram
+    # 💬 что делает эта часть: обновляем текст без засорения чата (edit_text, иначе delete+answer)
     try:
         await message.edit_text(text, reply_markup=reply_markup, request_timeout=60)
         return
-    except (TelegramBadRequest, TelegramNetworkError, asyncio.TimeoutError):
+    except TelegramBadRequest as e:
+        # 💬 что делает эта часть: если текст не изменился, не шлём дубль
+        if "message is not modified" in str(e).lower():
+            return
+    except (TelegramNetworkError, asyncio.TimeoutError):
+        # 💬 что делает эта часть: при сетевых таймаутах ничего не добавляем в чат
+        return
+
+    # 💬 что делает эта часть: если edit невозможен, удаляем старое сообщение бота и шлём новое
+    try:
+        if getattr(message, "from_user", None) and getattr(message.from_user, "is_bot", False):
+            await message.delete(request_timeout=60)
+    except Exception:
         pass
 
     try:
         await message.answer(text, reply_markup=reply_markup, request_timeout=60)
     except (TelegramNetworkError, asyncio.TimeoutError):
         pass
+
 
 
 def _split_text(text: str, limit: int = 3800) -> list[str]:
