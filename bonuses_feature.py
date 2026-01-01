@@ -594,7 +594,7 @@ async def bonuses_claim(callback: CallbackQuery, state):
 
     # 💬 что делает эта часть: после успешной отправки показываем следующий шаг пользователю
     write_text = "Хочу подарок 🎁"
-    write_url = f"https://t.me/share/url?text={quote(write_text)}"
+    write_url = f"https://t.me/Drancherrro?text={quote(write_text)}"  # 💬 открываем чат админа с предзаполненным текстом
 
     user_text = (
         "✅ <b>Заявка отправлена</b>\n\n"
