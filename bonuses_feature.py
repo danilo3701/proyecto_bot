@@ -602,7 +602,7 @@ async def bonuses_claim(callback: CallbackQuery, state):
         "• какой подарок хочешь\n"
         "• себе или кому-то другому\n"
         "• если другому = пришли @username\n\n"
-        "Сообщение можно не писать = я сам увижу заявку и могу написать тебе"
+        "Сообщение можно не писать. Я сам увижу заявку и напишу тебе"
     )
 
     kb2 = InlineKeyboardMarkup(inline_keyboard=[
