@@ -607,11 +607,9 @@ async def bonuses_claim(callback: CallbackQuery, state):
 
     kb2 = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✍️ Написать админу", url=write_url)],
-        [
-            InlineKeyboardButton(text="🔄 Обновить", callback_data="bonuses:refresh"),
-            InlineKeyboardButton(text="⬅️ Назад", callback_data="bonuses:back"),
-        ],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="bonuses:back")],  # 💬 убрали «Обновить», чтобы не засорять/не сбивать пользователя
     ])
+
 
     await callback.message.answer(user_text, reply_markup=kb2)
     return
