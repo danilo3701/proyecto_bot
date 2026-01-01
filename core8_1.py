@@ -2000,10 +2000,18 @@ async def settings_menu(message: Message, state: FSMContext):
     ])  # 💬 меню настроек (инлайн 4 кнопки)
 
 
-    await message.answer(
-        "⚙️ <b>Настройки</b>\n\nВыбери действие:",
-        reply_markup=kb
-    )
+    txt = (
+        "⚙️ <b>Настройки</b>\n\n"
+        f"📌 Лимит слов в день = <b>{daily_limit_words}</b>\n"
+        f"⏰ Время уведомления = <b>{notify_time}</b>\n\n"
+        "Выбери действие:"
+    )  # 💬 показываем текущие значения настроек
+
+    try:
+        await message.edit_text(txt, reply_markup=kb)  # 💬 не плодим новые сообщения
+    except Exception:
+        await message.answer(txt, reply_markup=kb)  # 💬 fallback если edit_text нельзя
+
 
 
 @dp.callback_query(F.data == "settings:back")
