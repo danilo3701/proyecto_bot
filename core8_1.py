@@ -1990,16 +1990,15 @@ async def settings_menu(message: Message, state: FSMContext):
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="💬 Связь", url=CONTACT_URL),
-            InlineKeyboardButton(text=f"🔢 Лимит слов: {daily_limit_words}", callback_data="settings:limit"),
+            InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL),
+            InlineKeyboardButton(text="Лимит слов", callback_data="settings:limit"),
         ],
         [
-            InlineKeyboardButton(text=f"⏰ Время уведомления: {notify_time}", callback_data="settings:notify"),
-        ],
-        [
+            InlineKeyboardButton(text="Время уведомления", callback_data="settings:notify"),
             InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back"),
         ],
-    ])  # 💬 настройки теперь инлайн
+    ])  # 💬 меню настроек (инлайн 4 кнопки)
+
 
     await message.answer(
         "⚙️ <b>Настройки</b>\n\nВыбери действие:",
@@ -2013,19 +2012,23 @@ async def settings_back_cb(callback: CallbackQuery, state: FSMContext):
     # 💬 возвращаем главное меню без нового сообщения
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
+
         [
             InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
-            InlineKeyboardButton(text="🧩 Мои слова", callback_data="menu:mywords"),
+            InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
         ],
+
         [
             InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
-            InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses"),
+            InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
         ],
+
         [
             InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
-            InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu:settings"),
+            InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
         ],
-    ])
+    ])  # 💬 выровненное главное меню
+])
 
     await callback.message.edit_text("🏠 Главное меню:", reply_markup=kb)
     await state.set_state(LessonStates.choosing_category)
