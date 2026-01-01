@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 from aiogram import Router, F
 from aiogram.filters import Command  # 💬 команды типа /refstats
+from aiogram.fsm.context import FSMContext  # 💬 FSMContext нужен для bonus_test_cmd
 
 from aiogram.types import (
     Message,
