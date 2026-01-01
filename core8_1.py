@@ -1622,10 +1622,18 @@ async def start_handler(message: Message, state: FSMContext):
     ])
 
 
-    await state.update_data(last_menu_msg_id=menu_msg.message_id)  # 💬 запоминаем id для последующего удаления
+    menu_text = "🏠 Главное меню:"  # 💬 без старой фразы "Что изучаем"
 
-    await state.set_state(LessonStates.choosing_category)
-    # 💬 Теперь пользователь сразу может нажимать на кнопки!
+    menu_msg = await smart_reply(
+        message,
+        menu_text,
+        reply_markup=inline_kb_main,
+        parse_mode="HTML"
+    )  # 💬 показываем меню и получаем message для сохранения id
+
+    await state.update_data(last_menu_msg_id=menu_msg.message_id)  # 💬 запоминаем id для последующего удаления
+    await state.update_data(menu_hidden=False)  # 💬 меню на экране
+    await state.set_state(LessonStates.choosing_category)  # 💬 ждём выбор кнопок меню
 
 
 
