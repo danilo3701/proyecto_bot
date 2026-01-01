@@ -2099,18 +2099,20 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
 
 
 
-@track_handler  # 💬 фиксируем хендлер для админ-логов
+
 # 💬 Обрабатываем только если текст не пустой и не None
 @dp.message(lambda m: m.text is not None and m.text.startswith("🔢 Лимит слов:"))
+
 async def set_limit(message: Message, state: FSMContext):
     # 💬 Здесь пользователь нажал на лимит слов
     await message.answer("Введи новый лимит слов в день (от 1 до 50):")
     await state.set_state("waiting_limit_input")
 
 
-@track_handler  # 💬 фиксируем хендлер для админ-логов
+
 @dp.message(StateFilter("waiting_limit_input"))
 async def process_limit_input(message: Message, state: FSMContext):
+    
     try:
         val = int(message.text)
         if not 1 <= val <= 50:
@@ -2125,13 +2127,13 @@ async def process_limit_input(message: Message, state: FSMContext):
     await message.answer(f"✅ Лимит обновлён: {val} слов в день.")
     return await settings_menu(message, state)
 
-@track_handler 
+
 @dp.message(lambda m: m.text is not None and m.text.startswith("⏰ Время уведомления:"))
 async def set_reminder_time(message: Message, state: FSMContext):
     await message.answer("Введи час (от 1 до 24), когда присылать напоминание:")
     await state.set_state("waiting_reminder_input")
 
-@track_handler 
+
 @dp.message(StateFilter("waiting_reminder_input"))
 async def process_reminder_input(message: Message, state: FSMContext):
     try:
@@ -2147,7 +2149,7 @@ async def process_reminder_input(message: Message, state: FSMContext):
     save_xp_data(xp_data)
     await message.answer(f"✅ Время напоминания обновлено: {hour}:00")
     return await settings_menu(message, state)
-@track_handler  
+ 
 @dp.message(lambda m: m.text == "⬅️ В меню")
 async def back_to_menu(message: Message, state: FSMContext):
     await start_handler(message, state)
