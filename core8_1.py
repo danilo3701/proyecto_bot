@@ -1602,23 +1602,24 @@ async def start_handler(message: Message, state: FSMContext):
 
 
     # 💬 Главное меню теперь ИНЛАЙН — без ReplyKeyboard (ничего не «висит» внизу)
-    inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📚 УЧИТЬСЯ",    callback_data="menu:learn")],
-        [
-            InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
-            InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL)
-        ],
-        [InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses")],  # 💬 открываем рефералку
+inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
 
+    [
+        InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
+        InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
+    ],
 
-        [InlineKeyboardButton(text="⚔️ Битва",   callback_data="menu:battle"),
-         InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords")],
+    [
+        InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
+        InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
+    ],
 
-        [InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating"),
-        InlineKeyboardButton(text="Настройки ⚙️",  callback_data="menu:settings")],
-
-
-    ])
+    [
+        InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
+        InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
+    ],
+])  # 💬 выровненное главное меню
 
 
     # 💬 Рандомная фраза «Что изучаем?» из сценариев (fallback — старая фраза)
@@ -1976,30 +1977,123 @@ async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
 
 
 
-@dp.message(LessonStates.choosing_category, lambda m: m.text == "⚙️ Настройки")
-@dp.message(LessonStates.waiting_lesson_action, lambda m: m.text == "⚙️ Настройки")
+@dp.message(LessonStates.choosing_category, lambda m: m.text == "Настройки ⚙️")
+
 @track_handler
 async def settings_menu(message: Message, state: FSMContext):
-    """
-    💬 Меню настроек: выбор лимита слов в день и часа напоминания.
-    """
-    xp_data = load_xp_data()
-    user_id = str(message.chat.id)
-    user = xp_data.setdefault(user_id, {})
-    reset_daily_words_if_needed(user)
-    current_limit = user.get("words_daily_limit", 10)
-    reminder_hour = user.get("reminder_hour", 19)
-    save_xp_data(xp_data)
+    user_data = load_user_data()
+    user_id = str(message.from_user.id)
+    settings = user_data.get(user_id, {}).get("settings", {})
 
-    # Кнопки выбора лимита и времени
-    buttons = [
-        [KeyboardButton(text=f"🔢 Лимит слов: {current_limit}")],
-        [KeyboardButton(text=f"⏰ Время уведомления: {reminder_hour}:00")],
-        [KeyboardButton(text="⬅️ В меню")]
-    ]
-    kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-    await message.answer("⚙️ <b>Настройки:</b>\n\n— Сколько слов в день ты хочешь учить?\n— Время для напоминания:", parse_mode="HTML", reply_markup=kb)
-    await state.set_state("settings_menu")
+    daily_limit_words = settings.get("daily_limit_words", 20)  # 💬 дефолт если нет
+    notify_time = settings.get("notify_time", "09:00")  # 💬 дефолт если нет
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💬 Связь", url=CONTACT_URL),
+            InlineKeyboardButton(text=f"🔢 Лимит слов: {daily_limit_words}", callback_data="settings:limit"),
+        ],
+        [
+            InlineKeyboardButton(text=f"⏰ Время уведомления: {notify_time}", callback_data="settings:notify"),
+        ],
+        [
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back"),
+        ],
+    ])  # 💬 настройки теперь инлайн
+
+    await message.answer(
+        "⚙️ <b>Настройки</b>\n\nВыбери действие:",
+        reply_markup=kb
+    )
+
+
+@dp.callback_query(F.data == "settings:back")
+async def settings_back_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    # 💬 возвращаем главное меню без нового сообщения
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
+        [
+            InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
+            InlineKeyboardButton(text="🧩 Мои слова", callback_data="menu:mywords"),
+        ],
+        [
+            InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
+            InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses"),
+        ],
+        [
+            InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data="menu:settings"),
+        ],
+    ])
+
+    await callback.message.edit_text("🏠 Главное меню:", reply_markup=kb)
+    await state.set_state(LessonStates.choosing_category)
+
+
+@dp.callback_query(F.data == "settings:limit")
+async def settings_limit_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    # 💬 просим число, дальше обработает отдельный input-хендлер
+    await state.update_data(_settings_wait="limit")
+    await callback.message.edit_text(
+        "🔢 Введи лимит слов в день (число):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")]
+        ])
+    )
+
+
+@dp.callback_query(F.data == "settings:notify")
+async def settings_notify_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    # 💬 просим время, дальше обработает отдельный input-хендлер
+    await state.update_data(_settings_wait="notify")
+    await callback.message.edit_text(
+        "⏰ Введи время уведомления в формате HH:MM (например 09:00):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")]
+        ])
+    )
+
+
+@dp.message()
+async def settings_inline_input_router(message: Message, state: FSMContext):
+    data = await state.get_data()
+    wait = data.get("_settings_wait")
+    if wait not in ("limit", "notify"):
+        return  # 💬 не наше состояние
+
+    user_data = load_user_data()
+    user_id = str(message.from_user.id)
+    user_data.setdefault(user_id, {}).setdefault("settings", {})
+
+    if wait == "limit":
+        try:
+            val = int(message.text.strip())
+            if val < 1 or val > 500:
+                raise ValueError
+        except Exception:
+            await message.answer("⚠️ Введи число от 1 до 500.")
+            return
+
+        user_data[user_id]["settings"]["daily_limit_words"] = val  # 💬 сохраняем лимит
+        save_user_data(user_data)
+        await state.update_data(_settings_wait=None)
+        await message.answer("✅ Лимит сохранён. Открой Настройки ещё раз.")
+
+    if wait == "notify":
+        t = message.text.strip()
+        if not re.match(r"^\d{2}:\d{2}$", t):
+            await message.answer("⚠️ Формат должен быть HH:MM, например 09:00.")
+            return
+
+        user_data[user_id]["settings"]["notify_time"] = t  # 💬 сохраняем время
+        save_user_data(user_data)
+        await state.update_data(_settings_wait=None)
+        await message.answer("✅ Время сохранено. Открой Настройки ещё раз.")
+
+
 
 
 @track_handler  # 💬 фиксируем хендлер для админ-логов
@@ -2805,20 +2899,23 @@ def mywords_build_quiz_options(correct_es: str, all_es: list) -> tuple[list, int
 async def mywords_show_main_menu(message: Message, state: FSMContext):
     # 💬 возвращаемся в главное инлайн-меню без /start
     inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📚 УЧИТЬСЯ",    callback_data="menu:learn")],
+        [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
+    
         [
             InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
-            InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL)
+            InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
         ],
-
-        [InlineKeyboardButton(text="⚔️ Битва",   callback_data="menu:battle"),
-         InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords")],
-
-        [InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating"),
-        InlineKeyboardButton(text="Настройки ⚙️",  callback_data="menu:settings")],
-
-
-    ])
+    
+        [
+            InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
+            InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
+        ],
+    
+        [
+            InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
+            InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
+        ],
+    ])  # 💬 выровненное главное меню
 
 
     menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Что изучаем?⭐"
