@@ -1601,25 +1601,25 @@ async def start_handler(message: Message, state: FSMContext):
     await state.update_data(phase_entry_count=0, pending_phase=False)
 
 
-    # 💬 Главное меню теперь ИНЛАЙН — без ReplyKeyboard (ничего не «висит» внизу)
-inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
-
-    [
-        InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
-        InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
-    ],
-
-    [
-        InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
-        InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
-    ],
-
-    [
-        InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
-        InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
-    ],
-])  # 💬 выровненное главное меню
+        # 💬 Главное меню теперь ИНЛАЙН — без ReplyKeyboard (ничего не «висит» внизу)
+    inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
+    
+        [
+            InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
+            InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
+        ],
+    
+        [
+            InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
+            InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
+        ],
+    
+        [
+            InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
+            InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
+        ],
+    ])  # 💬 выровненное главное меню
 
 
     # 💬 Рандомная фраза «Что изучаем?» из сценариев (fallback — старая фраза)
