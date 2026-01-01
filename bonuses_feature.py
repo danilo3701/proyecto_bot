@@ -472,9 +472,11 @@ async def bonuses_share(callback: CallbackQuery):
             callback.message,
             f"🔗 Твоя ссылка:\n{link}\n\nНажми «Поделиться» или просто скопируй ссылку.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Поделиться", url=share_url)]
+                [InlineKeyboardButton(text="Поделиться", url=share_url)],
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="bonuses:refresh")],  # 💬 возвращаемся на экран бонусов без спама
             ])
         )  # 💬 безопасно
+
 
 
 
