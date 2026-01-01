@@ -1622,11 +1622,6 @@ async def start_handler(message: Message, state: FSMContext):
 
 
 
-    # 💬 Рандомная фраза «Что изучаем?» из сценариев (fallback — старая фраза)
-    menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Что изучаем?⭐"
-
-    menu_msg = await smart_reply(message, menu_text, reply_markup=inline_kb_main)  # 💬 инлайн-меню и храним msg
-
     await state.update_data(last_menu_msg_id=menu_msg.message_id)  # 💬 запоминаем id для последующего удаления
 
 
