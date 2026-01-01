@@ -1619,13 +1619,10 @@ async def start_handler(message: Message, state: FSMContext):
             InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
             InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
         ],
-
+    ])
 
 
     await state.update_data(last_menu_msg_id=menu_msg.message_id)  # 💬 запоминаем id для последующего удаления
-
-
-
 
     await state.set_state(LessonStates.choosing_category)
     # 💬 Теперь пользователь сразу может нажимать на кнопки!
