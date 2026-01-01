@@ -601,6 +601,69 @@ async def bonuses_claim(callback: CallbackQuery, state):
     await callback.message.answer(user_text, reply_markup=kb2)
     return
 
+@router.message(Command("bonus_test"))
+async def bonus_test_cmd(message: Message, state: FSMContext):
+    # 💬 что делает эта часть: админ-чит для теста «Запросить подарок» без приглашённых друзей
+
+    if _admin_chat_id is None:
+        return await message.answer("⚠️ ADMIN_CHAT_ID не настроен.")
+
+    # 💬 защита: только админ (либо в админ-чате, либо от админ-юзера)
+    if str(message.chat.id) != str(_admin_chat_id) and str(message.from_user.id) != str(_admin_chat_id):
+        return await message.answer("⛔ Команда доступна только админу.")
+
+    if not callable(_load_user_data) or not callable(_save_user_data):
+        return await message.answer("⚠️ load_user_data/save_user_data не подключены.")
+
+    parts = (message.text or "").split(maxsplit=1)
+    arg = parts[1].strip().lower() if len(parts) > 1 else ""
+
+    if not arg:
+        return await message.answer(
+            "🧪 Использование:\n"
+            "/bonus_test 2 = поставить 2 приглашённых (15⭐)\n"
+            "/bonus_test 5 = поставить 5 приглашённых (50⭐)\n"
+            "/bonus_test reset = сбросить бонусы"
+        )
+
+    data = _load_user_data() or {}
+    uid = str(message.from_user.id)
+    u = data.setdefault(uid, {})
+    rb = _ensure_ref_bonus(u)
+
+    if arg == "reset":
+        rb["cycle_started_at"] = 0
+        rb["qualified"] = 0
+        rb["qualified_users"] = []
+        rb["stars"] = 0
+
+        rb["claim_status"] = "none"
+        rb["pending_stars"] = 0
+        rb["claim_requested_at"] = 0
+
+        _save_user_data(data)
+
+        await message.answer("✅ Сброшено. Теперь звёзды = 0⭐")
+        return await bonuses_open(message, state)
+
+    try:
+        fake_q = int(arg)
+    except Exception:
+        return await message.answer("⚠️ Неверный аргумент. Пример: /bonus_test 2 или /bonus_test reset")
+
+    # 💬 что делает эта часть: ставим фейковое кол-во qualified и пересчитываем звёзды по твоей же логике
+    fake_q = max(0, min(fake_q, 5))
+    rb["qualified"] = fake_q
+    rb["stars"] = _calc_stars(fake_q)
+
+    # 💬 чтобы не сбрасывало цикл, если он пустой
+    if int(rb.get("cycle_started_at", 0) or 0) == 0:
+        rb["cycle_started_at"] = int(time.time())
+
+    _save_user_data(data)
+
+    await message.answer(f"✅ Тест выставлен: friends = {fake_q}, stars = {rb['stars']}⭐")
+    return await bonuses_open(message, state)
 
 
 
