@@ -1619,7 +1619,7 @@ async def start_handler(message: Message, state: FSMContext):
             InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
             InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
         ],
-    ])  # 💬 выровненное главное меню
+
 
 
     # 💬 Рандомная фраза «Что изучаем?» из сценариев (fallback — старая фраза)
