@@ -443,11 +443,25 @@ async def bonuses_how(callback: CallbackQuery):
         await _safe_edit_or_answer(callback.message, text_out, reply_markup=kb)
 
 
-
 @router.callback_query(F.data == "bonuses:locked")
 async def bonuses_locked(callback: CallbackQuery):
-    # 💬 что делает эта часть: объясняем, почему «запросить» пока нельзя
-    await _safe_cb_answer(callback, "Нужно минимум 15⭐ (2 друга).", show_alert=True)  # 💬 безопасно
+    # 💬 что делает эта часть: объясняем, почему «запросить» пока нельзя (мало звёзд или заявка уже pending)
+
+    msg = "Нужно минимум 15⭐ (2 друга)."
+
+    try:
+        if callable(_load_user_data):
+            data = _load_user_data() or {}
+            uid = str(callback.from_user.id)
+            u = data.get(uid, {}) or {}
+            rb = _ensure_ref_bonus(u)
+
+            if rb.get("claim_status") == "pending":
+                msg = "⏳ Заявка уже отправлена. Если нужно = нажми «Написать админу» в экране после заявки."
+    except Exception:
+        pass
+
+    await _safe_cb_answer(callback, msg, show_alert=True)  # 💬 безопасно
 
 
 
@@ -656,6 +670,11 @@ async def bonus_test_cmd(message: Message, state: FSMContext):
     fake_q = max(0, min(fake_q, 5))
     rb["qualified"] = fake_q
     rb["stars"] = _calc_stars(fake_q)
+
+    rb["claim_status"] = "none"       # 💬 тест должен открывать кнопку «Запросить подарок»
+    rb["pending_stars"] = 0           # 💬 убираем зависшую заявку
+    rb["claim_requested_at"] = 0      # 💬 очищаем таймстамп заявки
+
 
     # 💬 чтобы не сбрасывало цикл, если он пустой
     if int(rb.get("cycle_started_at", 0) or 0) == 0:
