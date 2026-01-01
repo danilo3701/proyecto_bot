@@ -192,17 +192,17 @@ def _reset_cycle_if_expired(rb: dict) -> None:
         rb["pending_stars"] = 0
         rb["claim_requested_at"] = 0
 
-
 def _time_left_days(rb: dict) -> int:
-    # 💬 что делает эта часть: сколько дней осталось до сброса (округляем вверх)
+    # 💬 что делает эта часть: показываем цикл 7→1→7 по дням (без 0)
     now = int(time.time())
     started = int(rb.get("cycle_started_at", 0) or 0)
     if not started:
         return 7
-    left = (started + _CYCLE_SECONDS) - now
-    if left <= 0:
-        return 0
-    return int(ceil(left / 86400))
+
+    days_passed = int((now - started) // 86400)
+    left = 7 - (days_passed % 7)
+    return left if left > 0 else 7
+
 
 
 def _next_target(qualified: int) -> int:
@@ -404,41 +404,43 @@ async def bonuses_refresh(callback: CallbackQuery, state):
 
 @router.callback_query(F.data == "bonuses:how")
 async def bonuses_how(callback: CallbackQuery):
-
-    # 💬 что делает эта часть: отдельная инструкция отдельной кнопкой
-    await callback.answer()
+    # 💬 что делает эта часть: показываем простую инструкцию и не падаем на таймаутах Telegram
+    await _safe_cb_answer(callback)
 
     main_ch = _get_main_channel()
     text_out = (
-        "ℹ️ <b>Инструкция</b>\n\n"
-        "Как засчитывается друг:\n"
-        "Необходимо перейти по твоей ссылке "
-        f"И набрать 100 XP в любой теме\n"
-
-        "• Накопление действует 7 дней, потом сброс\n"
+        "ℹ️ <b>Как это работает</b>\n\n"
+        "1) Ты отправляешь другу свою ссылку\n"
+        "2) Друг нажимает Start\n"
+        "3) Друг набирает <b>100 XP</b> в любой теме\n"
+        f"4) Друг должен быть подписан на главный канал {main_ch}\n\n"
+        "После этого тебе начисляются ⭐ звёзды.\n\n"
+        "🎁 Когда накопишь звёзды = можешь запросить подарок\n"
+        "себе или другу, как захочешь.\n\n"
+        "⏳ Накопление действует 7 дней, потом сброс"
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="bonuses:refresh")]
     ])
 
-    try:
-        await callback.message.edit_text(text_out, reply_markup=kb)
-    except TelegramBadRequest:
-        await callback.message.answer(text_out, reply_markup=kb)
+    if getattr(callback, "message", None):
+        await _safe_edit_or_answer(callback.message, text_out, reply_markup=kb)
 
 
 
 @router.callback_query(F.data == "bonuses:locked")
 async def bonuses_locked(callback: CallbackQuery):
     # 💬 что делает эта часть: объясняем, почему «запросить» пока нельзя
-    await callback.answer("Подарок доступен от 15⭐ (нужно минимум 2 друга).", show_alert=True)
+    await _safe_cb_answer(callback, "Нужно минимум 15⭐ (2 друга).", show_alert=True)  # 💬 безопасно
+
 
 
 @router.callback_query(F.data == "bonuses:share")
 async def bonuses_share(callback: CallbackQuery):
  
-    await callback.answer()
+    await _safe_cb_answer(callback)  # 💬 безопасно
+
     me = await callback.bot.get_me()  # 💬 берём @username бота
 
     uid = str(callback.from_user.id)
@@ -451,13 +453,15 @@ async def bonuses_share(callback: CallbackQuery):
 
     share_url = f"https://t.me/share/url?url={quote(link)}&text={quote(text_msg)}"
 
-    await callback.message.answer(
-        f"🔗 Твоя ссылка:\n{link}\n\n"
-        "Нажми «Поделиться» или просто скопируй ссылку.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Поделиться", url=share_url)]
-        ])
-    )
+    if getattr(callback, "message", None):
+        await _safe_edit_or_answer(
+            callback.message,
+            f"🔗 Твоя ссылка:\n{link}\n\nНажми «Поделиться» или просто скопируй ссылку.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Поделиться", url=share_url)]
+            ])
+        )  # 💬 безопасно
+
 
 
 def _build_main_menu_kb() -> InlineKeyboardMarkup:
@@ -486,14 +490,10 @@ def _build_main_menu_kb() -> InlineKeyboardMarkup:
 @router.callback_query(F.data == "bonuses:back")
 async def bonuses_back(callback: CallbackQuery, state):
 
-    await callback.answer()
+    await _safe_cb_answer(callback)  # 💬 безопасно
     kb = _build_main_menu_kb()
+    await _safe_edit_or_answer(callback.message, "Что изучаем?⭐", reply_markup=kb)  # 💬 безопасно
 
-
-    try:
-        await callback.message.edit_text("Что изучаем?⭐", reply_markup=kb)  # 💬 возвращаем главное меню
-    except TelegramBadRequest:
-        await callback.message.answer("Что изучаем?⭐", reply_markup=kb)
 
     if _LessonStates:
         try:
@@ -504,8 +504,7 @@ async def bonuses_back(callback: CallbackQuery, state):
 
 @router.callback_query(F.data == "bonuses:claim")
 async def bonuses_claim(callback: CallbackQuery, state):
-    await callback.answer()
-
+    await _safe_cb_answer(callback)  # 💬 не падаем на таймаутах Telegram
 
     if _admin_chat_id is None:
         return await callback.message.answer("⚠️ Админ-чат не настроен.")
@@ -547,90 +546,45 @@ async def bonuses_claim(callback: CallbackQuery, state):
         f"Username = {user_tag}\n"
         f"User ID = <code>{uid}</code>\n\n"
         f"Друзья = {qualified}\n"
-        f"К выдаче = <b>{stars}⭐</b>\n"
-        f"ID друзей (последние) = {ids_short}\n\n"
-        "После отправки подарка нажми «✅ Выдано»."
+        f"⭐ Звёзды = <b>{stars}⭐</b>\n"
+        f"ID друзей (последние) = {ids_short}\n"
     )
 
-    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Выдано", callback_data=f"bonuses_admin:issued:{uid}"),
-            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"bonuses_admin:decline:{uid}"),
-        ]
-    ])
-
-    await callback.bot.send_message(_admin_chat_id, admin_text, reply_markup=admin_kb)
-
-    await callback.message.answer(
-        f"✅ Заявка отправлена админу.\n"
-        f"Сумма = {stars}⭐\n"
-        "Жди, я отправлю подарок вручную."
-    )
-
-    return await bonuses_open(callback.message, state)  # 💬 обновляем экран
-
-
-@router.callback_query(F.data.startswith("bonuses_admin:"))
-async def bonuses_admin_actions(callback: CallbackQuery):
-
-    await callback.answer()
-
-
-    if _admin_chat_id is None:
-        return
-
-    # 💬 разрешаем действие только в админ-чате
-    if int(getattr(callback.message, "chat", None).id) != int(_admin_chat_id):
-        return await callback.answer("⛔ Только админ-чат.", show_alert=True)
-
-    parts = callback.data.split(":", 2)
-    if len(parts) < 3:
-        return
-
-    action = parts[1]
-    uid = parts[2]
-
-    data = _load_user_data()
-    u = data.setdefault(str(uid), {})
-    rb = _ensure_ref_bonus(u)
-
-    if action == "issued":
-        stars = int(rb.get("pending_stars", 0) or 0)
-
-        # 💬 пишем в историю и сбрасываем цикл, чтобы можно было копить снова
-        rb.setdefault("claims", []).append({"stars": stars, "issued_at": int(time.time())})
-
-        rb["cycle_started_at"] = 0
-        rb["qualified"] = 0
-        rb["qualified_users"] = []
-        rb["stars"] = 0
-
+    # 💬 что делает эта часть: отправляем админу только текст, без кнопок
+    try:
+        await callback.bot.send_message(_admin_chat_id, admin_text, request_timeout=60)
+    except (TelegramNetworkError, asyncio.TimeoutError):
+        # 💬 что делает эта часть: если не отправилось админу = откатываем pending, чтобы пользователь не залип
         rb["claim_status"] = "none"
         rb["pending_stars"] = 0
         rb["claim_requested_at"] = 0
-
         _save_user_data(data)
+        return await callback.message.answer("⚠️ Не удалось отправить заявку (Telegram тормозит). Нажми ещё раз позже.")
 
-        await callback.message.edit_text("✅ Отмечено как выдано.")  # 💬 закрываем заявку
-        try:
-            await callback.bot.send_message(int(uid), f"🎉 Подарок отмечен как выданный. Сумма = {stars}⭐")
-        except Exception:
-            pass
-        return
+    # 💬 что делает эта часть: после успешной отправки показываем следующий шаг пользователю
+    write_text = "Хочу подарок 🎁"
+    write_url = f"https://t.me/share/url?text={quote(write_text)}"
 
-    if action == "decline":
-        rb["claim_status"] = "none"
-        rb["pending_stars"] = 0
-        rb["last_declined_at"] = int(time.time())
+    user_text = (
+        "✅ <b>Заявка отправлена</b>\n\n"
+        "Теперь можешь написать админу:\n"
+        "• какой подарок хочешь\n"
+        "• себе или кому-то другому\n"
+        "• если другому = пришли @username\n\n"
+        "Сообщение можно не писать = я сам увижу заявку и могу написать тебе"
+    )
 
-        _save_user_data(data)
+    kb2 = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✍️ Написать админу", url=write_url)],
+        [
+            InlineKeyboardButton(text="🔄 Обновить", callback_data="bonuses:refresh"),
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="bonuses:back"),
+        ],
+    ])
 
-        await callback.message.edit_text("❌ Отклонено.")
-        try:
-            await callback.bot.send_message(int(uid), "❌ Заявка отклонена. Нажми «Обновить» и попробуй снова.")
-        except Exception:
-            pass
-        return
+    await callback.message.answer(user_text, reply_markup=kb2)
+    return
+
 
 
 
