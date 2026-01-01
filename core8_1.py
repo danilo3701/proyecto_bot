@@ -2925,7 +2925,7 @@ async def mywords_show_main_menu(message: Message, state: FSMContext):
     ])  # 💬 выровненное главное меню
 
 
-    menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Что изучаем?⭐"
+    menu_text = "🏠 Главное меню:"  # 💬 убрали «Что изучаем?» (старая логика)
     try:
         await message.edit_text(menu_text, reply_markup=inline_kb_main)
     except Exception:
