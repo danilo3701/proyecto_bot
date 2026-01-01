@@ -2031,7 +2031,6 @@ async def settings_back_cb(callback: CallbackQuery, state: FSMContext):
             InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
         ],
     ])  # 💬 выровненное главное меню
-])
 
     await callback.message.edit_text("🏠 Главное меню:", reply_markup=kb)
     await state.set_state(LessonStates.choosing_category)
