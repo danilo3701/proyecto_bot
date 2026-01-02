@@ -209,6 +209,8 @@ from bonuses_feature import (
     bonus_register_referral_from_start,
     bonus_try_qualify_referral,
 )  # 💬 модуль «🎁 Бонусы»
+from podcasts_feature import router as podcasts_router, init_podcasts_feature, podcasts_open  # 💬 модуль "Подкасты"
+
 
 
 # ——— Сценарии для учеников ——————————————————————————————————————
@@ -278,6 +280,7 @@ dp         = Dispatcher(storage=MemoryStorage())
 dp.include_router(edit_topic_router)
 dp.include_router(battle_router)  # 💬 подключаем хендлеры "Битвы"
 dp.include_router(bonuses_router)  # 💬 подключаем хендлеры «Бонусы»
+dp.include_router(podcasts_router)  # 💬 подключаем модуль "Подкасты"
 dp.include_router(create_topic_router)
 
 # 💬 что делает эта часть: копируем темы из Railway Volume (/data/topics) в локальную ./topics,
@@ -1154,6 +1157,14 @@ init_bonus_feature(
     admin_chat_id=ADMIN_CHAT_ID,
 )
 
+init_podcasts_feature(
+    load_user_data=load_user_data,
+    save_user_data=save_user_data,
+    load_subscription_channels=load_subscription_channels,
+    LessonStates=LessonStates,
+    admin_chat_id=ADMIN_CHAT_ID,
+    bot=bot,
+)  # 💬 пробрасываем зависимости в модуль "Подкасты"
 
 
 
@@ -1609,6 +1620,8 @@ async def start_handler(message: Message, state: FSMContext):
             InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
             InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
         ],
+        
+        [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
     
         [
             InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
@@ -1620,6 +1633,8 @@ async def start_handler(message: Message, state: FSMContext):
             InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
         ],
     ])
+
+
 
 
     menu_text = "🏠 Главное меню:"  # 💬 без старой фразы "Что изучаем"
@@ -1715,6 +1730,11 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
     if action == "bonuses":
         await callback.answer()
         return await bonuses_open(callback.message, state)  # 💬 открываем «Бонусы»
+
+    if action == "podcasts":
+        await podcasts_open(callback.message, state)  # 💬 открываем подкасты (авторы -> эпизоды)
+        return
+
 
 
     # 📚 УЧИТЬСЯ — показываем выбор уровня (категорию выберем позже внутри уровня)
