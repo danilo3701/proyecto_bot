@@ -176,8 +176,11 @@ async def _is_subscribed_main_channel(user_id: int) -> bool:
     channels = []
     try:
         channels = _load_subscription_channels() or []
-    if isinstance(channels, dict):
-        channels = channels.get("channels", []) or []  # 💬 защита, если вернули dict
+        if isinstance(channels, dict):
+            channels = channels.get("channels", []) or []  # 💬 защита, если вернули dict
+    except Exception:
+        channels = []
+
 
 
     except Exception:
