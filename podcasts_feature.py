@@ -728,12 +728,14 @@ async def admin_pick_ep_frags(cb: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(PodcastAdminStates.waiting_fragments_text)
     await cb.message.answer(
         "Вставь фрагменты одним сообщением.\n\n"
-        "Формат каждого фрагмента:\n"
-        "1) 🇪🇸 ...\n"
-        "2) 🇷🇺 ...\n"
-        "3) 💡 ... (опционально)\n\n"
-        "Между фрагментами = пустая строка."
-    )
+        "Каждый фрагмент = одна строка.\n"
+        "Формат:\n"
+        "ES | RU\n"
+        "ES | RU | 💡 подсказка (опционально)\n\n"
+        "Между фрагментами пустые строки не нужны.\n"
+        "Важно = символ | используй только как разделитель."
+    )  # 💬 под твой новый формат 1 строка = 1 фрагмент
+
     await cb.answer()
 
 
@@ -750,25 +752,59 @@ def _strip_spoilers_ru(line: str) -> str:
     s = re.sub(r"</tg-spoiler>$", "", s)
     return s.strip()
 
+def _clean_cell(s: str) -> str:
+    # 💬 чистим префиксы, если они вдруг попали в текст
+    t = (s or "").strip()
+    t = re.sub(r"^(🇪🇸|🇷🇺|💡)\s*", "", t)
+    t = re.sub(r"^(ES|RU|HINT)\s+", "", t, flags=re.IGNORECASE)
+    return t.strip()
+
+
 
 def _parse_fragments(text: str) -> List[Dict[str, str]]:
     raw = (text or "").strip()
     if not raw:
         return []
 
+    # 💬 новый формат: 1 строка = 1 фрагмент, части разделены через |
+    all_lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    pipe_lines = [ln for ln in all_lines if "|" in ln]
+
+    # 💬 если большинство строк с | = парсим построчно
+    if pipe_lines and (len(pipe_lines) >= max(1, int(len(all_lines) * 0.6))):
+        out: List[Dict[str, str]] = []
+        for ln in all_lines:
+            if "|" not in ln:
+                continue
+            parts = [p.strip() for p in ln.split("|", 2)]
+            if len(parts) < 2:
+                continue
+
+            es = _clean_cell(parts[0])
+            ru = _strip_spoilers_ru(_clean_cell(parts[1]))
+
+            hint = ""
+            if len(parts) == 3:
+                hint = _clean_cell(parts[2])
+
+            out.append({"es": es, "ru": ru, "hint": hint})
+        return out
+
+    # 💬 старый формат: блоки через пустую строку, внутри 2 или 3 строки
     blocks = re.split(r"\n\s*\n", raw)
     out = []
     for b in blocks:
         lines = [ln.strip() for ln in b.splitlines() if ln.strip()]
         if len(lines) < 2:
             continue
-        es = _strip_prefix(lines[0])
-        ru = _strip_spoilers_ru(_strip_prefix(lines[1]))
+        es = _clean_cell(_strip_prefix(lines[0]))
+        ru = _strip_spoilers_ru(_clean_cell(_strip_prefix(lines[1])))
         hint = ""
         if len(lines) >= 3:
-            hint = _strip_prefix(lines[2])
+            hint = _clean_cell(_strip_prefix(lines[2]))
         out.append({"es": es, "ru": ru, "hint": hint})
     return out
+
 
 
 @router.message(PodcastAdminStates.waiting_fragments_text)
