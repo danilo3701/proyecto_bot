@@ -2065,7 +2065,10 @@ async def settings_back_cb(callback: CallbackQuery, state: FSMContext):
 async def settings_limit_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     # 💬 просим число, дальше обработает отдельный input-хендлер
-    await state.update_data(_settings_wait="limit")
+    prev_state = await state.get_state()  # 💬 запоминаем состояние, чтобы вернуть после ввода
+    await state.update_data(_settings_wait="limit", _settings_prev_state=prev_state)  # 💬 ждём ввод лимита
+    await state.set_state("settings_inline_input")  # 💬 включаем режим ввода из настроек
+
     await callback.message.edit_text(
         "🔢 Введи лимит слов в день (число):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -2078,6 +2081,7 @@ async def settings_limit_cb(callback: CallbackQuery, state: FSMContext):
 async def settings_notify_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     # 💬 просим время, дальше обработает отдельный input-хендлер
+    await state.update_data(_settings_wait=None, _settings_prev_state=None)  # 💬 сбрасываем режим ожидания ввода из настроек
     await state.update_data(_settings_wait="notify")
     await callback.message.edit_text(
         "⏰ Введи время уведомления в формате HH:MM (например 09:00):",
@@ -2087,12 +2091,15 @@ async def settings_notify_cb(callback: CallbackQuery, state: FSMContext):
     )
 
 
-@dp.message()
+@dp.message(StateFilter("settings_inline_input"), F.text, ~F.text.startswith("/"))
 async def settings_inline_input_router(message: Message, state: FSMContext):
     data = await state.get_data()
     wait = data.get("_settings_wait")
+    prev_state = data.get("_settings_prev_state")  # 💬 куда вернуться после ввода
+
     if wait not in ("limit", "notify"):
         return  # 💬 не наше состояние
+# 💬 не наше состояние
 
     user_data = load_user_data()
     user_id = str(message.from_user.id)
@@ -2109,8 +2116,10 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
 
         user_data[user_id]["settings"]["daily_limit_words"] = val  # 💬 сохраняем лимит
         save_user_data(user_data)
-        await state.update_data(_settings_wait=None)
         await message.answer("✅ Лимит сохранён. Открой Настройки ещё раз.")
+        await state.update_data(_settings_wait=None, _settings_prev_state=None)  # 💬 чистим флаги ожидания
+        await state.set_state(prev_state if prev_state else LessonStates.choosing_category)  # 💬 возвращаем состояние
+
 
     if wait == "notify":
         t = message.text.strip()
@@ -2120,8 +2129,10 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
 
         user_data[user_id]["settings"]["notify_time"] = t  # 💬 сохраняем время
         save_user_data(user_data)
-        await state.update_data(_settings_wait=None)
         await message.answer("✅ Время сохранено. Открой Настройки ещё раз.")
+        await state.update_data(_settings_wait=None, _settings_prev_state=None)  # 💬 чистим флаги ожидания
+        await state.set_state(prev_state if prev_state else LessonStates.choosing_category)  # 💬 возвращаем состояние
+
 
 
 
