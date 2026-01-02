@@ -501,11 +501,17 @@ async def podcasts_admin_text_alias(message: Message, state: FSMContext) -> None
     await podcasts_admin_cmd(message, state)  # 💬 алиас на админ-команду без слэша
 
 
-@router.callback_query(F.data.startswith("podadm:"))
+@router.callback_query(F.data.in_([
+    "podadm:close",
+    "podadm:back",
+    "podadm:list",
+    "podadm:add_author",
+    "podadm:add_episode",
+    "podadm:add_frags",
+    "podadm:del_ep",
+]))
 async def podcasts_admin_cb(cb: CallbackQuery, state: FSMContext) -> None:
-    # 💬 секретная админка без проверки админа
-    # 💬 если человек сюда попал = значит он ввёл секретную команду
-    pass
+    # 💬 ловим только “меню-экшены”, а pick_* отдадим отдельным хендлерам
 
 
 
