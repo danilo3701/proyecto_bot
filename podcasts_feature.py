@@ -58,7 +58,11 @@ def init_podcasts_feature(
     _save_user_data = save_user_data
     _load_subscription_channels = load_subscription_channels
     _LessonStates = LessonStates
-    _ADMIN_CHAT_ID = admin_chat_id
+    try:
+        _ADMIN_CHAT_ID = int(admin_chat_id)  # 💬 приводим к int, чтобы админка не молчала/не падала
+    except Exception:
+        _ADMIN_CHAT_ID = None  # 💬 если не настроено, покажем понятное сообщение в /podcasts_admin
+
     _bot = bot
 
     try:
@@ -485,20 +489,40 @@ def _kb_admin_eps_pick(data: Dict[str, Any], cb_prefix: str) -> InlineKeyboardMa
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-@router.message(Command("podcasts_admin"))
+@router.message(Command(commands=["podcasts_admin", "podcast_admin", "pod_admin"]))
 async def podcasts_admin_cmd(message: Message, state: FSMContext) -> None:
     if not _admin_only(message):
+        # 💬 всегда отвечаем, чтобы не было ощущения "бот завис"
+        if _ADMIN_CHAT_ID is None:
+            await message.answer(
+                "⚠️ Админка подкастов не настроена.\n"
+                "Проверь в core8_1.py: init_podcasts_feature(admin_chat_id=ADMIN_CHAT_ID)\n"
+                f"Твой id: {message.from_user.id}"
+            )
+        else:
+            await message.answer(
+                "⛔️ Нет доступа.\n"
+                f"Твой id: {message.from_user.id}\n"
+                "Если это ты = админ, значит в core8_1.py указан неверный ADMIN_CHAT_ID."
+            )
         return
+
     await state.clear()
     await state.set_state(PodcastAdminStates.choosing_action)
-    await message.answer("👑 Админка подкастов:", reply_markup=_kb_admin_menu())
+    await message.answer("👑 Админка подкастов:", reply_markup=_kb_admin_menu())  # 💬 открываем меню админки
+
+
+@router.message(F.text.lower().in_(["подкаст админ", "подкасты админ"]))
+async def podcasts_admin_text_alias(message: Message, state: FSMContext) -> None:
+    await podcasts_admin_cmd(message, state)  # 💬 алиас на админ-команду без слэша
 
 
 @router.callback_query(F.data.startswith("podadm:"))
 async def podcasts_admin_cb(cb: CallbackQuery, state: FSMContext) -> None:
     if not _admin_only(cb):
-        await cb.answer()
+        await cb.answer("⛔️ Нет доступа", show_alert=True)  # 💬 чтобы не выглядело как зависание
         return
+
 
     action = cb.data.split(":", 1)[1]
 
