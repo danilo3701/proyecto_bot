@@ -776,7 +776,7 @@ def _parse_fragments(text: str) -> List[Dict[str, str]]:
         for ln in all_lines:
             if "|" not in ln:
                 continue
-            parts = [p.strip() for p in ln.split("|", 2)]
+            parts = [p.strip() for p in ln.split("|", 3)]
             if len(parts) < 2:
                 continue
 
