@@ -179,7 +179,8 @@ async def _is_subscribed_main_channel(user_id: int) -> bool:
         if isinstance(channels, dict):
             channels = channels.get("channels", []) or []  # 💬 защита, если вернули dict
     except Exception:
-        channels = []
+        channels = []  # 💬 если не смогли прочитать = не блокируем по ошибке
+
 
 
 
@@ -246,7 +247,11 @@ def _kb_authors(data: Dict[str, Any]) -> InlineKeyboardMarkup:
     for aid, a in items:
         rows.append([InlineKeyboardButton(text=f"🎙 {a.get('name','Автор')}", callback_data=f"pod:author:{aid}")])
 
-    return InlineKeyboardMarkup(inline_keyboard=rows or [[InlineKeyboardButton(text="(пусто)", callback_data="pod:noop")]])
+    if not rows:
+        rows = [[InlineKeyboardButton(text="(пусто)", callback_data="pod:noop")]]
+
+    rows.append([InlineKeyboardButton(text="🏠 В меню", callback_data="back_to_menu")])  # 💬 выход в главное меню без тупика
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _kb_episodes(data: Dict[str, Any], author_id: str) -> InlineKeyboardMarkup:
@@ -476,14 +481,14 @@ async def pod_reply_nav(message: Message, state: FSMContext) -> None:
     if message.text == "🏠 К авторам":
         await state.update_data(pod_author_id=None, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
         await message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
-        await message.answer(" ", reply_markup=ReplyKeyboardRemove())
+        await message.answer("\u200b", reply_markup=ReplyKeyboardRemove())  # 💬 скрытый символ, чтобы Telegram не ругался на пустой текст
         return
 
     # ⬅️ К эпизодам
     author_id = st.get("pod_author_id")
     if not author_id:
         await message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
-        await message.answer(" ", reply_markup=ReplyKeyboardRemove())
+        await message.answer("\u200b", reply_markup=ReplyKeyboardRemove())  # 💬 скрытый символ, чтобы Telegram не ругался на пустой текст
         return
 
     await state.update_data(pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
@@ -776,7 +781,7 @@ def _parse_fragments(text: str) -> List[Dict[str, str]]:
         for ln in all_lines:
             if "|" not in ln:
                 continue
-            parts = [p.strip() for p in ln.split("|", 3)]
+            parts = [p.strip() for p in ln.split("|")]  # 💬 режем по всем | и потом склеиваем хвост в hint
             if len(parts) < 2:
                 continue
 
@@ -784,8 +789,9 @@ def _parse_fragments(text: str) -> List[Dict[str, str]]:
             ru = _strip_spoilers_ru(_clean_cell(parts[1]))
 
             hint = ""
-            if len(parts) == 3:
-                hint = _clean_cell(parts[2])
+            if len(parts) > 2:
+                hint = _clean_cell(" | ".join(parts[2:]))  # 💬 всё после RU = подсказка (если есть)
+
 
             out.append({"es": es, "ru": ru, "hint": hint})
         return out
