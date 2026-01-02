@@ -128,20 +128,43 @@ def _new_id(prefix: str) -> str:
 # -----------------------------
 # ✅ Subscription check (только 1 канал = первый из Subscription Channels)
 # -----------------------------
-def _extract_channel_ref(ch: Dict[str, Any]) -> Optional[str]:
-    # 💬 пытаемся достать chat_id/username/url
+def _extract_channel_ref(ch: Any) -> Optional[str]:
+    # 💬 достаём chat_ref из dict или str (username/url/chat_id)
     if not ch:
         return None
-    if ch.get("chat_id"):
-        return str(ch["chat_id"])
-    if ch.get("username"):
-        u = str(ch["username"]).lstrip("@")
-        return f"@{u}"
-    url = ch.get("url") or ch.get("link")
-    if url and "t.me/" in str(url):
-        tail = str(url).split("t.me/")[-1].strip("/")
-        if tail:
-            return f"@{tail}"
+
+    # 💬 если в channels лежит строка
+    if isinstance(ch, str):
+        s = ch.strip()
+        if not s:
+            return None
+        # chat_id строкой
+        if s.lstrip("-").isdigit():
+            return s
+        # url t.me/...
+        if "t.me/" in s:
+            tail = s.split("t.me/")[-1].strip("/").strip()
+            if tail:
+                return f"@{tail.lstrip('@')}"
+        # username
+        if s.startswith("@"):
+            return s
+        return f"@{s}"
+
+    # 💬 если в channels лежит dict
+    if isinstance(ch, dict):
+        if ch.get("chat_id"):
+            return str(ch["chat_id"])
+        if ch.get("username"):
+            u = str(ch["username"]).lstrip("@")
+            return f"@{u}"
+        url = ch.get("url") or ch.get("link")
+        if url and "t.me/" in str(url):
+            tail = str(url).split("t.me/")[-1].strip("/")
+            if tail:
+                return f"@{tail}"
+        return None
+
     return None
 
 
@@ -153,6 +176,10 @@ async def _is_subscribed_main_channel(user_id: int) -> bool:
     channels = []
     try:
         channels = _load_subscription_channels() or []
+    if isinstance(channels, dict):
+        channels = channels.get("channels", []) or []  # 💬 защита, если вернули dict
+
+
     except Exception:
         channels = []
 
@@ -171,12 +198,27 @@ async def _is_subscribed_main_channel(user_id: int) -> bool:
 
 
 def _main_channel_url() -> str:
-    # 💬 ссылка для кнопки "подписаться"
+    # 💬 ссылка для кнопки "подписаться" (поддержка dict и str)
     try:
-        ch = (_load_subscription_channels() or [None])[0]
+        channels = _load_subscription_channels() or []
+        # 💬 если вдруг вернули dict {"channels":[...]}
+        if isinstance(channels, dict):
+            channels = channels.get("channels", []) or []
+        ch = channels[0] if channels else None
         if not ch:
             return "https://t.me/espanolingooo"
-        return ch.get("url") or ch.get("link") or "https://t.me/espanolingooo"
+
+        if isinstance(ch, str):
+            s = ch.strip()
+            if "t.me/" in s:
+                return s
+            s = s.lstrip("@")
+            return f"https://t.me/{s}" if s else "https://t.me/espanolingooo"
+
+        if isinstance(ch, dict):
+            return ch.get("url") or ch.get("link") or "https://t.me/espanolingooo"
+
+        return "https://t.me/espanolingooo"
     except Exception:
         return "https://t.me/espanolingooo"
 
