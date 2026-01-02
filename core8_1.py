@@ -2226,12 +2226,25 @@ async def show_leaderboard(message: Message, state: FSMContext):
         RANK_COL = 4             # 💬 ширина колонки ранга (1) / 10) / 223)
 
         def _name_cell(raw: str) -> str:
-            # 💬 делает ячейку имени фикс длины: режем до 20 и ставим "..."
+            # 💬 делает ячейку имени фикс длины, убирая эмодзи (иначе в <pre> всё съезжает)
             raw = (raw or "").strip()
+
+            cleaned = []
+            for ch in raw:
+                o = ord(ch)
+                if ch in ("\uFE0F", "\u200D"):
+                    continue  # 💬 вариации эмодзи и joiner ломают ширину
+                if (0x1F300 <= o <= 0x1FAFF) or (0x2600 <= o <= 0x27BF):
+                    continue  # 💬 убираем эмодзи из имени только для рейтинга
+                cleaned.append(ch)
+
+            raw = "".join(cleaned).strip()
+
             if len(raw) > NAME_COL:
                 raw = raw[:max(0, NAME_COL - 3)] + "..."  # 💬 длинное имя = обрезаем
             pad = nbsp * max(0, NAME_COL - len(raw))
             return f"{raw}{pad}"  # 💬 добивка до фикс ширины
+
 
         def _mark_cell(is_me: bool) -> str:
             # 💬 маркер ">" для строки пользователя, ширина ячейки всегда 2 = ранги не съезжают
