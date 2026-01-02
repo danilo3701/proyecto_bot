@@ -488,28 +488,12 @@ def _kb_admin_eps_pick(data: Dict[str, Any], cb_prefix: str) -> InlineKeyboardMa
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-
 @router.message(Command(commands=["podcasts_admin", "podcast_admin", "pod_admin"]))
 async def podcasts_admin_cmd(message: Message, state: FSMContext) -> None:
-    if not _admin_only(message):
-        # 💬 всегда отвечаем, чтобы не было ощущения "бот завис"
-        if _ADMIN_CHAT_ID is None:
-            await message.answer(
-                "⚠️ Админка подкастов не настроена.\n"
-                "Проверь в core8_1.py: init_podcasts_feature(admin_chat_id=ADMIN_CHAT_ID)\n"
-                f"Твой id: {message.from_user.id}"
-            )
-        else:
-            await message.answer(
-                "⛔️ Нет доступа.\n"
-                f"Твой id: {message.from_user.id}\n"
-                "Если это ты = админ, значит в core8_1.py указан неверный ADMIN_CHAT_ID."
-            )
-        return
-
+    # 💬 секретная команда без проверки админа
     await state.clear()
     await state.set_state(PodcastAdminStates.choosing_action)
-    await message.answer("👑 Админка подкастов:", reply_markup=_kb_admin_menu())  # 💬 открываем меню админки
+    await message.answer("👑 Админка подкастов:", reply_markup=_kb_admin_menu())
 
 
 @router.message(F.text.lower().in_(["подкаст админ", "подкасты админ"]))
@@ -519,9 +503,10 @@ async def podcasts_admin_text_alias(message: Message, state: FSMContext) -> None
 
 @router.callback_query(F.data.startswith("podadm:"))
 async def podcasts_admin_cb(cb: CallbackQuery, state: FSMContext) -> None:
-    if not _admin_only(cb):
-        await cb.answer("⛔️ Нет доступа", show_alert=True)  # 💬 чтобы не выглядело как зависание
-        return
+    # 💬 секретная админка без проверки админа
+    # 💬 если человек сюда попал = значит он ввёл секретную команду
+    pass
+
 
 
     action = cb.data.split(":", 1)[1]
@@ -580,8 +565,7 @@ async def podcasts_admin_cb(cb: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("podadm:pick_author:"))
 async def admin_pick_author(cb: CallbackQuery, state: FSMContext) -> None:
-    if not _admin_only(cb):
-        return
+
     author_id = cb.data.split(":")[-1]
     await state.update_data(adm_author_id=author_id)
     await state.set_state(PodcastAdminStates.waiting_episode_title)
@@ -591,8 +575,7 @@ async def admin_pick_author(cb: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(PodcastAdminStates.waiting_author_name)
 async def admin_add_author_name(message: Message, state: FSMContext) -> None:
-    if not _admin_only(message):
-        return
+
     name = (message.text or "").strip()
     if not name:
         await message.answer("Имя пустое. Попробуй ещё раз.")
@@ -613,8 +596,7 @@ async def admin_add_author_name(message: Message, state: FSMContext) -> None:
 
 @router.message(PodcastAdminStates.waiting_episode_title)
 async def admin_episode_title(message: Message, state: FSMContext) -> None:
-    if not _admin_only(message):
-        return
+
     title = (message.text or "").strip()
     if not title:
         await message.answer("Название пустое. Пришли ещё раз.")
@@ -627,8 +609,7 @@ async def admin_episode_title(message: Message, state: FSMContext) -> None:
 
 @router.message(PodcastAdminStates.waiting_episode_desc)
 async def admin_episode_desc(message: Message, state: FSMContext) -> None:
-    if not _admin_only(message):
-        return
+
     desc = (message.text or "").strip()
     if not desc:
         desc = "-"
@@ -640,8 +621,7 @@ async def admin_episode_desc(message: Message, state: FSMContext) -> None:
 
 @router.message(PodcastAdminStates.waiting_episode_audio)
 async def admin_episode_audio(message: Message, state: FSMContext) -> None:
-    if not _admin_only(message):
-        return
+
 
     audio_file_id = None
     audio_type = "audio"
@@ -691,8 +671,7 @@ async def admin_episode_audio(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("podadm:pick_ep_frags:"))
 async def admin_pick_ep_frags(cb: CallbackQuery, state: FSMContext) -> None:
-    if not _admin_only(cb):
-        return
+
     eid = cb.data.split(":")[-1]
     await state.update_data(adm_frag_eid=eid)
     await state.set_state(PodcastAdminStates.waiting_fragments_text)
@@ -743,8 +722,7 @@ def _parse_fragments(text: str) -> List[Dict[str, str]]:
 
 @router.message(PodcastAdminStates.waiting_fragments_text)
 async def admin_add_fragments(message: Message, state: FSMContext) -> None:
-    if not _admin_only(message):
-        return
+
     st = await state.get_data()
     eid = st.get("adm_frag_eid")
     if not eid:
@@ -774,8 +752,7 @@ async def admin_add_fragments(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("podadm:pick_ep_del:"))
 async def admin_pick_ep_del(cb: CallbackQuery, state: FSMContext) -> None:
-    if not _admin_only(cb):
-        return
+
     eid = cb.data.split(":")[-1]
     data = _read_podcasts()
     eps = data.get("episodes", {})
