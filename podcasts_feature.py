@@ -794,6 +794,15 @@ async def admin_clear_frags(cb: CallbackQuery, state: FSMContext) -> None:
 
     ep["fragments"] = []  # 💬 очищаем все фрагменты
     _write_podcasts(data)  # 💬 сохраняем в RailwayData (/data)
+    try:
+        st = PODCASTS_FILE.stat()
+        await cb.message.answer(
+            f"🧾 podcasts_data.json очищен и сохранён\n"
+            f"mtime={int(st.st_mtime)} size={st.st_size}"
+        )  # 💬 что делает эта часть: подтверждаем, что файл реально перезаписался
+    except Exception:
+        pass
+
 
     await state.update_data(adm_frag_eid=eid, adm_frag_mode="replace")  # 💬 дальше перезапишем целиком
     await state.set_state(PodcastAdminStates.waiting_fragments_text)
@@ -863,28 +872,28 @@ def _parse_fragments(text: str) -> List[Dict[str, str]]:
 
     # 💬 новый формат: 1 строка = 1 фрагмент, части разделены через |
     all_lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    pipe_lines = [ln for ln in all_lines if "|" in ln]
+    # 💬 новый формат: парсим каждую строку с | как отдельный фрагмент
+    out: List[Dict[str, str]] = []
+    for ln in all_lines:
+        if "|" not in ln:
+            continue
 
-    # 💬 если большинство строк с | = парсим построчно
-    if pipe_lines and (len(pipe_lines) >= max(1, int(len(all_lines) * 0.6))):
-        out: List[Dict[str, str]] = []
-        for ln in all_lines:
-            if "|" not in ln:
-                continue
-            parts = [p.strip() for p in ln.split("|")]  # 💬 режем по всем | и потом склеиваем хвост в hint
-            if len(parts) < 2:
-                continue
+        parts = [p.strip() for p in ln.split("|")]  # 💬 режем по всем | и хвост склеиваем в hint
+        if len(parts) < 2:
+            continue
 
-            es = _clean_cell(parts[0])
-            ru = _strip_spoilers_ru(_clean_cell(parts[1]))
+        es = _clean_cell(parts[0])
+        ru = _strip_spoilers_ru(_clean_cell(parts[1]))
 
-            hint = ""
-            if len(parts) > 2:
-                hint = _clean_cell(" | ".join(parts[2:]))  # 💬 всё после RU = подсказка (если есть)
+        hint = ""
+        if len(parts) > 2:
+            hint = _clean_cell(" | ".join(parts[2:]))  # 💬 всё после RU = подсказка (если есть)
 
+        out.append({"es": es, "ru": ru, "hint": hint})
 
-            out.append({"es": es, "ru": ru, "hint": hint})
-        return out
+    if out:
+        return out  # 💬 что делает эта часть: если нашли хотя бы 1 строку с | = используем новый формат
+ out
 
     # 💬 старый формат: блоки через пустую строку, внутри 2 или 3 строки
     blocks = re.split(r"\n\s*\n", raw)
@@ -934,6 +943,15 @@ async def admin_add_fragments(message: Message, state: FSMContext) -> None:
         ep["fragments"].extend(frags)  # 💬 дописываем
 
     _write_podcasts(data)  # 💬 сохраняем в RailwayData (/data)
+    try:
+        st = PODCASTS_FILE.stat()
+        await message.answer(
+            f"🧾 podcasts_data.json сохранён\n"
+            f"mtime={int(st.st_mtime)} size={st.st_size}"
+        )  # 💬 что делает эта часть: показываем факт перезаписи файла на диске
+    except Exception:
+        pass
+
 
 
     await state.clear()
