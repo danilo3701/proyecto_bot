@@ -3,6 +3,10 @@
 
 import time
 import logging
+import asyncio  # 💬 нужен для asyncio.TimeoutError
+import random  # 💬 нужен для рандомной фразы меню
+from scenarios_estiloso8_1 import menu_study_phrases  # 💬 рандомные фразы меню
+
 from math import ceil
 from urllib.parse import quote
 
@@ -494,28 +498,39 @@ async def bonuses_share(callback: CallbackQuery):
 
 
 
+def _menu_text() -> str:
+    # 💬 что делает эта часть: рандомная фраза для главного меню (как в остальных меню)
+    try:
+        return random.choice(menu_study_phrases) if menu_study_phrases else "Выбирай"
+    except Exception:
+        return "Выбирай"
+
 
 def _build_main_menu_kb() -> InlineKeyboardMarkup:
-
-    # 💬 что делает эта часть: главное меню (для кнопки «Назад» из бонусов)
-
-    # 💬 что делает эта часть: главное меню (для кнопки «Назад» из бонусов)
+    # 💬 что делает эта часть: главное меню (для кнопки «Назад» из бонусов) в новом стиле
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📚 УЧИТЬСЯ",    callback_data="menu:learn")],
+        [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
+
         [
             InlineKeyboardButton(text="📎 Материалы", url=_materials_url),
-            InlineKeyboardButton(text="Связь 💬", url=_contact_url)
+            InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
         ],
+
+        [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
+
         [
-            InlineKeyboardButton(text="⚔️ Битва",   callback_data="menu:battle"),
-            InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords")
+            InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
+            InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses"),
         ],
-        [InlineKeyboardButton(text="🎁 Бонусы", callback_data="menu:bonuses")],
+
         [
-            InlineKeyboardButton(text="🏆 Рейтинг",    callback_data="menu:rating"),
-            InlineKeyboardButton(text="Настройки ⚙️",  callback_data="menu:settings")
+            InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
+            InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
         ],
+
+        [InlineKeyboardButton(text="Связь 💬", url=_contact_url)],
     ])
+
 
 
 @router.callback_query(F.data == "bonuses:back")
@@ -523,7 +538,8 @@ async def bonuses_back(callback: CallbackQuery, state):
 
     await _safe_cb_answer(callback)  # 💬 безопасно
     kb = _build_main_menu_kb()
-    await _safe_edit_or_answer(callback.message, "Что изучаем?⭐", reply_markup=kb)  # 💬 безопасно
+    await _safe_edit_or_answer(callback.message, _menu_text(), reply_markup=kb)  # 💬 меню с рандомной фразой
+
 
 
     if _LessonStates:
