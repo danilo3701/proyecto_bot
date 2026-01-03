@@ -224,8 +224,10 @@ def _result_kb() -> InlineKeyboardMarkup:
 def _share_invite_url() -> str:
     # 💬 что делает эта часть: шарим текст без явной ссылки, а сам url уходит отдельным параметром
     text = "Сыграем битву? Жми и выбирай тему."
-    deep = "https://t.me/espanoljuega_bot?start=channel"  # 💬 твой стартовый payload
+    username = (BOT_USERNAME or "espanoljuega_bot").replace("@", "").strip()  # 💬 берём username бота из core8_1
+    deep = f"https://t.me/{username}?start=channel"  # 💬 стартовый payload
     return f"https://t.me/share/url?url={quote(deep)}&text={quote(text)}"
+
 
 
 def _topics_kb(topic_keys: List[str]) -> InlineKeyboardMarkup:
@@ -419,11 +421,13 @@ async def _cancel_battle(user_id: int, bot: Optional[Bot] = None, chat_id: Optio
     rt.stop = True
     rt.event.set()
 
-    # 💬 отменяем фоновые таски битвы
-    if rt.task_tick:
+    # 💬 отменяем фоновые таски битвы (не отменяем текущую task, если cleanup вызывается из неё)
+    cur_task = asyncio.current_task()
+    if rt.task_tick and rt.task_tick is not cur_task:
         rt.task_tick.cancel()
-    if rt.task_main:
+    if rt.task_main and rt.task_main is not cur_task:
         rt.task_main.cancel()
+
 
     # 💬 чистим сообщения битвы, чтобы после /start не оставалось хвостов
     if bot is not None and chat_id is not None:
@@ -490,6 +494,8 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
         # 💬 вопросы (по порядку)
         topic = _get_battle_source().get(rt.topic_key, {}) or {}
         quiz_list = _collect_poll_quizzes(topic)
+        random.shuffle(quiz_list)  # 💬 перемешиваем порядок вопросов в каждом бою
+
 
         if not quiz_list:
             rt.stop = True
@@ -532,7 +538,6 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
             options = [options[i] for i in idxs]
             correct = idxs.index(correct)
             
-            out.append({"question": question, "options": options, "correct": correct})
 
 
 
@@ -548,7 +553,19 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
                 bot, chat_id, question, options, correct, open_period=open_period
             )  # 💬 poll отправили
             if not poll_msg:
-                break
+                rt.stop = True  # 💬 прекращаем бой, если Telegram не дал отправить poll
+                try:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text="⚠️ Не смог отправить квиз. Попробуй ещё раз через меню.",
+                        reply_markup=ReplyKeyboardRemove(),
+                    )
+                except Exception:
+                    pass
+                await state.clear()
+                await bot.send_message(chat_id=chat_id, text="Выбирай", reply_markup=_battle_main_menu_kb())  # 💬 возвращаем в меню
+                return
+
 
             rt.current_poll_id = poll_msg.poll.id
             rt.poll_msg_ids.append(poll_msg.message_id)
@@ -649,6 +666,13 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
             )  # 💬 сообщение об ошибке без нарушения порядка аргументов
         except Exception:
             pass
+    finally:
+        # 💬 гарантированно чистим хвосты (poll + scoreboard + BATTLES), даже если бой оборвался
+        try:
+            await _cancel_battle(user_id, bot=bot, chat_id=chat_id)
+        except Exception:
+            pass
+
 
 
 
@@ -659,7 +683,8 @@ async def start_battle_from_lex_menu(message: Message, state: FSMContext) -> Non
     _track("start_battle_from_lex_menu")  # 💬 записываем хендлер для админ-логов
 
     # 💬 отменяем предыдущий бой если вдруг уже был
-    await _cancel_battle(message.from_user.id)
+    await _cancel_battle(message.from_user.id, bot=message.bot, chat_id=message.chat.id)  # 💬 чистим сообщения старого боя
+
 
     # 💬 что делает эта часть: сначала берём battle темы из /data/battle_topics.json; если пусто = fallback на TOPICS_REF
     battle_topics = load_battle_topics() or {}
@@ -695,6 +720,8 @@ async def _start_battle_with_topic(message: Message, state: FSMContext, bot: Bot
     # 💬 что делает эта часть: единый запуск боя по topic_key (и для выбора темы, и для реванша)
     info = _get_battle_source().get(topic_key, {}) or {}
     title = info.get("title") or topic_key
+    await _cancel_battle(user_id, bot=bot, chat_id=message.chat.id)  # 💬 если старый бой ещё жив = останавливаем и чистим
+
 
     await state.set_state(Battle.Match)
     await state.update_data(battle_last_topic=topic_key)
@@ -720,9 +747,6 @@ async def _start_battle_with_topic(message: Message, state: FSMContext, bot: Bot
     rt.topic_key = topic_key
     rt.topic_title = title
     BATTLES[user_id] = rt
-    rt.start_monotonic = time.monotonic()  # 💬 фиксируем старт боя до запуска task'ов, чтобы таймер работал
-
-
     rt.start_monotonic = time.monotonic()  # 💬 фиксируем старт боя ДО запуска task_tick, чтобы таймер не был 0
 
 
@@ -845,7 +869,8 @@ async def battle_menu(callback: CallbackQuery, state: FSMContext):
 async def battle_topics_admin_start(message: Message, state: FSMContext):
     _track("battle_topics_admin_start")  # 💬 записываем хендлер для админ-логов
 
-    await _cancel_battle(message.from_user.id)  # 💬 если бой шёл, останавливаем чтобы не тикал в фоне
+    await _cancel_battle(message.from_user.id, bot=message.bot, chat_id=message.chat.id)  # 💬 если бой шёл, останавливаем и чистим хвосты
+
     # 💬 что делает эта часть: вход в админку battle тем отдельным FSM, не ломает бой
     await state.clear()
     await message.answer("⚙️ Battle темы = выбери действие:", reply_markup=_bt_admin_menu_kb())
@@ -1096,6 +1121,8 @@ async def battle_close(callback: CallbackQuery, state: FSMContext):
     _track("battle_close")  # 💬 записываем хендлер для админ-логов
 
     await callback.answer()
+    await _cancel_battle(callback.from_user.id, bot=callback.bot, chat_id=callback.message.chat.id)  # 💬 если бой шёл = останавливаем
+
 
     # 💬 удаляем экран выбора темы/битвы
     try:
