@@ -411,19 +411,48 @@ async def _safe_send_poll(bot: Bot, chat_id: int, question: str, options: List[s
     return None
 
 
-async def _cancel_battle(user_id: int) -> None:
+async def _cancel_battle(user_id: int, bot: Optional[Bot] = None, chat_id: Optional[int] = None):
     rt = BATTLES.get(user_id)
     if not rt:
         return
+
     rt.stop = True
+    rt.event.set()
+
+    # 💬 отменяем фоновые таски битвы
+    if rt.task_tick:
+        rt.task_tick.cancel()
+    if rt.task_main:
+        rt.task_main.cancel()
+
+    # 💬 чистим сообщения битвы, чтобы после /start не оставалось хвостов
+    if bot is not None and chat_id is not None:
+        try:
+            if getattr(rt, "score_msg_id", None):
+                await _safe_delete(bot, chat_id, rt.score_msg_id)  # 💬 удаляем скорборд
+        except Exception:
+            pass
+
+        try:
+            for mid in list(getattr(rt, "poll_msg_ids", []) or []):
+                await _safe_delete(bot, chat_id, mid)  # 💬 удаляем зависшие poll-сообщения
+        except Exception:
+            pass
+
+    # 💬 убираем запись, чтобы poll_answer не обрабатывался после отмены
     try:
-        rt.event.set()
+        BATTLES.pop(user_id, None)
     except Exception:
         pass
 
-    for t in [rt.task_tick, rt.task_main]:
-        if t and not t.done():
-            t.cancel()
+
+async def cancel_battle_if_running(bot: Bot, chat_id: int, user_id: int) -> None:
+    # 💬 внешний хелпер для core8_1 = отменяем битву при /start и любых выходах
+    try:
+        await _cancel_battle(user_id, bot=bot, chat_id=chat_id)
+    except Exception:
+        pass
+
 
 
 async def _tick_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) -> None:
@@ -489,16 +518,22 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
             options = list(q.get("options") or [])
             correct = int(q.get("correct_index") or 0)
 
-            options = options[:10]
+            options = options[:10]  # Telegram limit
             if not options:
                 continue
-            # 💬 перемешиваем варианты, чтобы правильный не был всегда первым
-            try:
-                correct_value = options[correct]
-                random.shuffle(options)
-                correct = options.index(correct_value)
-            except Exception:
-                pass
+            
+            # 💬 нормализуем correct_index, чтобы не улетал за границы после обрезки
+            if correct < 0 or correct >= len(options):
+                correct = 0
+            
+            # 💬 перемешиваем через индексы = корректно даже при дублях вариантов
+            idxs = list(range(len(options)))
+            random.shuffle(idxs)
+            options = [options[i] for i in idxs]
+            correct = idxs.index(correct)
+            
+            out.append({"question": question, "options": options, "correct": correct})
+
 
 
             rt.event.clear()
@@ -723,7 +758,7 @@ async def battle_stop(message: Message, state: FSMContext, bot: Bot):
     _track("battle_stop")  # 💬 записываем хендлер для админ-логов
 
     # 💬 останавливаем бой и возвращаем в меню битвы
-    await _cancel_battle(message.from_user.id)
+    await _cancel_battle(message.from_user.id, bot=message.bot, chat_id=message.chat.id)  # 💬 гасим бой полностью
 
     try:
         await message.answer("\u00AD", reply_markup=ReplyKeyboardRemove())
