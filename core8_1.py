@@ -2081,16 +2081,23 @@ async def settings_menu(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "settings:back")
 async def settings_back_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    await state.update_data(_settings_wait=None, _settings_prev_state=None, _settings_chat_id=None, _settings_msg_id=None)  # 💬 чистим флаги ожидания ввода
 
-    # 💬 возвращаем главное меню без нового сообщения
-    kb = InlineKeyboardMarkup(inline_keyboard=[
+    await state.update_data(
+        _settings_wait=None,
+        _settings_prev_state=None,
+        _settings_chat_id=None,
+        _settings_msg_id=None,
+    )  # 💬 чистим режим ввода настроек
+
+    inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
 
         [
             InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
             InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
         ],
+
+        [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],  # 💬 возвращаем кнопку подкастов
 
         [
             InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
@@ -2101,10 +2108,23 @@ async def settings_back_cb(callback: CallbackQuery, state: FSMContext):
             InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
             InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
         ],
-    ])  # 💬 выровненное главное меню
+    ])  # 💬 главное меню в актуальной раскладке
 
-    await callback.message.edit_text("🏠 Главное меню:", reply_markup=kb)
+    menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Выбирай"  # 💬 рандомная фраза главного меню
+
+    menu_msg_id = None
+    try:
+        await callback.message.edit_text(menu_text, reply_markup=inline_kb_main, parse_mode="HTML")
+        menu_msg_id = callback.message.message_id  # 💬 это же сообщение стало главным меню
+    except Exception:
+        menu_msg = await smart_reply(callback.message, menu_text, reply_markup=inline_kb_main, parse_mode="HTML")
+        menu_msg_id = menu_msg.message_id  # 💬 fallback если edit_text нельзя
+
+    if menu_msg_id:
+        await state.update_data(last_menu_msg_id=menu_msg_id, menu_hidden=False)  # 💬 синхронизируем id главного меню
+
     await state.set_state(LessonStates.choosing_category)
+
 
 
 @dp.callback_query(F.data == "settings:limit")
@@ -3185,6 +3205,9 @@ async def mywords_show_main_menu(message: Message, state: FSMContext):
             InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
             InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
         ],
+
+        [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],  # 💬 единое главное меню с подкастами
+
     
         [
             InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
