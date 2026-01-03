@@ -353,7 +353,7 @@ async def podcasts_open(message: Message, state: FSMContext) -> None:
         msg = await message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
         await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 если edit невозможен
 
-
+@router.callback_query(F.data == "pod:checksub")
 async def pod_checksub(cb: CallbackQuery, state: FSMContext) -> None:
     ok = await _is_subscribed_main_channel(cb.from_user.id)
     if not ok:
@@ -378,7 +378,7 @@ async def pod_checksub(cb: CallbackQuery, state: FSMContext) -> None:
         await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 fallback
 
 
-
+@router.callback_query(F.data == "pod:authors")
 async def pod_back_authors(cb: CallbackQuery, state: FSMContext) -> None:
     data = _read_podcasts()
     await state.update_data(
@@ -398,7 +398,7 @@ async def pod_back_authors(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-
+@router.callback_query(F.data.startswith("pod:author:"))
 async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
     author_id = cb.data.split(":")[-1]
     data = _read_podcasts()
@@ -426,7 +426,7 @@ async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-
+@router.callback_query(F.data.startswith("pod:ep:"))
 async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
     st = await state.get_data()
 
@@ -571,7 +571,7 @@ async def pod_fragment_controls(cb: CallbackQuery, state: FSMContext) -> None:
     except Exception:
         await cb.answer("Не смог обновить экран", show_alert=False)
 
-
+@router.message(F.text.in_(["🏠 К авторам", "⬅️ К эпизодам"]))
 async def pod_reply_nav(message: Message, state: FSMContext) -> None:
     st = await state.get_data()
     if not st.get("pod_ctx"):
@@ -599,7 +599,8 @@ async def pod_reply_nav(message: Message, state: FSMContext) -> None:
         await state.update_data(pod_author_id=None, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
         await _edit_or_send("🎧 Выбери автора:", _kb_authors(data))
 
-        rm = await message.answer(" ", reply_markup=ReplyKeyboardRemove())  # 💬 убираем клавиатуру “назад”
+        rm = await message.answer("\u200b", reply_markup=ReplyKeyboardRemove())  # 💬 скрытый символ, чтобы Telegram не ругался на пустой текст
+
         asyncio.create_task(_autodelete_message(message.bot, chat_id, rm.message_id, 1))
         return
 
@@ -609,14 +610,16 @@ async def pod_reply_nav(message: Message, state: FSMContext) -> None:
         await state.update_data(pod_author_id=None, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
         await _edit_or_send("🎧 Выбери автора:", _kb_authors(data))
 
-        rm = await message.answer(" ", reply_markup=ReplyKeyboardRemove())  # 💬 убираем клавиатуру “назад”
+        rm = await message.answer("\u200b", reply_markup=ReplyKeyboardRemove())  # 💬 скрытый символ, чтобы Telegram не ругался на пустой текст
+
         asyncio.create_task(_autodelete_message(message.bot, chat_id, rm.message_id, 1))
         return
 
     await state.update_data(pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
     await _edit_or_send("Выбери эпизод:", _kb_episodes(data, author_id))
 
-    rm = await message.answer(" ", reply_markup=ReplyKeyboardRemove())  # 💬 убираем клавиатуру “назад”
+    rm = await message.answer("\u200b", reply_markup=ReplyKeyboardRemove())  # 💬 скрытый символ, чтобы Telegram не ругался на пустой текст
+
     asyncio.create_task(_autodelete_message(message.bot, chat_id, rm.message_id, 1))
 
 
