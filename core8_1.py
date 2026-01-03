@@ -2163,6 +2163,12 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
     chat_id = data.get("_settings_chat_id") or message.chat.id  # 💬 берём сохранённый chat_id экрана настроек
     msg_id  = data.get("_settings_msg_id")  # 💬 берём сохранённый message_id, чтобы обновлять настройки без “зависаний”
 
+    # 💬 пытаемся удалить ввод пользователя (цифру), чтобы чат не засорялся
+    try:
+        await bot.delete_message(message.chat.id, message.message_id)
+    except Exception:
+        pass
+
 
     # ─────────────────────────────────────────────────────────────
     # LIMIT WORDS
@@ -2173,8 +2179,11 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
             if val < 1 or val > 500:
                 raise ValueError
         except Exception:
-            await message.answer("⚠️ Введи число от 1 до 500")  # 💬 защита от мусорного ввода
+            asyncio.create_task(
+                send_and_auto_delete_text(bot, chat_id, "⚠️ Введи число от 3 до 30", delay=1.0)
+            )  # 💬 короткое предупреждение без мусора в чате
             return
+
 
         user_data[user_id]["settings"]["daily_limit_words"] = val  # 💬 реально сохраняем лимит (раньше этого не было)
         save_user_data(user_data)
@@ -2185,11 +2194,6 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
         xp_data.setdefault(xp_user_id, {})["words_daily_limit"] = val
         save_xp_data(xp_data)
 
-
-        # 💬 короткое подтверждение, которое само удалится через 3 секунды
-        asyncio.create_task(
-            send_and_auto_delete_text(bot, chat_id, f"✅ Сохранено = {val}", delay=3.0)
-        )
 
         # 💬 обновляем меню настроек (редактируем исходное сообщение)
         settings = user_data[user_id]["settings"]
@@ -2246,8 +2250,11 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
             if hour < 1 or hour > 24:
                 raise ValueError
         except Exception:
-            await message.answer("⚠️ Введи час числом от 1 до 24\n24 = 00:00")  # 💬 защита от мусорного ввода
+            asyncio.create_task(
+                send_and_auto_delete_text(bot, chat_id, "⚠️ Введи час числом от 1 до 24\n23 = 23:00", delay=1.0)
+            )  # 💬 короткое предупреждение без мусора в чате
             return
+
 
         hour_norm = 0 if hour == 24 else hour
         notify_time = f"{hour_norm:02d}:00"  # 💬 храним как HH:00, ввод всегда по Мадриду
@@ -2262,10 +2269,7 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
         save_xp_data(xp_data)
 
 
-        # 💬 короткое подтверждение, которое само удалится через 3 секунды
-        asyncio.create_task(
-            send_and_auto_delete_text(bot, chat_id, f"✅ Сохранено = {notify_time}", delay=3.0)
-        )
+)
 
         # 💬 обновляем меню настроек
         settings = user_data[user_id]["settings"]
