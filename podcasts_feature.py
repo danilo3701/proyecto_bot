@@ -326,8 +326,15 @@ async def podcasts_open(message: Message, state: FSMContext) -> None:
         return
 
     data = _read_podcasts()
-    await state.update_data(pod_ctx=True, pod_author_id=None, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
-    pod_nav_msg_id=None,  # 💬 id "пустого" сообщения с reply-кнопками
+    await state.update_data(
+        pod_ctx=True,
+        pod_author_id=None,
+        pod_ep_id=None,
+        pod_idx=0,
+        pod_frag_msg_id=None,
+        pod_nav_msg_id=None,  # 💬 id "держателя" reply-кнопок
+    )
+
 
     await message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
 
@@ -406,30 +413,14 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
 
     idx = 0
     frag = frags[idx]
-    text = _format_fragment(frag.get("es", ""), frag.get("ru", ""), frag.get("hint", ""))
-
-    msg = await cb.message.answer(
-        text,
-        reply_markup=_kb_fragment_controls(),
-    )
-    nav_msg = await cb.message.answer(
-        "\u2060",
-        reply_markup=_kb_episode_back(),
-    )  # 💬 оставляем кнопки отдельным сообщением, его не удаляем
-
-    nav_msg = await cb.message.answer(
-        "\u2060",
-        reply_markup=_kb_episode_back(),
-    )  # 💬 оставляем кнопки отдельным сообщением, его не удаляем
-
     msg = await cb.message.answer(
         text,
         reply_markup=_kb_fragment_controls(),
     )
 
-    # 💬 держим reply-кнопки отдельным "пустым" сообщением, чтобы авто-удаление текста их не убивало
+    # 💬 держим reply-кнопки отдельным сообщением (безопасный невидимый символ)
     kb_holder = await cb.message.answer(
-        "\u200b",  # 💬 невидимый символ, чтобы сообщение было "пустым", но кнопки остались
+        "\u200b",  # 💬 чтобы Telegram не ругался на пустой текст
         reply_markup=_kb_episode_back(),
     )
 
@@ -438,7 +429,7 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
         "Навигация = кнопками ниже.\nНазад = кнопками внизу.",
     )
 
-    # 💬 удаляем только текст-подсказку через 7 секунд, кнопки остаются
+    # 💬 удаляем только текст подсказки, кнопки остаются
     async def _auto_delete_tip(m: Message) -> None:
         await asyncio.sleep(7)
         try:
@@ -454,13 +445,9 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
         pod_ep_id=ep_id,
         pod_idx=idx,
         pod_frag_msg_id=msg.message_id,
-        pod_nav_msg_id=kb_holder.message_id,  # 💬 запоминаем "держатель" reply-кнопок
+        pod_nav_msg_id=kb_holder.message_id,  # 💬 запоминаем id "держателя" reply-кнопок
     )
 
-
-
-
-    await state.update_data(pod_ep_id=ep_id, pod_idx=idx, pod_frag_msg_id=msg.message_id)
 
 
 @router.callback_query(F.data.in_(["pod:prev", "pod:next", "pod:star"]))
@@ -533,6 +520,14 @@ async def pod_reply_nav(message: Message, state: FSMContext) -> None:
         return
 
     data = _read_podcasts()
+    
+    nav_id = st.get("pod_nav_msg_id")
+    if nav_id:
+        try:
+            await message.bot.delete_message(message.chat.id, int(nav_id))
+        except Exception:
+            pass  # 💬 что делает эта часть: тихо чистим "пустой держатель" кнопок, чтобы не копился
+
 
     if message.text == "🏠 К авторам":
         await state.update_data(pod_author_id=None, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
@@ -549,7 +544,8 @@ async def pod_reply_nav(message: Message, state: FSMContext) -> None:
 
     await state.update_data(pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
     await message.answer("Выбери эпизод:", reply_markup=_kb_episodes(data, author_id))
-    await message.answer(" ", reply_markup=ReplyKeyboardRemove())
+    await message.answer("\u200b", reply_markup=ReplyKeyboardRemove())  # 💬 чтобы Telegram не ругался на пустой текст
+
 
 
 # -----------------------------
