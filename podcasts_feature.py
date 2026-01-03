@@ -303,7 +303,7 @@ def _format_fragment(es: str, ru: str, hint: str = "") -> str:
 
     lines = [
         f"<b>🇪🇸 {es_txt}</b>",  # 💬 испанская строка всегда жирным
-        f"<i>🇷🇺 <tg-spoiler>{ru_txt}</tg-spoiler></i>",
+        f"<i>🔹 <tg-spoiler>{ru_txt}</tg-spoiler></i>",
 
     ]
     if hint_txt:
