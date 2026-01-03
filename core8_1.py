@@ -2140,7 +2140,7 @@ async def settings_notify_cb(callback: CallbackQuery, state: FSMContext):
     await state.set_state("settings_inline_input")  # 💬 включаем режим ввода из настроек
 
     await callback.message.edit_text(
-        "⏰ Во сколько присылать напоминание? Введи время HH:MM (например 09:00):",
+        "⏰ Введи час уведомления числом 1–24 (время Мадрида)\n24 = 00:00",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")]
         ])
@@ -2151,71 +2151,126 @@ async def settings_notify_cb(callback: CallbackQuery, state: FSMContext):
 async def settings_inline_input_router(message: Message, state: FSMContext):
     data = await state.get_data()
     wait = data.get("_settings_wait")
-    prev_state = data.get("_settings_prev_state")  # 💬 куда вернуться после ввода
+    prev_state = data.get("_settings_prev_state")
 
     if wait not in ("limit", "notify"):
-        return  # 💬 не наше состояние
-# 💬 не наше состояние
+        return  # 💬 не наше состояние ввода
 
     user_data = load_user_data()
     user_id = str(message.from_user.id)
     user_data.setdefault(user_id, {}).setdefault("settings", {})
 
+    chat_id = data.get("settings_chat_id") or message.chat.id
+    msg_id  = data.get("settings_msg_id")
+
+    # ─────────────────────────────────────────────────────────────
+    # LIMIT WORDS
+    # ─────────────────────────────────────────────────────────────
     if wait == "limit":
         try:
-            val = int(message.text.strip())
+            val = int((message.text or "").strip())
             if val < 1 or val > 500:
                 raise ValueError
         except Exception:
-            await message.answer("⚠️ Введи число от 1 до 500.")
+            await message.answer("⚠️ Введи число от 1 до 500")  # 💬 защита от мусорного ввода
             return
 
+        user_data[user_id]["settings"]["daily_limit_words"] = val  # 💬 реально сохраняем лимит (раньше этого не было)
         save_user_data(user_data)
-        
-        # 💬 возвращаем экран настроек (без “зависаний”)
-        data = await state.get_data()
-        chat_id = data.get("_settings_chat_id") or message.chat.id
-        msg_id = data.get("_settings_msg_id")
-        
-        settings = user_data.get(user_id, {}).get("settings", {})
+
+        # 💬 короткое подтверждение, которое само удалится через 3 секунды
+        asyncio.create_task(
+            send_and_auto_delete_text(bot, chat_id, f"✅ Сохранено = {val}", delay=3.0)
+        )
+
+        # 💬 обновляем меню настроек (редактируем исходное сообщение)
+        settings = user_data[user_id]["settings"]
         daily_limit_words = settings.get("daily_limit_words", 20)
         notify_time = settings.get("notify_time", "09:00")
-        
+
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL),
-                InlineKeyboardButton(text="Лимит слов", callback_data="settings:limit"),
-            ],
-            [
-                InlineKeyboardButton(text="Время уведомления", callback_data="settings:notify"),
-                InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back"),
-            ],
-        ])  # 💬 меню настроек (инлайн 4 кнопки)
-        
+            [InlineKeyboardButton(text="🔢 Limit слов", callback_data="settings:limit")],
+            [InlineKeyboardButton(text="⏰ Время уведомления", callback_data="settings:notify")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")]
+        ])
+
         txt = (
-            "⚙️ <b>Настройки</b>\n\n"
-            f"📌 Лимит слов в день = <b>{daily_limit_words}</b>\n"
-            f"⏰ Время уведомления = <b>{notify_time}</b>\n\n"
-            "Выбери действие:"
-        )  # 💬 показываем текущие значения настроек
-        
+            "<b>⚙️ Настройки</b>\n\n"
+            f"🔢 Limit слов в день: <b>{daily_limit_words}</b>\n"
+            f"⏰ Уведомление: <b>{notify_time}</b>\n"
+        )
+
         if msg_id:
             try:
-                await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=txt, reply_markup=kb)  # 💬 не плодим новые сообщения
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    text=txt,
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
             except Exception:
-                await message.answer(txt, reply_markup=kb)  # 💬 fallback если edit_message_text нельзя
-        else:
-            await message.answer(txt, reply_markup=kb)  # 💬 fallback если нет msg_id
-        
-        await state.update_data(_settings_wait=None, _settings_prev_state=None, _settings_chat_id=None, _settings_msg_id=None)  # 💬 чистим флаги ожидания
-        await state.set_state(prev_state if prev_state else LessonStates.choosing_category)  # 💬 возвращаем состояние
+                pass  # 💬 если исходное сообщение уже удалено/не редактируется
 
+        await state.update_data(_settings_wait=None, _settings_prev_state=None)  # 💬 выходим из режима ввода
+        await state.set_state(prev_state if prev_state else LessonStates.choosing_category)
+        return
 
+    # ─────────────────────────────────────────────────────────────
+    # NOTIFY TIME (1–24 Madrid)
+    # ─────────────────────────────────────────────────────────────
     if wait == "notify":
-        t = message.text.strip()
-        if not re.match(r"^\d{2}:\d{2}$", t):
-            await message.answer("⚠️ Формат должен быть HH:MM, например 09:00.")
+        try:
+            hour = int((message.text or "").strip())
+            if hour < 1 or hour > 24:
+                raise ValueError
+        except Exception:
+            await message.answer("⚠️ Введи час числом от 1 до 24\n24 = 00:00")  # 💬 защита от мусорного ввода
             return
+
+        hour_norm = 0 if hour == 24 else hour
+        notify_time = f"{hour_norm:02d}:00"  # 💬 храним как HH:00, ввод всегда по Мадриду
+
+        user_data[user_id]["settings"]["notify_time"] = notify_time  # 💬 сохраняем время уведомления
+        save_user_data(user_data)
+
+        # 💬 короткое подтверждение, которое само удалится через 3 секунды
+        asyncio.create_task(
+            send_and_auto_delete_text(bot, chat_id, f"✅ Сохранено = {notify_time}", delay=3.0)
+        )
+
+        # 💬 обновляем меню настроек
+        settings = user_data[user_id]["settings"]
+        daily_limit_words = settings.get("daily_limit_words", 20)
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔢 Limit слов", callback_data="settings:limit")],
+            [InlineKeyboardButton(text="⏰ Время уведомления", callback_data="settings:notify")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")]
+        ])
+
+        txt = (
+            "<b>⚙️ Настройки</b>\n\n"
+            f"🔢 Limit слов в день: <b>{daily_limit_words}</b>\n"
+            f"⏰ Уведомление: <b>{notify_time}</b>\n"
+        )
+
+        if msg_id:
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    text=txt,
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass  # 💬 если исходное сообщение уже удалено/не редактируется
+
+        await state.update_data(_settings_wait=None, _settings_prev_state=None)  # 💬 выходим из режима ввода
+        await state.set_state(prev_state if prev_state else LessonStates.choosing_category)
+        return
+
 
         user_data[user_id]["settings"]["notify_time"] = t  # 💬 сохраняем время
         save_user_data(user_data)
