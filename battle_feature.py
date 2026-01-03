@@ -524,6 +524,12 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
             options = list(q.get("options") or [])
             correct = int(q.get("correct_index") or 0)
 
+            # 💬 поддержка переносов строк в вопросе/вариантах (админ вводит как \n)
+            question = question.replace("\\n", "\n")
+            question = question.replace("\n", "\n\u200b")  # 💬 фикс: Telegram иногда схлопывает перенос, добавляем zero-width
+            options = [str(x).replace("\\n", "\n") for x in options]
+
+
             options = options[:10]  # Telegram limit
             if not options:
                 continue
@@ -1015,15 +1021,17 @@ async def battle_topics_bulk_quiz(message: Message, state: FSMContext):
 
         q, correct, wrong1, wrong2 = parts[0], parts[1], parts[2], parts[3]
 
-            # 💬 поддержка переносов строк через \n в админ-вводе
-            q = q.replace("\\n", "\n")
-            correct = correct.replace("\\n", "\n")
-            wrong1 = wrong1.replace("\\n", "\n")
-            wrong2 = wrong2.replace("\\n", "\n")
+        # 💬 поддержка переносов строк через \n в админ-вводе
+        q = q.replace("\\n", "\n")
+        correct = correct.replace("\\n", "\n")
+        wrong1 = wrong1.replace("\\n", "\n")
+        wrong2 = wrong2.replace("\\n", "\n")
 
         expl = parts[4] if len(parts) >= 5 else ""
-            if expl:
-                expl = expl.replace("\\n", "\n")
+        if expl:
+            expl = expl.replace("\\n", "\n")  # 💬 переносы строк в объяснении тоже поддерживаем
+
+
 
         if not expl or expl == "-":
             expl = f"Неверно. Правильно: {correct}."
