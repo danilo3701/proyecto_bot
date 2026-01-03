@@ -2039,6 +2039,8 @@ async def settings_menu(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "settings:back")
 async def settings_back_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    await state.update_data(_settings_wait=None, _settings_prev_state=None, _settings_chat_id=None, _settings_msg_id=None)  # 💬 чистим флаги ожидания ввода
+
     # 💬 возвращаем главное меню без нового сообщения
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
@@ -2068,6 +2070,11 @@ async def settings_limit_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     # 💬 просим число, дальше обработает отдельный input-хендлер
     prev_state = await state.get_state()  # 💬 запоминаем состояние, чтобы вернуть после ввода
+    await state.update_data(
+        _settings_chat_id=callback.message.chat.id,   # 💬 чтобы вернуть экран настроек без новых сообщений
+        _settings_msg_id=callback.message.message_id  # 💬 чтобы вернуть экран настроек без новых сообщений
+    )
+
     await state.update_data(_settings_wait="limit", _settings_prev_state=prev_state)  # 💬 ждём ввод лимита
     await state.set_state("settings_inline_input")  # 💬 включаем режим ввода из настроек
 
@@ -2082,11 +2089,18 @@ async def settings_limit_cb(callback: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "settings:notify")
 async def settings_notify_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    # 💬 просим время, дальше обработает отдельный input-хендлер
-    await state.update_data(_settings_wait=None, _settings_prev_state=None)  # 💬 сбрасываем режим ожидания ввода из настроек
-    await state.update_data(_settings_wait="notify")
+
+    prev_state = await state.get_state()  # 💬 запоминаем состояние, чтобы вернуть после ввода
+    await state.update_data(
+        _settings_wait="notify",                      # 💬 ждём ввод времени
+        _settings_prev_state=prev_state,              # 💬 куда вернуть FSM после ввода
+        _settings_chat_id=callback.message.chat.id,   # 💬 чтобы вернуть экран настроек без новых сообщений
+        _settings_msg_id=callback.message.message_id  # 💬 чтобы вернуть экран настроек без новых сообщений
+    )
+    await state.set_state("settings_inline_input")  # 💬 включаем режим ввода из настроек
+
     await callback.message.edit_text(
-        "⏰ Введи время уведомления в формате HH:MM (например 09:00):",
+        "⏰ Во сколько присылать напоминание? Введи время HH:MM (например 09:00):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")]
         ])
@@ -2116,10 +2130,44 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
             await message.answer("⚠️ Введи число от 1 до 500.")
             return
 
-        user_data[user_id]["settings"]["daily_limit_words"] = val  # 💬 сохраняем лимит
         save_user_data(user_data)
-        await message.answer("✅ Лимит сохранён. Открой Настройки ещё раз.")
-        await state.update_data(_settings_wait=None, _settings_prev_state=None)  # 💬 чистим флаги ожидания
+        
+        # 💬 возвращаем экран настроек (без “зависаний”)
+        data = await state.get_data()
+        chat_id = data.get("_settings_chat_id") or message.chat.id
+        msg_id = data.get("_settings_msg_id")
+        
+        settings = user_data.get(user_id, {}).get("settings", {})
+        daily_limit_words = settings.get("daily_limit_words", 20)
+        notify_time = settings.get("notify_time", "09:00")
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL),
+                InlineKeyboardButton(text="Лимит слов", callback_data="settings:limit"),
+            ],
+            [
+                InlineKeyboardButton(text="Время уведомления", callback_data="settings:notify"),
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back"),
+            ],
+        ])  # 💬 меню настроек (инлайн 4 кнопки)
+        
+        txt = (
+            "⚙️ <b>Настройки</b>\n\n"
+            f"📌 Лимит слов в день = <b>{daily_limit_words}</b>\n"
+            f"⏰ Время уведомления = <b>{notify_time}</b>\n\n"
+            "Выбери действие:"
+        )  # 💬 показываем текущие значения настроек
+        
+        if msg_id:
+            try:
+                await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=txt, reply_markup=kb)  # 💬 не плодим новые сообщения
+            except Exception:
+                await message.answer(txt, reply_markup=kb)  # 💬 fallback если edit_message_text нельзя
+        else:
+            await message.answer(txt, reply_markup=kb)  # 💬 fallback если нет msg_id
+        
+        await state.update_data(_settings_wait=None, _settings_prev_state=None, _settings_chat_id=None, _settings_msg_id=None)  # 💬 чистим флаги ожидания
         await state.set_state(prev_state if prev_state else LessonStates.choosing_category)  # 💬 возвращаем состояние
 
 
@@ -2131,11 +2179,45 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
 
         user_data[user_id]["settings"]["notify_time"] = t  # 💬 сохраняем время
         save_user_data(user_data)
-        await message.answer("✅ Время сохранено. Открой Настройки ещё раз.")
-        await state.update_data(_settings_wait=None, _settings_prev_state=None)  # 💬 чистим флаги ожидания
+        
+        # 💬 возвращаем экран настроек (без “зависаний”)
+        data = await state.get_data()
+        chat_id = data.get("_settings_chat_id") or message.chat.id
+        msg_id = data.get("_settings_msg_id")
+        
+        settings = user_data.get(user_id, {}).get("settings", {})
+        daily_limit_words = settings.get("daily_limit_words", 20)
+        notify_time = settings.get("notify_time", "09:00")
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL),
+                InlineKeyboardButton(text="Лимит слов", callback_data="settings:limit"),
+            ],
+            [
+                InlineKeyboardButton(text="Время уведомления", callback_data="settings:notify"),
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back"),
+            ],
+        ])  # 💬 меню настроек (инлайн 4 кнопки)
+        
+        txt = (
+            "⚙️ <b>Настройки</b>\n\n"
+            f"📌 Лимит слов в день = <b>{daily_limit_words}</b>\n"
+            f"⏰ Время уведомления = <b>{notify_time}</b>\n\n"
+            "Выбери действие:"
+        )  # 💬 показываем текущие значения настроек
+        
+        if msg_id:
+            try:
+                await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=txt, reply_markup=kb)  # 💬 не плодим новые сообщения
+            except Exception:
+                await message.answer(txt, reply_markup=kb)  # 💬 fallback если edit_message_text нельзя
+        else:
+            await message.answer(txt, reply_markup=kb)  # 💬 fallback если нет msg_id
+        
+        await state.update_data(_settings_wait=None, _settings_prev_state=None, _settings_chat_id=None, _settings_msg_id=None)  # 💬 чистим флаги ожидания
         await state.set_state(prev_state if prev_state else LessonStates.choosing_category)  # 💬 возвращаем состояние
-
-
+        
 
 
 
