@@ -335,6 +335,7 @@ async def podcasts_open(message: Message, state: FSMContext) -> None:
         pod_frag_msg_id=None,
         pod_nav_msg_id=None,
         pod_hint_msg_id=None,
+        pod_audio_msg_id=None,  # 💬 id аудио текущего эпизода
     )
 
     try:
@@ -423,6 +424,8 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
     ep_id = cb.data.split(":")[-1]
     data = _read_podcasts()
     ep = data.get("episodes", {}).get(ep_id)
+    st = await state.get_data()  # 💬 берём прошлые msg_id (аудио/прочее) для чистки
+
 
     if not ep:
         await cb.answer("Эпизод не найден", show_alert=True)
@@ -440,6 +443,11 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
     except Exception:
         pass
 
+    old_audio_id = st.get("pod_audio_msg_id")
+    if old_audio_id:
+        await _safe_delete_message(cb.bot, cb.message.chat.id, int(old_audio_id))  # 💬 удаляем прошлое аудио, чтобы не копилось
+
+
     # 💬 1) сначала аудио
     audio_file_id = ep.get("audio_file_id")
     audio_type = ep.get("audio_type", "audio")
@@ -447,9 +455,12 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
     if audio_file_id:
         try:
             if audio_type == "voice":
-                await cb.bot.send_voice(chat_id=cb.message.chat.id, voice=audio_file_id)  # 💬 шлём напрямую через bot
+                audio_msg = await cb.bot.send_voice(chat_id=cb.message.chat.id, voice=audio_file_id)  # 💬 шлём аудио и сохраняем msg_id
             else:
-                await cb.bot.send_audio(chat_id=cb.message.chat.id, audio=audio_file_id)  # 💬 шлём напрямую через bot
+                audio_msg = await cb.bot.send_audio(chat_id=cb.message.chat.id, audio=audio_file_id)  # 💬 шлём аудио и сохраняем msg_id
+
+            await state.update_data(pod_audio_msg_id=audio_msg.message_id)  # 💬 запоминаем id аудио для удаления по Back
+
         except Exception:
             await cb.bot.send_message(
                 chat_id=cb.message.chat.id,
@@ -478,13 +489,19 @@ async def pod_back_inline(cb: CallbackQuery, state: FSMContext) -> None:
     # 💬 Back = удалить фрагмент и заново показать список эпизодов
     st = await state.get_data()
     author_id = st.get("pod_author_id")
+    audio_id = st.get("pod_audio_msg_id")  # 💬 аудио текущего эпизода
 
-    await state.update_data(pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
+
+    await state.update_data(pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None, pod_audio_msg_id=None)  # 💬 очищаем id аудио
+
 
     try:
         await cb.message.delete()  # 💬 удаляем сообщение с фрагментом
     except Exception:
         pass
+    if audio_id:
+        await _safe_delete_message(cb.bot, cb.message.chat.id, int(audio_id))  # 💬 удаляем аудио вместе с эпизодом
+
 
     data = _read_podcasts()
     if author_id:
