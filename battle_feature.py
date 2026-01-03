@@ -7,6 +7,8 @@ import json
 import time
 import random
 import asyncio
+from scenarios_estiloso8_1 import menu_study_phrases  # 💬 рандомные фразы для меню
+
 from dataclasses import dataclass, field 
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote  # 💬 кодируем text/url для t.me/share/url
@@ -58,22 +60,32 @@ def set_battle_links(contact_url: str, materials_url: str, bot_username: str = "
 
 
 def _battle_main_menu_kb() -> InlineKeyboardMarkup:
-    # 💬 главное меню, чтобы после выхода из битвы кнопки сразу работали
+    # 💬 главное меню, чтобы после выхода из битвы кнопки совпадали с core8_1
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
+
         [
             InlineKeyboardButton(text="📎 Материалы", url=(MATERIALS_POST_URL or "https://t.me/")),
-            InlineKeyboardButton(text="Связь 💬", url=(CONTACT_URL or "https://t.me/"))
+            InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
         ],
+
+        [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
+
         [
             InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
-            InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords")
+            InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
         ],
+
         [
             InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
-            InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")
+            InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
         ],
     ])
+
+def _battle_menu_text() -> str:
+    # 💬 рандомная фраза главного меню (как в core8_1)
+    return random.choice(menu_study_phrases) if menu_study_phrases else "Выбирай"
+
 
 
 # 💬 Ссылка на topics из core8_1 (чтобы не делать круговой импорт)
