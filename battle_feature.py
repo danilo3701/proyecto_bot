@@ -581,7 +581,12 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
                 except Exception:
                     pass
                 await state.clear()
-                await bot.send_message(chat_id=chat_id, text="Выбирай", reply_markup=_battle_main_menu_kb())  # 💬 возвращаем в меню
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=_battle_menu_text(),  # 💬 показываем рандомную фразу меню
+                    reply_markup=_battle_main_menu_kb()
+                )  # 💬 возвращаем в меню
+                
                 return
 
 
@@ -1186,7 +1191,6 @@ async def battle_close(callback: CallbackQuery, state: FSMContext):
 
     # 💬 важно: ставим состояние главного меню строкой (без импорта, чтобы не было circular import)
     await state.set_state("LessonStates:choosing_category")
-    await callback.message.answer("Выбирай", reply_markup=_battle_main_menu_kb())
-
+    await callback.message.answer(_battle_menu_text(), reply_markup=_battle_main_menu_kb())  # 💬 меню с рандомной фразой
 
 
