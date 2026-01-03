@@ -327,6 +327,8 @@ async def podcasts_open(message: Message, state: FSMContext) -> None:
 
     data = _read_podcasts()
     await state.update_data(pod_ctx=True, pod_author_id=None, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
+    pod_nav_msg_id=None,  # 💬 id "пустого" сообщения с reply-кнопками
+
     await message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
 
 
@@ -340,6 +342,7 @@ async def pod_checksub(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer("✅ Подписка ок", show_alert=False)
     data = _read_podcasts()
     await state.update_data(pod_ctx=True, pod_author_id=None, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
+    pod_nav_msg_id=None,  # 💬 id "пустого" сообщения с reply-кнопками
     await cb.message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
 
 
@@ -414,11 +417,28 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
         reply_markup=_kb_episode_back(),
     )  # 💬 оставляем кнопки отдельным сообщением, его не удаляем
 
+    nav_msg = await cb.message.answer(
+        "\u2060",
+        reply_markup=_kb_episode_back(),
+    )  # 💬 оставляем кнопки отдельным сообщением, его не удаляем
+
+    msg = await cb.message.answer(
+        text,
+        reply_markup=_kb_fragment_controls(),
+    )
+
+    # 💬 держим reply-кнопки отдельным "пустым" сообщением, чтобы авто-удаление текста их не убивало
+    kb_holder = await cb.message.answer(
+        "\u200b",  # 💬 невидимый символ, чтобы сообщение было "пустым", но кнопки остались
+        reply_markup=_kb_episode_back(),
+    )
+
+    # 💬 подсказка отдельным сообщением БЕЗ reply keyboard = можно безопасно удалять
     tip_msg = await cb.message.answer(
         "Навигация = кнопками ниже.\nНазад = кнопками внизу.",
-    )  # 💬 показываем подсказку текстом, её удаляем через 7 секунд
+    )
 
-    # 💬 удаляем только текст подсказки, кнопки остаются
+    # 💬 удаляем только текст-подсказку через 7 секунд, кнопки остаются
     async def _auto_delete_tip(m: Message) -> None:
         await asyncio.sleep(7)
         try:
@@ -429,6 +449,15 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
             pass
 
     asyncio.create_task(_auto_delete_tip(tip_msg))
+
+    await state.update_data(
+        pod_ep_id=ep_id,
+        pod_idx=idx,
+        pod_frag_msg_id=msg.message_id,
+        pod_nav_msg_id=kb_holder.message_id,  # 💬 запоминаем "держатель" reply-кнопок
+    )
+
+
 
 
     await state.update_data(pod_ep_id=ep_id, pod_idx=idx, pod_frag_msg_id=msg.message_id)
