@@ -287,22 +287,13 @@ def _kb_fragment_controls() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="◀️", callback_data="pod:prev"),
                 InlineKeyboardButton(text="⭐", callback_data="pod:star"),
+                InlineKeyboardButton(text="🏠", callback_data="pod:back"),
                 InlineKeyboardButton(text="▶️", callback_data="pod:next"),
             ]
         ]
-    )
+    )  # 💬 добавили Back рядом со звёздочкой без reply-кнопок
 
 
-def _kb_episode_back() -> ReplyKeyboardMarkup:
-    # 💬 "назад" только в reply keyboard (как ты хотел)
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="⬅️ К эпизодам"), KeyboardButton(text="🏠 К авторам")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=False,
-        selective=True,
-    )
 
 
 def _format_fragment(es: str, ru: str, hint: str = "") -> str:
@@ -428,8 +419,7 @@ async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("pod:ep:"))
 async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
-    st = await state.get_data()
-
+    # 💬 механика как раньше = сначала аудио, потом отдельным сообщением фрагмент с кнопками
     ep_id = cb.data.split(":")[-1]
     data = _read_podcasts()
     ep = data.get("episodes", {}).get(ep_id)
@@ -444,7 +434,7 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
     else:
         await cb.answer()
 
-    # 💬 отправляем аудио отдельным сообщением
+    # 💬 1) сначала аудио
     audio_file_id = ep.get("audio_file_id")
     audio_type = ep.get("audio_type", "audio")
 
@@ -452,64 +442,38 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
         try:
             if audio_type == "voice":
                 await cb.message.answer_voice(audio_file_id)
-                await asyncio.sleep(0.2)
-
             else:
                 await cb.message.answer_audio(audio_file_id)
-                await asyncio.sleep(0.2)
         except Exception:
             await cb.message.answer("⚠️ Не смог отправить аудио (file_id). Проверь, что эпизод добавлен правильно.")
 
     frags = ep.get("fragments", []) or []
-
-    # 💬 удаляем старую подсказку-навигацию (если была)
-    old_hint_id = st.get("pod_hint_msg_id")
-    if old_hint_id:
-        await _safe_delete_message(cb.bot, cb.message.chat.id, old_hint_id)
-
-    await state.update_data(
-        pod_ep_id=ep_id,
-        pod_idx=0,
-        pod_frag_msg_id=None,
-        pod_nav_msg_id=cb.message.message_id,  # 💬 “основное сообщение навигации”
-    )
+    await state.update_data(pod_ep_id=ep_id, pod_idx=0, pod_frag_msg_id=None)  # 💬 фиксируем текущий эпизод
 
     if not frags:
-        # 💬 заменяем меню эпизодов на сообщение “пока нет фрагментов”
-        kb_back = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")]]
-        )
-        try:
-            await cb.message.edit_text("Пока нет фрагментов для этого эпизода.", reply_markup=kb_back)
-        except Exception:
-            msg = await cb.message.answer("Пока нет фрагментов для этого эпизода.", reply_markup=kb_back)
-            await state.update_data(pod_nav_msg_id=msg.message_id)
-
-        kb_msg = await cb.message.answer("\u200b", reply_markup=_kb_episode_back())  # 💬 показываем кнопки “назад” без текста
-
-        tip_msg = await cb.message.answer("Навигация = кнопками ниже.\nНазад = кнопками внизу.")  # 💬 текст на 7 секунд
-        await state.update_data(pod_hint_msg_id=tip_msg.message_id)  # 💬 храним id именно текста, чтобы удалять только его
-        asyncio.create_task(_autodelete_message(cb.bot, cb.message.chat.id, tip_msg.message_id, 4))
+        await cb.message.answer("Пока нет фрагментов для этого эпизода.")  # 💬 без reply-кнопок и без “Навигации…”
         return
 
-
+    # 💬 2) потом фрагмент (отдельным сообщением)
     frag = frags[0]
     text = _format_fragment(frag.get("es", ""), frag.get("ru", ""), frag.get("hint", ""))
 
-    # 💬 заменяем меню эпизодов на экран фрагмента (НЕ создаём новое сообщение)
+    msg = await cb.message.answer(text, reply_markup=_kb_fragment_controls())
+    await state.update_data(pod_frag_msg_id=msg.message_id)  # 💬 чтобы знать, какое сообщение редактируем кнопками
+
+
+
+@router.callback_query(F.data == "pod:back")
+async def pod_back_inline(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 Back = убираем экран фрагмента, остаётся меню эпизодов (оно уже открыто выше)
+    await state.update_data(pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
+
     try:
-        await cb.message.edit_text(text, reply_markup=_kb_fragment_controls())
-        await state.update_data(pod_frag_msg_id=cb.message.message_id)
+        await cb.message.delete()  # 💬 удаляем только сообщение с фрагментом
     except Exception:
-        msg = await cb.message.answer(text, reply_markup=_kb_fragment_controls())
-        await state.update_data(pod_nav_msg_id=msg.message_id, pod_frag_msg_id=msg.message_id)
+        pass
 
-    kb_msg = await cb.message.answer("\u200b", reply_markup=_kb_episode_back())  # 💬 показываем кнопки “назад” без текста
-
-    tip_msg = await cb.message.answer("Навигация = кнопками ниже.\nНазад = кнопками внизу.")  # 💬 текст на 7 секунд
-    await state.update_data(pod_hint_msg_id=tip_msg.message_id)  # 💬 храним id именно текста, чтобы удалять только его
-    asyncio.create_task(_autodelete_message(cb.bot, cb.message.chat.id, tip_msg.message_id, 4))
-
+    await cb.answer()
 
 
 @router.callback_query(F.data.in_(["pod:prev", "pod:next", "pod:star"]))
@@ -573,57 +537,6 @@ async def pod_fragment_controls(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.answer()
     except Exception:
         await cb.answer("Не смог обновить экран", show_alert=False)
-
-@router.message(F.text.in_(["🏠 К авторам", "⬅️ К эпизодам"]))
-async def pod_reply_nav(message: Message, state: FSMContext) -> None:
-    st = await state.get_data()
-    if not st.get("pod_ctx"):
-        return
-
-    data = _read_podcasts()
-    chat_id = message.chat.id
-    nav_id = st.get("pod_nav_msg_id") or st.get("pod_frag_msg_id")
-
-    async def _edit_or_send(text: str, kb: InlineKeyboardMarkup) -> None:
-        # 💬 редактируем “основное сообщение навигации”, чтобы меню не копилось
-        nonlocal nav_id
-        if nav_id:
-            try:
-                await message.bot.edit_message_text(chat_id=chat_id, message_id=nav_id, text=text, reply_markup=kb)
-                return
-            except Exception:
-                pass
-
-        msg = await message.answer(text, reply_markup=kb)
-        nav_id = msg.message_id
-        await state.update_data(pod_nav_msg_id=nav_id)
-
-    if message.text == "🏠 К авторам":
-        await state.update_data(pod_author_id=None, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
-        await _edit_or_send("🎧 Выбери автора:", _kb_authors(data))
-
-        rm = await message.answer("\u200b", reply_markup=ReplyKeyboardRemove())  # 💬 скрытый символ, чтобы Telegram не ругался на пустой текст
-
-        asyncio.create_task(_autodelete_message(message.bot, chat_id, rm.message_id, 1))
-        return
-
-    # ⬅️ К эпизодам
-    author_id = st.get("pod_author_id")
-    if not author_id:
-        await state.update_data(pod_author_id=None, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
-        await _edit_or_send("🎧 Выбери автора:", _kb_authors(data))
-
-        rm = await message.answer("\u200b", reply_markup=ReplyKeyboardRemove())  # 💬 скрытый символ, чтобы Telegram не ругался на пустой текст
-
-        asyncio.create_task(_autodelete_message(message.bot, chat_id, rm.message_id, 1))
-        return
-
-    await state.update_data(pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
-    await _edit_or_send("Выбери эпизод:", _kb_episodes(data, author_id))
-
-    rm = await message.answer("\u200b", reply_markup=ReplyKeyboardRemove())  # 💬 скрытый символ, чтобы Telegram не ругался на пустой текст
-
-    asyncio.create_task(_autodelete_message(message.bot, chat_id, rm.message_id, 1))
 
 
 # -----------------------------
