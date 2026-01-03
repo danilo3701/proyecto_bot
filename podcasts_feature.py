@@ -201,11 +201,6 @@ async def _is_subscribed_main_channel(user_id: int) -> bool:
         channels = []  # 💬 если не смогли прочитать = не блокируем по ошибке
 
 
-
-
-    except Exception:
-        channels = []
-
     if not channels:
         return True
 
@@ -401,7 +396,7 @@ async def pod_back_authors(cb: CallbackQuery, state: FSMContext) -> None:
         await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 fallback
 
     await cb.answer()
-answer()
+
 
 
 async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
