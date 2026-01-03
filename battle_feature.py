@@ -1014,7 +1014,17 @@ async def battle_topics_bulk_quiz(message: Message, state: FSMContext):
             continue
 
         q, correct, wrong1, wrong2 = parts[0], parts[1], parts[2], parts[3]
+
+            # 💬 поддержка переносов строк через \n в админ-вводе
+            q = q.replace("\\n", "\n")
+            correct = correct.replace("\\n", "\n")
+            wrong1 = wrong1.replace("\\n", "\n")
+            wrong2 = wrong2.replace("\\n", "\n")
+
         expl = parts[4] if len(parts) >= 5 else ""
+            if expl:
+                expl = expl.replace("\\n", "\n")
+
         if not expl or expl == "-":
             expl = f"Неверно. Правильно: {correct}."
 
