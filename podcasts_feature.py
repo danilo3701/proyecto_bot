@@ -30,6 +30,20 @@ from aiogram.exceptions import TelegramBadRequest  # 💬 чтобы не пад
 
 router = Router()
 
+async def _safe_delete_message(bot, chat_id: int, message_id: int) -> None:
+    # 💬 безопасно удаляем сообщение (без падений, если уже удалено/нельзя удалить)
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:
+        pass
+
+
+async def _autodelete_message(bot, chat_id: int, message_id: int, delay: int = 7) -> None:
+    # 💬 удаляем сообщение через delay секунд, чтобы не засорять чат
+    await asyncio.sleep(delay)
+    await _safe_delete_message(bot, chat_id, message_id)
+
+
 # -----------------------------
 # 🔧 DI (проброс из core8_1.py)
 # -----------------------------
@@ -316,13 +330,14 @@ def _format_fragment(es: str, ru: str, hint: str = "") -> str:
 # 👤 USER FLOW
 # -----------------------------
 async def podcasts_open(message: Message, state: FSMContext) -> None:
-    # 💬 точка входа из core8_1.py (menu:podcasts)
+    # 💬 точка входа из core8_1.py (menu:podcasts) = заменяем главное меню, а не шлём новое
     ok = await _is_subscribed_main_channel(message.from_user.id)
     if not ok:
-        await message.answer(
-            "🔒 Подкасты доступны после подписки на канал.\n\nНажми кнопку ниже и потом = проверить подписку.",
-            reply_markup=_kb_subscribe_check(),
-        )
+        text = "🔒 Подкасты доступны после подписки на канал.\n\nНажми кнопку ниже и потом = проверить подписку."
+        try:
+            await message.edit_text(text, reply_markup=_kb_subscribe_check())
+        except Exception:
+            await message.answer(text, reply_markup=_kb_subscribe_check())
         return
 
     data = _read_podcasts()
@@ -332,14 +347,18 @@ async def podcasts_open(message: Message, state: FSMContext) -> None:
         pod_ep_id=None,
         pod_idx=0,
         pod_frag_msg_id=None,
-        pod_nav_msg_id=None,  # 💬 id "держателя" reply-кнопок
+        pod_nav_msg_id=None,
+        pod_hint_msg_id=None,
     )
 
+    try:
+        await message.edit_text("🎧 Выбери автора:", reply_markup=_kb_authors(data))
+        await state.update_data(pod_nav_msg_id=message.message_id)  # 💬 запоминаем “главное сообщение навигации”
+    except Exception:
+        msg = await message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
+        await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 если edit невозможен
 
-    await message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
 
-
-@router.callback_query(F.data == "pod:checksub")
 async def pod_checksub(cb: CallbackQuery, state: FSMContext) -> None:
     ok = await _is_subscribed_main_channel(cb.from_user.id)
     if not ok:
@@ -348,20 +367,43 @@ async def pod_checksub(cb: CallbackQuery, state: FSMContext) -> None:
 
     await cb.answer("✅ Подписка ок", show_alert=False)
     data = _read_podcasts()
-    await state.update_data(pod_ctx=True, pod_author_id=None, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
-    pod_nav_msg_id=None,  # 💬 id "пустого" сообщения с reply-кнопками
-    await cb.message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
+    await state.update_data(
+        pod_ctx=True,
+        pod_author_id=None,
+        pod_ep_id=None,
+        pod_idx=0,
+        pod_frag_msg_id=None,
+        pod_nav_msg_id=cb.message.message_id,
+    )
+
+    try:
+        await cb.message.edit_text("🎧 Выбери автора:", reply_markup=_kb_authors(data))
+    except Exception:
+        msg = await cb.message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
+        await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 fallback
 
 
-@router.callback_query(F.data == "pod:authors")
+
 async def pod_back_authors(cb: CallbackQuery, state: FSMContext) -> None:
     data = _read_podcasts()
-    await state.update_data(pod_author_id=None, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
-    await cb.message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
+    await state.update_data(
+        pod_author_id=None,
+        pod_ep_id=None,
+        pod_idx=0,
+        pod_frag_msg_id=None,
+        pod_nav_msg_id=cb.message.message_id,  # 💬 остаёмся в том же “нав-сообщении”
+    )
+
+    try:
+        await cb.message.edit_text("🎧 Выбери автора:", reply_markup=_kb_authors(data))
+    except Exception:
+        msg = await cb.message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
+        await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 fallback
+
     await cb.answer()
+answer()
 
 
-@router.callback_query(F.data.startswith("pod:author:"))
 async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
     author_id = cb.data.split(":")[-1]
     data = _read_podcasts()
@@ -371,13 +413,28 @@ async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.answer("Автор не найден", show_alert=True)
         return
 
-    await state.update_data(pod_author_id=author_id, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
-    await cb.message.answer(f"🎙 {author.get('name','Автор')}\n\nВыбери эпизод:", reply_markup=_kb_episodes(data, author_id))
+    await state.update_data(
+        pod_author_id=author_id,
+        pod_ep_id=None,
+        pod_idx=0,
+        pod_frag_msg_id=None,
+        pod_nav_msg_id=cb.message.message_id,  # 💬 меню “живёт” в одном сообщении
+    )
+
+    text = f"🎙 {author.get('name','Автор')}\n\nВыбери эпизод:"
+    try:
+        await cb.message.edit_text(text, reply_markup=_kb_episodes(data, author_id))
+    except Exception:
+        msg = await cb.message.answer(text, reply_markup=_kb_episodes(data, author_id))
+        await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 fallback
+
     await cb.answer()
 
 
-@router.callback_query(F.data.startswith("pod:ep:"))
+
 async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
+    st = await state.get_data()
+
     ep_id = cb.data.split(":")[-1]
     data = _read_podcasts()
     ep = data.get("episodes", {}).get(ep_id)
@@ -406,48 +463,55 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
             await cb.message.answer("⚠️ Не смог отправить аудио (file_id). Проверь, что эпизод добавлен правильно.")
 
     frags = ep.get("fragments", []) or []
-    if not frags:
-        await cb.message.answer("Пока нет фрагментов для этого эпизода.")
-        await state.update_data(pod_ep_id=ep_id, pod_idx=0, pod_frag_msg_id=None)
-        return
 
-    idx = 0
-    frag = frags[idx]
-    msg = await cb.message.answer(
-        text,
-        reply_markup=_kb_fragment_controls(),
-    )
-
-    # 💬 держим reply-кнопки отдельным сообщением (безопасный невидимый символ)
-    kb_holder = await cb.message.answer(
-        "\u200b",  # 💬 чтобы Telegram не ругался на пустой текст
-        reply_markup=_kb_episode_back(),
-    )
-
-    # 💬 подсказка отдельным сообщением БЕЗ reply keyboard = можно безопасно удалять
-    tip_msg = await cb.message.answer(
-        "Навигация = кнопками ниже.\nНазад = кнопками внизу.",
-    )
-
-    # 💬 удаляем только текст подсказки, кнопки остаются
-    async def _auto_delete_tip(m: Message) -> None:
-        await asyncio.sleep(7)
-        try:
-            await m.delete()
-        except TelegramBadRequest:
-            pass
-        except Exception:
-            pass
-
-    asyncio.create_task(_auto_delete_tip(tip_msg))
+    # 💬 удаляем старую подсказку-навигацию (если была)
+    old_hint_id = st.get("pod_hint_msg_id")
+    if old_hint_id:
+        await _safe_delete_message(cb.bot, cb.message.chat.id, old_hint_id)
 
     await state.update_data(
         pod_ep_id=ep_id,
-        pod_idx=idx,
-        pod_frag_msg_id=msg.message_id,
-        pod_nav_msg_id=kb_holder.message_id,  # 💬 запоминаем id "держателя" reply-кнопок
+        pod_idx=0,
+        pod_frag_msg_id=None,
+        pod_nav_msg_id=cb.message.message_id,  # 💬 “основное сообщение навигации”
     )
 
+    if not frags:
+        # 💬 заменяем меню эпизодов на сообщение “пока нет фрагментов”
+        kb_back = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")]]
+        )
+        try:
+            await cb.message.edit_text("Пока нет фрагментов для этого эпизода.", reply_markup=kb_back)
+        except Exception:
+            msg = await cb.message.answer("Пока нет фрагментов для этого эпизода.", reply_markup=kb_back)
+            await state.update_data(pod_nav_msg_id=msg.message_id)
+
+        hint_msg = await cb.message.answer(
+            "Навигация = кнопками ниже.\nНазад = кнопками внизу.",
+            reply_markup=_kb_episode_back(),
+        )
+        await state.update_data(pod_hint_msg_id=hint_msg.message_id)
+        asyncio.create_task(_autodelete_message(cb.bot, cb.message.chat.id, hint_msg.message_id, 7))
+        return
+
+    frag = frags[0]
+    text = _format_fragment(frag.get("es", ""), frag.get("ru", ""), frag.get("hint", ""))
+
+    # 💬 заменяем меню эпизодов на экран фрагмента (НЕ создаём новое сообщение)
+    try:
+        await cb.message.edit_text(text, reply_markup=_kb_fragment_controls())
+        await state.update_data(pod_frag_msg_id=cb.message.message_id)
+    except Exception:
+        msg = await cb.message.answer(text, reply_markup=_kb_fragment_controls())
+        await state.update_data(pod_nav_msg_id=msg.message_id, pod_frag_msg_id=msg.message_id)
+
+    hint_msg = await cb.message.answer(
+        "Навигация = кнопками ниже.\nНазад = кнопками внизу.",
+        reply_markup=_kb_episode_back(),
+    )
+    await state.update_data(pod_hint_msg_id=hint_msg.message_id)
+    asyncio.create_task(_autodelete_message(cb.bot, cb.message.chat.id, hint_msg.message_id, 7))
 
 
 @router.callback_query(F.data.in_(["pod:prev", "pod:next", "pod:star"]))
@@ -513,39 +577,52 @@ async def pod_fragment_controls(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.answer("Не смог обновить экран", show_alert=False)
 
 
-@router.message(F.text.in_(["⬅️ К эпизодам", "🏠 К авторам"]))
 async def pod_reply_nav(message: Message, state: FSMContext) -> None:
     st = await state.get_data()
     if not st.get("pod_ctx"):
         return
 
     data = _read_podcasts()
-    
-    nav_id = st.get("pod_nav_msg_id")
-    if nav_id:
-        try:
-            await message.bot.delete_message(message.chat.id, int(nav_id))
-        except Exception:
-            pass  # 💬 что делает эта часть: тихо чистим "пустой держатель" кнопок, чтобы не копился
+    chat_id = message.chat.id
+    nav_id = st.get("pod_nav_msg_id") or st.get("pod_frag_msg_id")
 
+    async def _edit_or_send(text: str, kb: InlineKeyboardMarkup) -> None:
+        # 💬 редактируем “основное сообщение навигации”, чтобы меню не копилось
+        nonlocal nav_id
+        if nav_id:
+            try:
+                await message.bot.edit_message_text(chat_id=chat_id, message_id=nav_id, text=text, reply_markup=kb)
+                return
+            except Exception:
+                pass
+
+        msg = await message.answer(text, reply_markup=kb)
+        nav_id = msg.message_id
+        await state.update_data(pod_nav_msg_id=nav_id)
 
     if message.text == "🏠 К авторам":
         await state.update_data(pod_author_id=None, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
-        await message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
-        await message.answer("\u200b", reply_markup=ReplyKeyboardRemove())  # 💬 скрытый символ, чтобы Telegram не ругался на пустой текст
+        await _edit_or_send("🎧 Выбери автора:", _kb_authors(data))
+
+        rm = await message.answer(" ", reply_markup=ReplyKeyboardRemove())  # 💬 убираем клавиатуру “назад”
+        asyncio.create_task(_autodelete_message(message.bot, chat_id, rm.message_id, 1))
         return
 
     # ⬅️ К эпизодам
     author_id = st.get("pod_author_id")
     if not author_id:
-        await message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
-        await message.answer("\u200b", reply_markup=ReplyKeyboardRemove())  # 💬 скрытый символ, чтобы Telegram не ругался на пустой текст
+        await state.update_data(pod_author_id=None, pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
+        await _edit_or_send("🎧 Выбери автора:", _kb_authors(data))
+
+        rm = await message.answer(" ", reply_markup=ReplyKeyboardRemove())  # 💬 убираем клавиатуру “назад”
+        asyncio.create_task(_autodelete_message(message.bot, chat_id, rm.message_id, 1))
         return
 
     await state.update_data(pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
-    await message.answer("Выбери эпизод:", reply_markup=_kb_episodes(data, author_id))
-    await message.answer("\u200b", reply_markup=ReplyKeyboardRemove())  # 💬 чтобы Telegram не ругался на пустой текст
+    await _edit_or_send("Выбери эпизод:", _kb_episodes(data, author_id))
 
+    rm = await message.answer(" ", reply_markup=ReplyKeyboardRemove())  # 💬 убираем клавиатуру “назад”
+    asyncio.create_task(_autodelete_message(message.bot, chat_id, rm.message_id, 1))
 
 
 # -----------------------------
