@@ -434,6 +434,12 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
     else:
         await cb.answer()
 
+    # 💬 удаляем меню "Выбери эпизод", чтобы не копилось в чате
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+
     # 💬 1) сначала аудио
     audio_file_id = ep.get("audio_file_id")
     audio_type = ep.get("audio_type", "audio")
@@ -441,11 +447,15 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
     if audio_file_id:
         try:
             if audio_type == "voice":
-                await cb.message.answer_voice(audio_file_id)
+                await cb.bot.send_voice(chat_id=cb.message.chat.id, voice=audio_file_id)  # 💬 шлём напрямую через bot
             else:
-                await cb.message.answer_audio(audio_file_id)
+                await cb.bot.send_audio(chat_id=cb.message.chat.id, audio=audio_file_id)  # 💬 шлём напрямую через bot
         except Exception:
-            await cb.message.answer("⚠️ Не смог отправить аудио (file_id). Проверь, что эпизод добавлен правильно.")
+            await cb.bot.send_message(
+                chat_id=cb.message.chat.id,
+                text="⚠️ Не смог отправить аудио (file_id). Проверь, что эпизод добавлен правильно.",
+            )
+
 
     frags = ep.get("fragments", []) or []
     await state.update_data(pod_ep_id=ep_id, pod_idx=0, pod_frag_msg_id=None)  # 💬 фиксируем текущий эпизод
@@ -465,15 +475,33 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "pod:back")
 async def pod_back_inline(cb: CallbackQuery, state: FSMContext) -> None:
-    # 💬 Back = убираем экран фрагмента, остаётся меню эпизодов (оно уже открыто выше)
+    # 💬 Back = удалить фрагмент и заново показать список эпизодов
+    st = await state.get_data()
+    author_id = st.get("pod_author_id")
+
     await state.update_data(pod_ep_id=None, pod_idx=0, pod_frag_msg_id=None)
 
     try:
-        await cb.message.delete()  # 💬 удаляем только сообщение с фрагментом
+        await cb.message.delete()  # 💬 удаляем сообщение с фрагментом
     except Exception:
         pass
 
+    data = _read_podcasts()
+    if author_id:
+        await cb.bot.send_message(
+            chat_id=cb.message.chat.id,
+            text="Выбери эпизод:",
+            reply_markup=_kb_episodes(data, author_id),
+        )  # 💬 возвращаем список эпизодов
+    else:
+        await cb.bot.send_message(
+            chat_id=cb.message.chat.id,
+            text="🎧 Выбери автора:",
+            reply_markup=_kb_authors(data),
+        )  # 💬 fallback, если author_id потерялся
+
     await cb.answer()
+
 
 
 @router.callback_query(F.data.in_(["pod:prev", "pod:next", "pod:star"]))
