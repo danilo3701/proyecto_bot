@@ -452,8 +452,11 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
         try:
             if audio_type == "voice":
                 await cb.message.answer_voice(audio_file_id)
+                await asyncio.sleep(0.2)
+
             else:
                 await cb.message.answer_audio(audio_file_id)
+                await asyncio.sleep(0.2)
         except Exception:
             await cb.message.answer("⚠️ Не смог отправить аудио (file_id). Проверь, что эпизод добавлен правильно.")
 
@@ -482,13 +485,13 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
             msg = await cb.message.answer("Пока нет фрагментов для этого эпизода.", reply_markup=kb_back)
             await state.update_data(pod_nav_msg_id=msg.message_id)
 
-        hint_msg = await cb.message.answer(
-            "Навигация = кнопками ниже.\nНазад = кнопками внизу.",
-            reply_markup=_kb_episode_back(),
-        )
-        await state.update_data(pod_hint_msg_id=hint_msg.message_id)
-        asyncio.create_task(_autodelete_message(cb.bot, cb.message.chat.id, hint_msg.message_id, 7))
+        kb_msg = await cb.message.answer("\u200b", reply_markup=_kb_episode_back())  # 💬 показываем кнопки “назад” без текста
+
+        tip_msg = await cb.message.answer("Навигация = кнопками ниже.\nНазад = кнопками внизу.")  # 💬 текст на 7 секунд
+        await state.update_data(pod_hint_msg_id=tip_msg.message_id)  # 💬 храним id именно текста, чтобы удалять только его
+        asyncio.create_task(_autodelete_message(cb.bot, cb.message.chat.id, tip_msg.message_id, 4))
         return
+
 
     frag = frags[0]
     text = _format_fragment(frag.get("es", ""), frag.get("ru", ""), frag.get("hint", ""))
@@ -501,12 +504,12 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
         msg = await cb.message.answer(text, reply_markup=_kb_fragment_controls())
         await state.update_data(pod_nav_msg_id=msg.message_id, pod_frag_msg_id=msg.message_id)
 
-    hint_msg = await cb.message.answer(
-        "Навигация = кнопками ниже.\nНазад = кнопками внизу.",
-        reply_markup=_kb_episode_back(),
-    )
-    await state.update_data(pod_hint_msg_id=hint_msg.message_id)
-    asyncio.create_task(_autodelete_message(cb.bot, cb.message.chat.id, hint_msg.message_id, 7))
+    kb_msg = await cb.message.answer("\u200b", reply_markup=_kb_episode_back())  # 💬 показываем кнопки “назад” без текста
+
+    tip_msg = await cb.message.answer("Навигация = кнопками ниже.\nНазад = кнопками внизу.")  # 💬 текст на 7 секунд
+    await state.update_data(pod_hint_msg_id=tip_msg.message_id)  # 💬 храним id именно текста, чтобы удалять только его
+    asyncio.create_task(_autodelete_message(cb.bot, cb.message.chat.id, tip_msg.message_id, 4))
+
 
 
 @router.callback_query(F.data.in_(["pod:prev", "pod:next", "pod:star"]))
