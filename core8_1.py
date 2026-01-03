@@ -1676,7 +1676,8 @@ async def start_handler(message: Message, state: FSMContext):
 
 
 
-    menu_text = "🏠 Главное меню:"  # 💬 без старой фразы "Что изучаем"
+    menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Выбирай"  # 💬 рандомная фраза главного меню
+
 
     menu_msg = await smart_reply(
         message,
@@ -3097,7 +3098,8 @@ async def mywords_show_main_menu(message: Message, state: FSMContext):
     ])  # 💬 выровненное главное меню
 
 
-    menu_text = "🏠 Главное меню:"  # 💬 убрали «Что изучаем?» (старая логика)
+    menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Выбирай"  # 💬 рандомная фраза главного меню
+
     try:
         await message.edit_text(menu_text, reply_markup=inline_kb_main)
     except Exception:
