@@ -201,7 +201,7 @@ from edit_topic_flow     import router as edit_topic_router   # Роутер а�
 from topics.loader import load_topics                    # Функция чтения всех JSON-файлов с уроками
 from create_lesson_block import load_ads_data  # 💬 Функция загрузки рекламы из ads_data.json
 
-from battle_feature import router as battle_router, set_topics_ref, start_battle_from_lex_menu, set_battle_links  # 💬 модуль "Битва"
+from battle_feature import router as battle_router, set_topics_ref, start_battle_from_lex_menu, set_battle_links, cancel_battle_if_running  # 💬 модуль "Битва"
 from bonuses_feature import (
     router as bonuses_router,
     init_bonus_feature,
@@ -1586,6 +1586,8 @@ async def start_handler(message: Message, state: FSMContext):
 
 
         # — далее остальная логика: приветствие, загрузка тем и установка состояния —
+    await cancel_battle_if_running(bot, message.chat.id, message.from_user.id)  # 💬 если шла битва = останавливаем её на /start
+
     await state.clear()
     global topics
     topics = load_topics()
