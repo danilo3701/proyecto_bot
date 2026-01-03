@@ -2,6 +2,7 @@
 # 💬 модуль "Подкасты" (авторы -> эпизоды -> фрагменты) + админка /podcasts_admin
 
 from __future__ import annotations
+import asyncio  # 💬 нужен таймер для авто-удаления подсказки
 
 import json
 import os
@@ -24,6 +25,8 @@ from aiogram.types import (
     KeyboardButton,
     ReplyKeyboardRemove,
 )
+from aiogram.exceptions import TelegramBadRequest  # 💬 чтобы не падать, если сообщение уже удалено
+
 
 router = Router()
 
@@ -87,6 +90,8 @@ class PodcastAdminStates(StatesGroup):
     waiting_episode_audio = State()
 
     choosing_episode_for_fragments = State()
+    choosing_episode_for_edit_fragments = State()  # 💬 выбор эпизода для очистки/перезаписи фрагментов
+
     waiting_fragments_text = State()
 
     choosing_episode_for_delete = State()
@@ -402,7 +407,22 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
         text,
         reply_markup=_kb_fragment_controls(),
     )
-    await cb.message.answer("Навигация = кнопками ниже.\nНазад = кнопками внизу.", reply_markup=_kb_episode_back())
+    tip_msg = await cb.message.answer(
+        "Навигация = кнопками ниже.\nНазад = кнопками внизу.",
+        reply_markup=_kb_episode_back(),
+    )
+    
+    # 💬 удаляем подсказку через 7 секунд, чтобы не висела в чате
+    async def _auto_delete_tip(m: Message) -> None:
+        await asyncio.sleep(7)
+        try:
+            await m.delete()
+        except TelegramBadRequest:
+            pass
+        except Exception:
+            pass
+    
+    asyncio.create_task(_auto_delete_tip(tip_msg))
 
     await state.update_data(pod_ep_id=ep_id, pod_idx=idx, pod_frag_msg_id=msg.message_id)
 
@@ -511,6 +531,7 @@ def _kb_admin_menu() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="➕ Добавить автора", callback_data="podadm:add_author")],
             [InlineKeyboardButton(text="➕ Добавить эпизод", callback_data="podadm:add_episode")],
             [InlineKeyboardButton(text="➕ Добавить фрагменты", callback_data="podadm:add_frags")],
+            [InlineKeyboardButton(text="✏️ Редактировать фрагменты", callback_data="podadm:edit_frags")],  # 💬 очистить и вставить заново
             [InlineKeyboardButton(text="🗑 Удалить эпизод", callback_data="podadm:del_ep")],
             [InlineKeyboardButton(text="📋 Список", callback_data="podadm:list")],
             [InlineKeyboardButton(text="❌ Закрыть", callback_data="podadm:close")],
@@ -558,6 +579,7 @@ async def podcasts_admin_text_alias(message: Message, state: FSMContext) -> None
     "podadm:add_author",
     "podadm:add_episode",
     "podadm:add_frags",
+    "podadm:edit_frags",
     "podadm:del_ep",
 ]))
 async def podcasts_admin_cb(cb: CallbackQuery, state: FSMContext) -> None:
@@ -608,6 +630,18 @@ async def podcasts_admin_cb(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.message.answer("Выбери эпизод, куда добавить фрагменты:", reply_markup=_kb_admin_eps_pick(data, "podadm:pick_ep_frags"))
         await cb.answer()
         return
+
+    
+    if action == "edit_frags":
+        data = _read_podcasts()
+        await state.set_state(PodcastAdminStates.choosing_episode_for_edit_fragments)
+        await cb.message.answer(
+            "Выбери эпизод, чтобы очистить фрагменты и вставить заново:",
+            reply_markup=_kb_admin_eps_pick(data, "podadm:pick_ep_edit_frags"),
+        )
+        await cb.answer()
+        return
+
 
     if action == "del_ep":
         data = _read_podcasts()
@@ -725,11 +759,67 @@ async def admin_episode_audio(message: Message, state: FSMContext) -> None:
     await message.answer(f"✅ Эпизод создан\nid = {eid}\n\nТеперь можешь добавить фрагменты: /podcasts_admin")
 
 
+@router.callback_query(F.data.startswith("podadm:pick_ep_edit_frags:"))
+async def admin_pick_ep_edit_frags(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 подтверждение очистки + переход в режим перезаписи
+    eid = cb.data.split(":")[-1]
+    await state.update_data(adm_frag_eid=eid, adm_frag_mode="replace")  # 💬 replace = перезаписываем список фрагментов
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 Удалить фрагменты и вставить заново", callback_data=f"podadm:clear_frags:{eid}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")],
+    ])
+
+    await cb.message.answer(
+        "⚠️ Это удалит ВСЕ фрагменты у выбранного эпизода.\n"
+        "Аудио, автора и описание не трогаем.\n\n"
+        "Нажми кнопку ниже:",
+        reply_markup=kb,
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("podadm:clear_frags:"))
+async def admin_clear_frags(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 очищаем фрагменты и ждём новый текст фрагментов
+    eid = cb.data.split(":")[-1]
+
+    data = _read_podcasts()
+    ep = data.get("episodes", {}).get(eid)
+    if not ep:
+        await cb.message.answer("Эпизод не найден. /podcasts_admin")
+        await state.clear()
+        await cb.answer()
+        return
+
+    ep["fragments"] = []  # 💬 очищаем все фрагменты
+    _write_podcasts(data)  # 💬 сохраняем в RailwayData (/data)
+
+    await state.update_data(adm_frag_eid=eid, adm_frag_mode="replace")  # 💬 дальше перезапишем целиком
+    await state.set_state(PodcastAdminStates.waiting_fragments_text)
+
+    await cb.message.answer(
+        "✅ Фрагменты очищены.\n\n"
+        "Теперь вставь фрагменты одним сообщением.\n\n"
+        "Каждый фрагмент = одна строка.\n"
+        "Формат:\n"
+        "ES | RU\n"
+        "ES | RU | 💡 подсказка (опционально)\n\n"
+        "Между фрагментами пустые строки не нужны.\n"
+        "Важно = символ | используй только как разделитель."
+    )  # 💬 сразу просим вставить новый список
+    await cb.answer()
+
+
+
+
 @router.callback_query(F.data.startswith("podadm:pick_ep_frags:"))
 async def admin_pick_ep_frags(cb: CallbackQuery, state: FSMContext) -> None:
 
     eid = cb.data.split(":")[-1]
     await state.update_data(adm_frag_eid=eid)
+    await state.update_data(adm_frag_mode="append")  # 💬 обычный режим = дописываем к существующим
+
     await state.set_state(PodcastAdminStates.waiting_fragments_text)
     await cb.message.answer(
         "Вставь фрагменты одним сообщением.\n\n"
@@ -836,8 +926,15 @@ async def admin_add_fragments(message: Message, state: FSMContext) -> None:
         return
 
     ep.setdefault("fragments", [])
-    ep["fragments"].extend(frags)
-    _write_podcasts(data)
+
+    mode = (st.get("adm_frag_mode") or "append").strip()
+    if mode == "replace":
+        ep["fragments"] = frags  # 💬 перезаписываем фрагменты целиком
+    else:
+        ep["fragments"].extend(frags)  # 💬 дописываем
+
+    _write_podcasts(data)  # 💬 сохраняем в RailwayData (/data)
+
 
     await state.clear()
     await message.answer(f"✅ Добавлено фрагментов: {len(frags)}\nВсего теперь: {len(ep['fragments'])}\n\n/podcasts_admin")
