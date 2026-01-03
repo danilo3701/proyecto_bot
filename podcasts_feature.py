@@ -409,12 +409,16 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
         text,
         reply_markup=_kb_fragment_controls(),
     )
+    nav_msg = await cb.message.answer(
+        "\u2060",
+        reply_markup=_kb_episode_back(),
+    )  # 💬 оставляем кнопки отдельным сообщением, его не удаляем
+
     tip_msg = await cb.message.answer(
         "Навигация = кнопками ниже.\nНазад = кнопками внизу.",
-        reply_markup=_kb_episode_back(),
-    )
-    
-    # 💬 удаляем подсказку через 7 секунд, чтобы не висела в чате
+    )  # 💬 показываем подсказку текстом, её удаляем через 7 секунд
+
+    # 💬 удаляем только текст подсказки, кнопки остаются
     async def _auto_delete_tip(m: Message) -> None:
         await asyncio.sleep(7)
         try:
@@ -423,8 +427,9 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
             pass
         except Exception:
             pass
-    
+
     asyncio.create_task(_auto_delete_tip(tip_msg))
+
 
     await state.update_data(pod_ep_id=ep_id, pod_idx=idx, pod_frag_msg_id=msg.message_id)
 
