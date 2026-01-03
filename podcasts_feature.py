@@ -302,11 +302,12 @@ def _format_fragment(es: str, ru: str, hint: str = "") -> str:
     hint_txt = html.escape(hint.strip())
 
     lines = [
-        f"🇪🇸 {es_txt}",
-        f"🇷🇺 <tg-spoiler>{ru_txt}</tg-spoiler>",
+        f"<b>🇪🇸 {es_txt}</b>",  # 💬 испанская строка всегда жирным
+        f"<i>🇷🇺 <tg-spoiler>{ru_txt}</tg-spoiler></i>",  # 💬 перевод всегда курсивом, спойлер сохраняем
     ]
     if hint_txt:
-        lines.append(f"💡 {hint_txt}")
+        lines.append(f"<b><i>💡 {hint_txt}</i></b>")  # 💬 подсказка всегда жирный курсив
+
     return "\n".join(lines)
 
 
@@ -893,7 +894,6 @@ def _parse_fragments(text: str) -> List[Dict[str, str]]:
 
     if out:
         return out  # 💬 что делает эта часть: если нашли хотя бы 1 строку с | = используем новый формат
- out
 
     # 💬 старый формат: блоки через пустую строку, внутри 2 или 3 строки
     blocks = re.split(r"\n\s*\n", raw)
