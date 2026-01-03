@@ -2269,7 +2269,6 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
         save_xp_data(xp_data)
 
 
-)
 
         # 💬 обновляем меню настроек
         settings = user_data[user_id]["settings"]
