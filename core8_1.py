@@ -330,12 +330,20 @@ def track_handler(func):
         # 💬 сохраняем стек исполнения (кроме текущего кадра)
         last_stack = traceback.extract_stack()[:-1]
         # 💬 сохраняем имя хендлера
-        handler_history.append(func.__name__)
-
+        # 💬 сохраняем имя хендлера (без дубля, если уже записали в middleware)
+        added = False
+        if not handler_history or handler_history[-1] != func.__name__:
+            handler_history.append(func.__name__)
+            added = True
 
         # 💬 аналитика: последний хендлер + (если есть) тема и state из FSM
         try:
+            if not added:
+                # 💬 если middleware уже записал контекст = не дублируем запись
+                raise Exception("skip duplicate analytics")  # 💬 мягкий пропуск, чтобы не плодить записи
+
             user_id = None
+
 
             # пытаемся вытащить пользователя из args/kwargs
             for v in list(kwargs.values()) + list(args):
@@ -394,6 +402,37 @@ class LoggingMiddleware(BaseMiddleware):
         if isinstance(event, Message) and getattr(event, "voice", None):
             await event.answer("⚠️ Голосовые сообщения пока не поддерживаются. Пришли текст или нажми кнопку ниже.")
             return
+        # 💬 фиксируем текущий хендлер ДО выполнения (работает для роутеров из других файлов тоже)
+        try:
+            global last_stack
+            last_stack = traceback.extract_stack()[:-1]  # 💬 чтобы видеть стек перед падением
+
+            handler_name = getattr(handler, "__name__", handler.__class__.__name__)
+            if not handler_history or handler_history[-1] != handler_name:
+                handler_history.append(handler_name)  # 💬 сохраняем реальный хендлер (curr/prev)
+
+            if getattr(event, "from_user", None):
+                st = data.get("state")
+                topic_key = None
+                state_name = None
+
+                if st:
+                    try:
+                        st_data = await st.get_data()
+                        topic_key = st_data.get("selected_topic")
+                        state_name = await st.get_state()
+                    except Exception:
+                        pass
+
+                analytics_set_last_context(
+                    user_id=str(event.from_user.id),
+                    handler_name=handler_name,
+                    topic_key=topic_key,
+                    state_name=state_name
+                )  # 💬 сохраняем last context в xp_data.json
+        except Exception:
+            logging.exception("LoggingMiddleware: track handler failed")
+
 
         try:
             return await handler(event, data)
