@@ -303,7 +303,8 @@ def _format_fragment(es: str, ru: str, hint: str = "") -> str:
 
     lines = [
         f"<b>🇪🇸 {es_txt}</b>",  # 💬 испанская строка всегда жирным
-        f"<i>🇷🇺 <tg-spoiler>{ru_txt}</tg-spoiler></i>",  # 💬 перевод всегда курсивом, спойлер сохраняем
+        f'<i><tg-emoji emoji-id="5267142132816163690">🙂</tg-emoji> 🇷🇺 <tg-spoiler>{ru_txt}</tg-spoiler></i>',  # 💬 добавляем кастом-эмодзи перед RU, внутри тега оставляем обычный эмодзи как fallback
+
     ]
     if hint_txt:
         lines.append(f"<b><i>💡 {hint_txt}</i></b>")  # 💬 подсказка всегда жирный курсив
