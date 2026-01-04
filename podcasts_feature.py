@@ -779,6 +779,13 @@ def _kb_admin_menu() -> InlineKeyboardMarkup:
         ]
     )
 
+def _kb_admin_frags_continue() -> InlineKeyboardMarkup:
+    # 💬 кнопка выхода из режима добавления фрагментов без зависаний
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")]
+        ]
+    )
 
 def _kb_admin_authors_pick(data: Dict[str, Any], cb_prefix: str) -> InlineKeyboardMarkup:
     authors = data.get("authors", {})
@@ -1056,8 +1063,10 @@ async def admin_clear_frags(cb: CallbackQuery, state: FSMContext) -> None:
         "ES | RU\n"
         "ES | RU | 💡 подсказка (опционально)\n\n"
         "Между фрагментами пустые строки не нужны.\n"
-        "Важно = символ | используй только как разделитель."
-    )  # 💬 сразу просим вставить новый список
+        "Важно = символ | используй только как разделитель.",
+        reply_markup=_kb_admin_frags_continue(),
+    )  # 💬 добавили выход назад, чтобы можно было выйти без команд
+
     await cb.answer()
 
 
@@ -1078,8 +1087,10 @@ async def admin_pick_ep_frags(cb: CallbackQuery, state: FSMContext) -> None:
         "ES | RU\n"
         "ES | RU | 💡 подсказка (опционально)\n\n"
         "Между фрагментами пустые строки не нужны.\n"
-        "Важно = символ | используй только как разделитель."
-    )  # 💬 под твой новый формат 1 строка = 1 фрагмент
+        "Важно = символ | используй только как разделитель.",
+        reply_markup=_kb_admin_frags_continue(),
+    )  # 💬 добавили выход назад, чтобы админка не становилась тупиком
+
 
     await cb.answer()
 
@@ -1192,10 +1203,16 @@ async def admin_add_fragments(message: Message, state: FSMContext) -> None:
     except Exception:
         pass
 
+    if mode == "replace":
+        await state.update_data(adm_frag_mode="append")  # 💬 если Telegram разрежет = следующая часть допишется, а не перезатрёт
 
-
-    await state.clear()
-    await message.answer(f"✅ Добавлено фрагментов: {len(frags)}\nВсего теперь: {len(ep['fragments'])}\n\n/podcasts_admin")
+    await message.answer(
+        f"✅ Добавлено фрагментов: {len(frags)}\n"
+        f"Всего теперь: {len(ep['fragments'])}\n\n"
+        "Если Telegram разрезал текст = просто пришли продолжение.\n"
+        "Для выхода нажми ⬅️ Назад.",
+        reply_markup=_kb_admin_frags_continue(),
+    )  # 💬 держим состояние открытым, чтобы следующая часть тоже сохранилась
 
 
 @router.callback_query(F.data.startswith("podadm:pick_ep_del:"))
