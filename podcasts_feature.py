@@ -56,6 +56,8 @@ _bot = None
 
 DATA_DIR = Path("/data")
 PODCASTS_FILE = DATA_DIR / "podcasts_data.json"
+PODCAST_NOTES_DIR = DATA_DIR / "podcast_notes"  # 💬 заметки подкастов по пользователю (отдельные файлы)
+
 
 
 def init_podcasts_feature(
@@ -88,6 +90,8 @@ def init_podcasts_feature(
         pass
 
     _ensure_podcasts_file()
+    _ensure_podcast_notes_dir()  # 💬 гарантируем папку для заметок подкастов
+
 
 
 # -----------------------------
@@ -137,6 +141,44 @@ def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
 
 def _write_podcasts(data: Dict[str, Any]) -> None:
     _atomic_write_json(PODCASTS_FILE, data)
+
+def _ensure_podcast_notes_dir() -> None:
+    # 💬 создаём /data/podcast_notes для отдельных файлов заметок
+    try:
+        PODCAST_NOTES_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+
+def _podcast_notes_file(uid: str) -> Path:
+    # 💬 файл заметок конкретного пользователя
+    _ensure_podcast_notes_dir()
+    return PODCAST_NOTES_DIR / f"{uid}.json"
+
+
+def _ensure_podcast_notes_file(uid: str) -> None:
+    # 💬 если файла нет = создаём пустой
+    path = _podcast_notes_file(uid)
+    if not path.exists():
+        _atomic_write_json(path, {"notes": []})
+
+
+def _read_podcast_notes(uid: str) -> List[Dict[str, Any]]:
+    # 💬 читаем заметки пользователя (самые свежие = в начале списка)
+    _ensure_podcast_notes_file(uid)
+    try:
+        with _podcast_notes_file(uid).open("r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+        notes = data.get("notes", [])
+        return notes if isinstance(notes, list) else []
+    except Exception:
+        return []
+
+
+def _write_podcast_notes(uid: str, notes: List[Dict[str, Any]]) -> None:
+    # 💬 атомарно сохраняем заметки пользователя
+    _atomic_write_json(_podcast_notes_file(uid), {"notes": notes})
+
 
 
 def _new_id(prefix: str) -> str:
@@ -264,6 +306,9 @@ def _kb_authors(data: Dict[str, Any]) -> InlineKeyboardMarkup:
     if not rows:
         rows = [[InlineKeyboardButton(text="(пусто)", callback_data="pod:noop")]]
 
+    rows.append([InlineKeyboardButton(text="⭐ Мои заметки", callback_data="pod:notes")])  # 💬 открыть сохранённые заметки из подкастов
+
+
     rows.append([InlineKeyboardButton(text="🏠 В меню", callback_data="back_to_menu")])  # 💬 выход в главное меню без тупика
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -293,6 +338,28 @@ def _kb_fragment_controls() -> InlineKeyboardMarkup:
         ]
     )  # 💬 добавили Back рядом со звёздочкой без reply-кнопок
 
+def _kb_notes_controls() -> InlineKeyboardMarkup:
+    # 💬 навигация по заметкам (влево/удалить/домой к авторам/вправо)
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="◀️", callback_data="pod:notes_prev"),
+                InlineKeyboardButton(text="🗑", callback_data="pod:notes_del"),
+                InlineKeyboardButton(text="🏠", callback_data="pod:authors"),
+                InlineKeyboardButton(text="▶️", callback_data="pod:notes_next"),
+            ]
+        ]
+    )
+
+
+def _format_note_screen(notes: List[Dict[str, Any]], idx: int) -> str:
+    # 💬 экран заметки = "2/7\n...заметка..."
+    total = len(notes)
+    if total <= 0:
+        return "Нет заметок"
+    idx = max(0, min(idx, total - 1))
+    body = notes[idx].get("text_html", "")
+    return f"{idx + 1}/{total}\n{body}"
 
 
 
@@ -332,6 +399,7 @@ async def podcasts_open(message: Message, state: FSMContext) -> None:
         pod_author_id=None,
         pod_ep_id=None,
         pod_idx=0,
+        pod_notes_idx=0,  # 💬 индекс для режима "Мои заметки"
         pod_frag_msg_id=None,
         pod_nav_msg_id=None,
         pod_hint_msg_id=None,
@@ -359,6 +427,7 @@ async def pod_checksub(cb: CallbackQuery, state: FSMContext) -> None:
         pod_author_id=None,
         pod_ep_id=None,
         pod_idx=0,
+        pod_notes_idx=0,  # 💬 индекс для режима "Мои заметки"
         pod_frag_msg_id=None,
         pod_nav_msg_id=cb.message.message_id,
     )
@@ -377,6 +446,7 @@ async def pod_back_authors(cb: CallbackQuery, state: FSMContext) -> None:
         pod_author_id=None,
         pod_ep_id=None,
         pod_idx=0,
+        pod_notes_idx=0,  # 💬 индекс для режима "Мои заметки"
         pod_frag_msg_id=None,
         pod_nav_msg_id=cb.message.message_id,  # 💬 остаёмся в том же “нав-сообщении”
     )
@@ -388,6 +458,98 @@ async def pod_back_authors(cb: CallbackQuery, state: FSMContext) -> None:
         await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 fallback
 
     await cb.answer()
+
+
+
+@router.callback_query(F.data == "pod:notes")
+async def pod_notes_open(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 "Мои заметки" = открываем в том же сообщении и начинаем с самой свежей
+    st = await state.get_data()
+    if not st.get("pod_ctx"):
+        await cb.answer()
+        return
+
+    uid = str(cb.from_user.id)
+    notes = _read_podcast_notes(uid)
+    idx = 0
+    await state.update_data(pod_notes_idx=idx, pod_nav_msg_id=cb.message.message_id)  # 💬 держим один экран
+
+    text = _format_note_screen(notes, idx)
+    try:
+        await cb.message.edit_text(text, reply_markup=_kb_notes_controls())
+    except Exception:
+        msg = await cb.message.answer(text, reply_markup=_kb_notes_controls())
+        await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 fallback
+
+    await cb.answer()
+
+
+@router.callback_query(F.data.in_(["pod:notes_prev", "pod:notes_next", "pod:notes_del"]))
+async def pod_notes_controls(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 листаем/удаляем заметки в реальном времени (RailwayData /data)
+    st = await state.get_data()
+    if not st.get("pod_ctx"):
+        await cb.answer()
+        return
+
+    uid = str(cb.from_user.id)
+    notes = _read_podcast_notes(uid)
+    if not notes:
+        try:
+            await cb.message.edit_text("Нет заметок", reply_markup=_kb_notes_controls())
+        except Exception:
+            pass
+        await state.update_data(pod_notes_idx=0)
+        await cb.answer("Нет заметок", show_alert=False)
+        return
+
+    idx = int(st.get("pod_notes_idx") or 0)
+    idx = max(0, min(idx, len(notes) - 1))
+
+    if cb.data == "pod:notes_prev":
+        if idx <= 0:
+            await cb.answer("Это первая", show_alert=False)
+            return
+        idx -= 1
+
+    elif cb.data == "pod:notes_next":
+        if idx >= len(notes) - 1:
+            await cb.answer("Это последняя", show_alert=False)
+            return
+        idx += 1
+
+    elif cb.data == "pod:notes_del":
+        # 💬 удаляем текущую заметку и подвигаем индексы
+        try:
+            notes.pop(idx)
+        except Exception:
+            notes = _read_podcast_notes(uid)
+
+        _write_podcast_notes(uid, notes)
+
+        if not notes:
+            await state.update_data(pod_notes_idx=0)
+            try:
+                await cb.message.edit_text("Нет заметок", reply_markup=_kb_notes_controls())
+            except Exception:
+                await cb.message.answer("Нет заметок", reply_markup=_kb_notes_controls())
+            await cb.answer("Удалено", show_alert=False)
+            return
+
+        if idx >= len(notes):
+            idx = len(notes) - 1
+
+    text = _format_note_screen(notes, idx)
+    try:
+        await cb.message.edit_text(text, reply_markup=_kb_notes_controls())
+        await state.update_data(pod_notes_idx=idx)
+        if cb.data == "pod:notes_del":
+            await cb.answer("Удалено", show_alert=False)
+        else:
+            await cb.answer()
+    except Exception:
+        await cb.answer("Не смог обновить экран", show_alert=False)
+
 
 
 @router.callback_query(F.data.startswith("pod:author:"))
@@ -404,6 +566,7 @@ async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
         pod_author_id=author_id,
         pod_ep_id=None,
         pod_idx=0,
+        pod_notes_idx=0,  # 💬 индекс для режима "Мои заметки"
         pod_frag_msg_id=None,
         pod_nav_msg_id=cb.message.message_id,  # 💬 меню “живёт” в одном сообщении
     )
@@ -548,24 +711,34 @@ async def pod_fragment_controls(cb: CallbackQuery, state: FSMContext) -> None:
 
     if cb.data == "pod:star":
         # 💬 сохраняем текущий фрагмент в user_data (RailwayData)
-        if _load_user_data and _save_user_data:
-            ud = _load_user_data()
-            uid = str(cb.from_user.id)
-            ud.setdefault(uid, {})
-            ud[uid].setdefault("podcasts_favorites", [])
-            frag = frags[idx]
-            ud[uid]["podcasts_favorites"].append(
-                {
-                    "ts": int(time.time()),
-                    "episode_id": ep_id,
-                    "index": idx,
-                    "es": frag.get("es", ""),
-                    "ru": frag.get("ru", ""),
-                    "hint": frag.get("hint", ""),
-                }
-            )
-            _save_user_data(ud)
+        # 💬 сохраняем текущий фрагмент как заметку в отдельный файл (/data/podcast_notes)
+        uid = str(cb.from_user.id)
+        frag = frags[idx]
+        note_html = _format_fragment(frag.get("es", ""), frag.get("ru", ""), frag.get("hint", ""))
+        notes = _read_podcast_notes(uid)
+
+        # 💬 антидубликаты по episode_id + index
+        for n in notes:
+            try:
+                saved_idx = int(n.get("index", -1))
+            except Exception:
+                saved_idx = -1
+            if n.get("episode_id") == ep_id and saved_idx == idx:
+                await cb.answer("Уже сохранено ⭐", show_alert=False)
+                return
+
+        notes.insert(
+            0,
+            {
+                "ts": int(time.time()),
+                "episode_id": ep_id,
+                "index": idx,
+                "text_html": note_html,
+            },
+        )
+        _write_podcast_notes(uid, notes)
         await cb.answer("Сохранено ⭐", show_alert=False)
+
         return
 
     if cb.data == "pod:prev":
