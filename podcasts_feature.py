@@ -1262,13 +1262,14 @@ async def admin_add_fragments(message: Message, state: FSMContext) -> None:
 
     _write_podcasts(data)  # 💬 сохраняем в RailwayData (/data)
     try:
-        st = PODCASTS_FILE.stat()
+        file_stat = PODCASTS_FILE.stat()  # 💬 получаем stat файла и не затираем st из FSM
         await message.answer(
             f"🧾 podcasts_data.json сохранён\n"
-            f"mtime={int(st.st_mtime)} size={st.st_size}"
+            f"mtime={int(file_stat.st_mtime)} size={file_stat.st_size}"
         )  # 💬 что делает эта часть: показываем факт перезаписи файла на диске
     except Exception:
         pass
+
 
     if mode == "replace":
         await state.update_data(adm_frag_mode="append")  # 💬 если Telegram разрежет = следующая часть допишется, а не перезатрёт
