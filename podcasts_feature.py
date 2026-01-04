@@ -1116,6 +1116,55 @@ def _clean_cell(s: str) -> str:
     return t.strip()
 
 
+def _parse_fragments_with_tail(text: str) -> Tuple[List[Dict[str, str]], str, int]:
+    # 💬 парсим строки с | и сохраняем незавершённую последнюю строку как tail
+    raw = (text or "")
+    if not raw.strip():
+        return [], "", 0
+
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    out: List[Dict[str, str]] = []
+    tail = ""
+    bad = 0
+
+    for i, ln in enumerate(lines):
+        is_last = i == len(lines) - 1
+
+        if "|" not in ln:
+            if is_last:
+                tail = ln  # 💬 похоже на разрез внутри строки, ждём продолжение
+            else:
+                bad += 1  # 💬 мусорная строка не по формату
+            continue
+
+        parts = [p.strip() for p in ln.split("|")]
+        if len(parts) < 2:
+            if is_last:
+                tail = ln  # 💬 незавершено
+            else:
+                bad += 1
+            continue
+
+        es = _clean_cell(parts[0])
+        ru = _strip_spoilers_ru(_clean_cell(parts[1]))
+
+        if not ru:
+            if is_last:
+                tail = ln  # 💬 есть |, но RU пустой, ждём продолжение
+            else:
+                bad += 1
+            continue
+
+        hint = ""
+        if len(parts) > 2:
+            hint = _clean_cell(" | ".join(parts[2:]))  # 💬 всё после RU = подсказка (если есть)
+
+        out.append({"es": es, "ru": ru, "hint": hint})
+
+    return out, tail, bad
+
+
+
 
 def _parse_fragments(text: str) -> List[Dict[str, str]]:
     raw = (text or "").strip()
@@ -1173,10 +1222,28 @@ async def admin_add_fragments(message: Message, state: FSMContext) -> None:
         await state.clear()
         return
 
-    frags = _parse_fragments(message.text or "")
-    if not frags:
-        await message.answer("Не смог распарсить. Проверь формат и пришли ещё раз.")
+    prev_tail = (st.get("adm_frag_tail") or "").strip()
+    raw_in = message.text or ""
+    if prev_tail:
+        raw_in = f"{prev_tail}{raw_in}"  # 💬 склеиваем разрезанную строку без переноса
+
+    frags, tail, bad_lines = _parse_fragments_with_tail(raw_in)
+    await state.update_data(adm_frag_tail=tail)  # 💬 сохраняем хвост, если строка разрезана
+
+    if not frags and tail:
+        await message.answer(
+            "⚠️ Вижу незавершённую строку. Пришли продолжение следующим сообщением.",
+            reply_markup=_kb_admin_frags_continue(),
+        )  # 💬 не закрываем FSM, ждём продолжение
         return
+
+    if not frags:
+        await message.answer(
+            "Не смог распарсить. Проверь формат и пришли ещё раз.",
+            reply_markup=_kb_admin_frags_continue(),
+        )  # 💬 даём выход назад, чтобы не было тупика
+        return
+
 
     data = _read_podcasts()
     ep = data.get("episodes", {}).get(eid)
@@ -1206,11 +1273,18 @@ async def admin_add_fragments(message: Message, state: FSMContext) -> None:
     if mode == "replace":
         await state.update_data(adm_frag_mode="append")  # 💬 если Telegram разрежет = следующая часть допишется, а не перезатрёт
 
+    warn = ""
+    if bad_lines:
+        warn += f"\n⚠️ Пропущено строк без | = {bad_lines}"
+    if (st.get("adm_frag_tail") or "").strip():
+        warn += "\n⚠️ В конце есть незавершённая строка. Пришли продолжение."
+
+    
     await message.answer(
         f"✅ Добавлено фрагментов: {len(frags)}\n"
         f"Всего теперь: {len(ep['fragments'])}\n\n"
         "Если Telegram разрезал текст = просто пришли продолжение.\n"
-        "Для выхода нажми ⬅️ Назад.",
+        f"Для выхода нажми ⬅️ Назад.{warn}",
         reply_markup=_kb_admin_frags_continue(),
     )  # 💬 держим состояние открытым, чтобы следующая часть тоже сохранилась
 
