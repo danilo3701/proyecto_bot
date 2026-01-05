@@ -2499,7 +2499,7 @@ async def show_leaderboard(message: Message, state: FSMContext):
 
         NAME_COL = 16            # 💬 минус 2 пробела между именем и 🍪, чтобы всё влезало
 
-        RANK_COL = 4             # 💬 ширина колонки ранга (1) / 10) / 223)
+        RANK_COL = 2             # 💬 ширина колонки ранга (1) / 10) / 223)
 
         def _name_cell(raw: str) -> str:
             # 💬 делает ячейку имени фикс длины, убирая эмодзи (иначе в <pre> всё съезжает)
