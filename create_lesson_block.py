@@ -267,16 +267,28 @@ class EditTopicStates(StatesGroup):
 
 
 
-def get_main_menu() -> ReplyKeyboardMarkup:
+def get_main_menu(category: str | None = None) -> ReplyKeyboardMarkup:
+    # 💬 что делает эта часть: разные кнопки для lex и gram, но структура JSON та же
+    if category == "gram":
+        return ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📖 Теория"),     KeyboardButton(text="📝 Практика")],
+                [KeyboardButton(text="🎥 Видео"),      KeyboardButton(text="📚 Читать")],
+                [KeyboardButton(text="👁 Просмотреть"), KeyboardButton(text="✏️ Редактировать")]
+            ],
+            resize_keyboard=True
+        )
+
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📚 словарь"), KeyboardButton(text="✏️ Добавить упражнение")],
             [KeyboardButton(text="🎥 Добавить видео"),    KeyboardButton(text="💬 Добавить диалог")],
-            [KeyboardButton(text="📖 Добавить чтение")],  # 💬 что делает эта часть: добавляем раздел "Читать" (как подкасты)
+            [KeyboardButton(text="📖 Добавить чтение")],
             [KeyboardButton(text="👁 Просмотреть"),       KeyboardButton(text="✏️ Редактировать")]
         ],
         resize_keyboard=True
     )
+
 
 
 def get_edit_menu() -> ReplyKeyboardMarkup:
@@ -465,7 +477,9 @@ async def get_topic_description(message: Message, state: FSMContext):
         "vocab":         topic.get("vocab", []),
         "exercises":     topic.get("exercises", []),
         "videos":        topic.get("videos", []),
-        "dialogs":       topic.get("dialogs", [])
+        "dialogs":       topic.get("dialogs", []),
+        "reading":       topic.get("reading", []),  # 💬 что делает эта часть: не теряем пакеты чтения при сохранении описания
+
     }
 
     # 💾 Сохраняем в файл
@@ -493,6 +507,20 @@ async def handle_main_menu(message: Message, state: FSMContext):
     data = await state.get_data()
     tp = data.get("topic")
     path = data.get("topic_path")
+
+    category = (tp or {}).get("category")
+
+    # 💬 что делает эта часть: кнопки грамматики перекидываем на существующие ветки (vocab/exercise/video/reading)
+    if category == "gram":
+        if text == "📖 Теория":
+            text = "📚 словарь"
+        elif text == "📝 Практика":
+            text = "✏️ Добавить упражнение"
+        elif text == "🎥 Видео":
+            text = "🎥 Добавить видео"
+        elif text == "📚 Читать":
+            text = "📖 Добавить чтение"
+
 
     # ----------------------- Добавить словарь -----------------------
     if text == "📚 словарь":
@@ -562,6 +590,8 @@ async def handle_main_menu(message: Message, state: FSMContext):
     # ----------------------- Просмотреть то, что уже создали -----------------------
 
     if text == "👁 Просмотреть":
+        topic_path = data.get("topic_path")  # 💬 что делает эта часть: фикс NameError, используем актуальный путь
+
         # 💬 Читаем текущий JSON-файл
         if topic_path and os.path.exists(topic_path):
             with open(topic_path, "r", encoding="utf-8") as f:
@@ -672,14 +702,7 @@ async def handle_main_menu(message: Message, state: FSMContext):
             )
 
         # 💡 Восстанавливаем главное меню кнопок и состояние
-        keyboard = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="📚 словарь"), KeyboardButton(text="✏️ Добавить упражнение")],
-                [KeyboardButton(text="🎥 Добавить видео"),    KeyboardButton(text="💬 Добавить диалог")],
-                [KeyboardButton(text="👁 Просмотреть"),       KeyboardButton(text="✏️ Редактировать")]
-            ],
-            resize_keyboard=True
-        )
+        keyboard = get_main_menu((data.get("topic") or {}).get("category"))  # 💬 возвращаем правильное меню (lex/gram)
         await message.answer("С чего начнём?", reply_markup=keyboard)
         await state.set_state(NewTopicStates.waiting_first_choice)
         return
@@ -923,17 +946,22 @@ async def send_post_menu(message: Message, state: FSMContext):
 
     # Составляем кнопки под тип последнего блока
     if last == "vocab":
-        # 💬 Меню для словаря:
-        #  📘VOC       — выбор/создание фазы
-        #  📝ТЕКСТ     — текстовый блок внутри фазы
-        #  🖼FOTO      — фото/гиф/стикер внутри фазы
-        #  📥TXT_QUIZ  — bulk импорт TEXT_QUIZ в textquiz_pool
-        #  📥QUIZ      — bulk импорт QUIZ в quiz_pool
-        rows = [
-            [KeyboardButton(text="📘VOC")],
-            [KeyboardButton(text="📝ТЕКСТ"),    KeyboardButton(text="🖼FOTO")],
-            [KeyboardButton(text="📥TXT_QUIZ"), KeyboardButton(text="📥QUIZ")],
-        ]
+        category = (data.get("topic") or {}).get("category")
+
+        if category == "gram":
+            # 💬 что делает эта часть: меню Теории = только текст/фото/пулквизы/назад
+            rows = [
+                [KeyboardButton(text="📝 Текст"), KeyboardButton(text="🖼 Фото")],
+                [KeyboardButton(text="📥 Пулквизы")],
+            ]
+        else:
+            # 💬 лексика: старое меню словаря
+            rows = [
+                [KeyboardButton(text="📘VOC")],
+                [KeyboardButton(text="📝ТЕКСТ"),    KeyboardButton(text="🖼FOTO")],
+                [KeyboardButton(text="📥TXT_QUIZ"), KeyboardButton(text="📥QUIZ")],
+            ]
+
 
 
     elif last == "exercise":
@@ -1005,7 +1033,16 @@ async def choose_phase(message: Message, state: FSMContext):
 
     # 💬 подтвердить выбор и убрать клавиатуру
     await message.answer(f"Фаза выбрана: {text}", reply_markup=ReplyKeyboardRemove())
-    # 💬 перейти к вводу заголовка словаря в выбранной фазе
+
+    data = await state.get_data()
+    topic = data.get("topic") or {}
+    if topic.get("category") == "gram":
+        # 💬 что делает эта часть: для грамматики сразу показываем меню Теории (текст/фото/пулквизы)
+        await state.update_data(last_block="vocab")
+        await send_post_menu(message, state)
+        return
+
+    # 💬 для лексики оставляем старое поведение (заголовок + link)
     await message.answer("Введите ЗАГОЛОВОК словаря:")
     await state.set_state(NewTopicStates.waiting_vocab_title)
 
@@ -1189,6 +1226,14 @@ async def handle_post_action(message: Message, state: FSMContext):
 
     # ─── БЛОК «СЛОВАРЬ» ───
     if last_block == "vocab":
+        # 💬 что делает эта часть: алиасы кнопок Теории (gram) на существующие ветки
+        if text == "📝 Текст":
+            text = "📝ТЕКСТ"
+        elif text == "🖼 Фото":
+            text = "🖼FOTO"
+        elif text == "📥 Пулквизы":
+            text = "📥QUIZ"
+
         if text == "📘VOC":
             data   = await state.get_data()
             topic  = data["topic"]
@@ -1976,6 +2021,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
