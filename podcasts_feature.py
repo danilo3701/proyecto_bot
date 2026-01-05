@@ -400,16 +400,10 @@ def _split_speaker_prefix(text: str) -> Tuple[Optional[str], str]:
 
 def _format_fragment(es: str, ru: str, hint: str = "") -> str:
     es_emoji, es_body = _split_speaker_prefix(es)
-    ru_emoji, ru_body = _split_speaker_prefix(ru)
-
-    # Если RU без метки, но ES с меткой, используем эмоджи ES и для RU
-    if es_emoji and not ru_emoji:
-        ru_emoji = es_emoji
-    if ru_emoji and not es_emoji:
-        es_emoji = ru_emoji
+    _, ru_body = _split_speaker_prefix(ru)  # 💬 в RU убираем Paco:/Roi:, но эмоджи не используем
 
     es_prefix = es_emoji or "🇪🇸"
-    ru_prefix = ru_emoji or "🔹"
+    ru_prefix = "🔹"  # 💬 RU всегда начинается с ромбика, без 🌚/🌝
 
     es_txt = html.escape(es_body)
     ru_txt = html.escape(ru_body)
@@ -423,6 +417,7 @@ def _format_fragment(es: str, ru: str, hint: str = "") -> str:
         lines.append(f"<b><i>💡 {hint_txt}</i></b>")
 
     return "\n".join(lines)
+
 
 
 
