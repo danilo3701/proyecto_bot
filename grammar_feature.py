@@ -121,38 +121,68 @@ def _get_grammar_root(topic: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get_theory_phases(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
-    g = _get_grammar_root(topic)
-    phases = g.get("theory") or g.get("theory_phases") or topic.get("theory") or []
-    return phases or []
-
-
-def _phase_title(phase: Dict[str, Any], idx: int) -> str:
-    return str(phase.get("title") or phase.get("name") or f"Фаза {idx + 1}")
+    # 💬 CreateLessonBlock: фазы лежат в topic["vocab"]
+    phases = topic.get("vocab") or []
+    return phases if isinstance(phases, list) else []
 
 
 def _phase_items(phase: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return phase.get("items") or phase.get("blocks") or phase.get("content") or []
+    """
+    💬 копируем логику core get_vocab_list:
+       после каждого link добавляем 6 quiz из quiz_pool,
+       затем докладываем остаток quiz_pool,
+       затем добавляем textquiz_pool в конец
+    """
+    base = phase.get("vocab") or []
+    quiz_pool = list(phase.get("quiz_pool") or [])
+    textquiz_pool = list(phase.get("textquiz_pool") or [])
+
+    PACK = 6
+    compiled: List[Dict[str, Any]] = []
+
+    def take_pack(pool, start, pack=PACK):
+        return pool[start:start + pack], start + min(pack, max(0, len(pool) - start))
+
+    qi = 0
+    for block in base:
+        compiled.append(block)
+        if ("link" in block) or ("url" in block) or (block.get("type") == "link"):
+            if qi < len(quiz_pool):
+                chunk, qi = take_pack(quiz_pool, qi)
+                compiled.extend(chunk)
+
+    while qi < len(quiz_pool):
+        chunk, qi = take_pack(quiz_pool, qi)
+        compiled.extend(chunk)
+
+    compiled.extend(textquiz_pool)
+    return compiled
 
 
 def _practice_items(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
-    g = _get_grammar_root(topic)
-    items = g.get("practice") or topic.get("practice") or []
-    return items or []
+    # 💬 CreateLessonBlock: практика лежит в topic["exercises"]
+    items = topic.get("exercises") or []
+    return items if isinstance(items, list) else []
 
 
 def _video_items(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
-    g = _get_grammar_root(topic)
-    items = g.get("videos") or topic.get("videos") or []
-    return items or []
+    items = topic.get("videos") or []
+    return items if isinstance(items, list) else []
 
 
-def _read_fragments(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
-    g = _get_grammar_root(topic)
-    read = g.get("read") or topic.get("read") or {}
-    frags = read.get("fragments") if isinstance(read, dict) else None
-    if frags is None:
-        frags = g.get("read_fragments") or topic.get("read_fragments") or []
-    return frags or []
+def _read_packs(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
+    # 💬 CreateLessonBlock: чтение лежит в topic["reading"] как список пакетов
+    packs = topic.get("reading") or []
+    return packs if isinstance(packs, list) else []
+
+
+def _read_fragments_from_pack(topic: Dict[str, Any], pack_idx: int) -> List[Dict[str, Any]]:
+    packs = _read_packs(topic)
+    if pack_idx < 0 or pack_idx >= len(packs):
+        return []
+    frags = packs[pack_idx].get("fragments") or []
+    return frags if isinstance(frags, list) else []
+
 
 
 def _item_type(item: Dict[str, Any]) -> str:
@@ -399,7 +429,7 @@ async def gram_topics(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.message.answer("⚠️ Не вижу уровень. Нажми /start и выбери заново.")
         return
     if _show_topics_for_category_level:
-        await _show_topics_for_category_level(cb.message, state, category="gram", level=lvl)  # 💬 обратно к темам
+        await _show_topics_for_category_level(cb, state, category="gram", level=lvl)  # 💬 обратно к темам
     else:
         await cb.message.answer("⚠️ Нет show_topics_for_category_level.")
 
@@ -566,10 +596,17 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
             q = str(item.get("question") or "Выбери ответ")
             opts = item.get("options") or item.get("answers") or []
             opts = [str(x) for x in opts][:10]
-            try:
-                correct = int(item.get("correct_option_id"))
-            except Exception:
-                correct = int(item.get("correct", 0) or 0)
+            correct = 0  # 💬 по умолчанию первый
+            if "correct_option_id" in item:
+                try:
+                    correct = int(item.get("correct_option_id"))
+                except Exception:
+                    correct = 0
+            elif isinstance(item.get("correct"), int):
+                correct = int(item.get("correct"))
+            elif item.get("correct_answer") in opts:
+                correct = opts.index(item.get("correct_answer"))  # 💬 CreateLessonBlock: correct_answer = текст
+
 
             poll_msg = await _bot.send_poll(
                 chat_id=chat_id,
@@ -744,10 +781,17 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
         q = str(item.get("question") or "Выбери ответ")
         opts = item.get("options") or item.get("answers") or []
         opts = [str(x) for x in opts][:10]
-        try:
-            correct = int(item.get("correct_option_id"))
-        except Exception:
-            correct = int(item.get("correct", 0) or 0)
+        correct = 0  # 💬 по умолчанию первый
+        if "correct_option_id" in item:
+            try:
+                correct = int(item.get("correct_option_id"))
+            except Exception:
+                correct = 0
+        elif isinstance(item.get("correct"), int):
+            correct = int(item.get("correct"))
+        elif item.get("correct_answer") in opts:
+            correct = opts.index(item.get("correct_answer"))  # 💬 CreateLessonBlock: correct_answer = текст
+        
 
         poll_msg = await _bot.send_poll(
             chat_id=chat_id,
