@@ -210,6 +210,7 @@ from bonuses_feature import (
     bonus_try_qualify_referral,
 )  # 💬 модуль «🎁 Бонусы»
 from podcasts_feature import router as podcasts_router, init_podcasts_feature, podcasts_open  # 💬 модуль "Подкасты"
+from grammar_feature import router as grammar_router, init_grammar_feature, grammar_open_from_topic  # 💬 модуль грамматики
 
 
 
@@ -282,6 +283,8 @@ dp.include_router(battle_router)  # 💬 подключаем хендлеры "
 dp.include_router(bonuses_router)  # 💬 подключаем хендлеры «Бонусы»
 dp.include_router(podcasts_router)  # 💬 подключаем модуль "Подкасты"
 dp.include_router(create_topic_router)
+dp.include_router(grammar_router)  # 💬 подключаем грамматику
+
 
 # 💬 что делает эта часть: копируем темы из Railway Volume (/data/topics) в локальную ./topics,
 # чтобы load_topics() увидел новые темы без redeploy
@@ -308,7 +311,7 @@ sync_topics_volume_to_local()  # 💬 подтягиваем темы из Volum
 
 # ——— Загружаем уроки ——————————————————————————————————————————
 topics = load_topics()
-
+init_grammar_feature(topics)  # 💬 передаём темы в модуль грамматики
 set_topics_ref(topics)  # 💬 передаём topics в модуль "Битва" без круговых импортов
 
 
@@ -1708,34 +1711,6 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
 
     action = callback.data.split(":", 1)[1]
 
-    # ⛔ Временная блокировка раздела «Грамматика»
-    if action == "gram":
-        await callback.answer()
-        chat_id = callback.message.chat.id
-
-        # 💬 1) Текст «Раздел временно недоступен» → удалится через 2 секунды
-        asyncio.create_task(
-            send_and_auto_delete_text(
-                bot,
-                chat_id,
-                "Раздел временно недоступен",
-                delay=2.0,
-            )
-        )
-
-        # 💬 2) Через 1 секунду показываем стикер → тоже удалится через 2 секунды
-        await asyncio.sleep(1.0)
-        asyncio.create_task(
-            send_and_auto_delete_sticker(
-                bot,
-                chat_id,
-                GRAMMAR_LOCKED_STICKER,
-                delay=2.5,
-            )
-        )
-
-        # 💬 Главное меню остаётся тем же: просто не заходим в поток «Грамматика»
-        return
 
 
     # 🏆/⚙️ — сразу открываем соответствующие разделы
@@ -2006,31 +1981,7 @@ async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
-    # ⛔ Временная блокировка раздела «Грамматика» внутри уровня
-    if action == "gram":
-        await callback.answer()
-        chat_id = callback.message.chat.id
 
-        asyncio.create_task(
-            send_and_auto_delete_text(
-                bot,
-                chat_id,
-                "Раздел временно недоступен",
-                delay=2.0,
-            )
-        )
-
-        await asyncio.sleep(1.0)
-        asyncio.create_task(
-            send_and_auto_delete_sticker(
-                bot,
-                chat_id,
-                GRAMMAR_LOCKED_STICKER,
-                delay=2.5,
-            )
-        )
-        # 💬 Остаёмся на экране выбора подкатегории
-        return
 
     if action == "lex":
         # 💬 Сохраняем выбранную категорию и показываем темы для этого уровня
@@ -2949,7 +2900,13 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
             if topic_key not in unlocked:
                 unlocked.append(topic_key)
                 save_user_data(data)
-            return await lesson_menu_handler(query.message, state)
+            topic = topics.get(topic_key, {})  # 💬 достаём тему, чтобы понять category
+            
+            if topic.get("category") == "gram":
+                return await grammar_open_from_topic(callback.message, state)  # 💬 открываем меню грамматики
+            
+            return await lesson_menu_handler(callback.message, state)  # 💬 старое поведение для lex и остального
+
 
     elif active:
         # 💬 есть active_until, но нет списка каналов — считаем подписку невалидной и сбрасываем
