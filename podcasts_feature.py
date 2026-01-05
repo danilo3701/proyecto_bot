@@ -378,21 +378,52 @@ def _format_note_screen(notes: List[Dict[str, Any]], idx: int) -> str:
     return f"{idx + 1}/{total}\n{body}"
 
 
+SPEAKER_EMOJI = {
+    "roi": "🌝",
+    "paco": "🌞",
+}
+
+def _split_speaker_prefix(text: str) -> Tuple[Optional[str], str]:
+    """
+    Возвращает (emoji, body).
+    Если префикса спикера нет, emoji=None, body=text.
+    """
+    s = (text or "").strip()
+    m = re.match(r"^(Roi|Paco)\s*:\s*(.*)$", s, flags=re.IGNORECASE)
+    if not m:
+        return None, s
+    who = (m.group(1) or "").strip().lower()
+    body = (m.group(2) or "").strip()
+    return SPEAKER_EMOJI.get(who), body
+
+
 
 def _format_fragment(es: str, ru: str, hint: str = "") -> str:
-    es_txt = html.escape(es.strip())
-    ru_txt = html.escape(ru.strip())
-    hint_txt = html.escape(hint.strip())
+    es_emoji, es_body = _split_speaker_prefix(es)
+    ru_emoji, ru_body = _split_speaker_prefix(ru)
+
+    # Если RU без метки, но ES с меткой, используем эмоджи ES и для RU
+    if es_emoji and not ru_emoji:
+        ru_emoji = es_emoji
+    if ru_emoji and not es_emoji:
+        es_emoji = ru_emoji
+
+    es_prefix = es_emoji or "🇪🇸"
+    ru_prefix = ru_emoji or "🔹"
+
+    es_txt = html.escape(es_body)
+    ru_txt = html.escape(ru_body)
+    hint_txt = html.escape((hint or "").strip())
 
     lines = [
-        f"<b>🇪🇸 {es_txt}</b>",  # 💬 испанская строка всегда жирным
-        f"<i>🔹 <tg-spoiler>{ru_txt}</tg-spoiler></i>",
-
+        f"<b>{es_prefix} {es_txt}</b>",
+        f"<i>{ru_prefix} <tg-spoiler>{ru_txt}</tg-spoiler></i>",
     ]
     if hint_txt:
-        lines.append(f"<b><i>💡 {hint_txt}</i></b>")  # 💬 подсказка всегда жирный курсив
+        lines.append(f"<b><i>💡 {hint_txt}</i></b>")
 
     return "\n".join(lines)
+
 
 
 # -----------------------------
@@ -402,7 +433,7 @@ async def podcasts_open(message: Message, state: FSMContext) -> None:
     # 💬 точка входа из core8_1.py (menu:podcasts) = заменяем главное меню, а не шлём новое
     ok = await _is_subscribed_main_channel(message.from_user.id)
     if not ok:
-        text = "🔒 Подкасты доступны после подписки на канал.\n\nНажми кнопку ниже и потом = проверить подписку."
+        text = "🔒 Подкасты доступны после подписки на канал.\n\nНажми кнопку ниже, затем нажми «Проверить подписку»"
         try:
             await message.edit_text(text, reply_markup=_kb_subscribe_check())
         except Exception:
@@ -1520,14 +1551,6 @@ async def admin_add_fragments(message: Message, state: FSMContext) -> None:
         ep["fragments"].extend(frags)  # 💬 дописываем
 
     _write_podcasts(data)  # 💬 сохраняем в RailwayData (/data)
-    try:
-        file_stat = PODCASTS_FILE.stat()  # 💬 получаем stat файла и не затираем st из FSM
-        await message.answer(
-            f"🧾 podcasts_data.json сохранён\n"
-            f"mtime={int(file_stat.st_mtime)} size={file_stat.st_size}"
-        )  # 💬 что делает эта часть: показываем факт перезаписи файла на диске
-    except Exception:
-        pass
 
 
     if mode == "replace":
