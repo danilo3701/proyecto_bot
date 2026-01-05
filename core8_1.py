@@ -1213,7 +1213,7 @@ init_grammar_feature(
     load_user_data=load_user_data,
     save_user_data=save_user_data,
     show_topics_for_category_level=(lambda *args, **kwargs: globals()["show_topics_for_category_level"](*args, **kwargs)),  # 💬 прокси чтобы избежать NameError при импорте
-    start_handler=start_handler,
+    start_handler=(lambda message, state: globals()["start_handler"](message, state)),  # 💬 прокси чтобы избежать NameError при импорте
     admin_chat_id=ADMIN_CHAT_ID,
     bot=bot,
 )  # 💬 пробрасываем зависимости в модуль грамматики
