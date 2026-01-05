@@ -219,6 +219,9 @@ class NewTopicStates(StatesGroup):
     waiting_video_title     = State()  # 💬 вводим заголовок видео
     waiting_video_link      = State()  # 💬 вводим ссылку на видео
 
+    # ----------- БЛОК “ЧТЕНИЕ” -----------
+    waiting_reading_title = State()          # 💬 вводим заголовок чтения (как "мини-эпизод")
+    waiting_reading_fragments_text = State() # 💬 ждём фрагменты (ES | RU | 💡 hint)
 
 
     waiting_channel = State()  # Новое состояние для канала
@@ -269,10 +272,12 @@ def get_main_menu() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="📚 словарь"), KeyboardButton(text="✏️ Добавить упражнение")],
             [KeyboardButton(text="🎥 Добавить видео"),    KeyboardButton(text="💬 Добавить диалог")],
+            [KeyboardButton(text="📖 Добавить чтение")],  # 💬 что делает эта часть: добавляем раздел "Читать" (как подкасты)
             [KeyboardButton(text="👁 Просмотреть"),       KeyboardButton(text="✏️ Редактировать")]
         ],
         resize_keyboard=True
     )
+
 
 def get_edit_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -425,7 +430,9 @@ async def get_topic_name(message: Message, state: FSMContext):
         "vocab": [],
         "exercises": [],
         "videos": [],
-        "dialogs": []
+        "dialogs": [],
+        "reading": []  # 💬 что делает эта часть: хранит пакеты чтения (фрагменты как в подкастах)
+
     }
     
     # 💾 Сохраняем в файл (уже в Volume)
@@ -540,6 +547,13 @@ async def handle_main_menu(message: Message, state: FSMContext):
         )
         return await state.set_state(NewDialogStates.waiting_dialog_phase_name)
 
+    # ----------------------- Добавить чтение -----------------------
+    if text == "📖 Добавить чтение":
+        await state.update_data(last_block="reading")  # 💬 что делает эта часть: помечаем текущий раздел
+        await message.answer("Введите ЗАГОЛОВОК чтения:", reply_markup=ReplyKeyboardRemove())
+        return await state.set_state(NewTopicStates.waiting_reading_title)
+
+
 
 
   
@@ -625,6 +639,17 @@ async def handle_main_menu(message: Message, state: FSMContext):
                             preview = f'{title} — <a href="{url}">ссылка</a> ({url})'
                         lines.append(f"      {d_idx}.{ex_idx}) {preview}")
                 lines.append("")
+
+            # 5) Чтение (как подкасты)
+            reading_list = topic_data.get("reading", [])
+            if reading_list:
+                lines.append("📖 <b>Чтение:</b>")
+                for r_idx, pack in enumerate(reading_list, start=1):
+                    ttl = pack.get("title") or "Без названия"
+                    cnt = len(pack.get("fragments", []))
+                    lines.append(f"  {r_idx}) 📖 <b>{ttl}</b> (фрагментов: {cnt})")
+                lines.append("")  # 💬 что делает эта часть: добавили краткий список пакетов чтения
+
 
             # Если ничего не добавлено
             if not lines:
@@ -1655,6 +1680,66 @@ async def get_video_link(message: Message, state: FSMContext):
 
 
 
+@router.message(NewTopicStates.waiting_reading_title)
+async def get_reading_title(message: Message, state: FSMContext):
+    await state.update_data(current_reading_title=(message.text or "").strip())  # 💬 заголовок пакета чтения
+    await message.answer(
+        "Теперь вставь фрагменты одним сообщением.\n\n"
+        "Каждый фрагмент = одна строка.\n"
+        "Формат:\n"
+        "ES | RU\n"
+        "ES | RU | 💡 подсказка (опционально)\n\n"
+        "Важно = символ | используй только как разделитель.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
+
+
+@router.message(NewTopicStates.waiting_reading_fragments_text)
+async def save_reading_fragments(message: Message, state: FSMContext):
+    import json
+
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("❗ Пусто. Вставь фрагменты в формате ES | RU (и опционально | 💡 подсказка).")
+        return
+
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    fragments = []
+
+    for ln in lines:
+        parts = [p.strip() for p in ln.split("|")]
+        if len(parts) < 2 or not parts[0] or not parts[1]:
+            await message.answer("❗ Ошибка формата. Пример: Estoy en casa | Я дома | 💡 estar = место")
+            return  # 💬 остаёмся в этом же состоянии
+
+        frag = {"es": parts[0], "ru": parts[1]}  # 💬 базовый фрагмент
+        if len(parts) >= 3 and parts[2]:
+            frag["hint"] = parts[2]  # 💬 подсказка опционально
+        fragments.append(frag)
+
+    data = await state.get_data()
+    topic = data.get("topic") or {}
+    topic_path = data.get("topic_path")
+    title = (data.get("current_reading_title") or "Чтение").strip()
+
+    if not topic_path:
+        await message.answer("❗ Ошибка: не найден путь темы (topic_path).")
+        return
+
+    topic.setdefault("reading", []).append({
+        "title": title,
+        "fragments": fragments
+    })  # 💬 что делает эта часть: сохраняем пакет чтения как список фрагментов
+
+    with open(topic_path, "w", encoding="utf-8") as f:
+        json.dump(topic, f, ensure_ascii=False, indent=2)
+
+    await state.update_data(topic=topic, current_reading_title=None)  # 💬 чистим временный заголовок
+    await message.answer("✅ Чтение сохранено.", reply_markup=get_main_menu())
+    return await state.set_state(NewTopicStates.waiting_first_choice)
+
+
 
 
 
@@ -1891,6 +1976,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
