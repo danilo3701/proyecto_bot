@@ -827,7 +827,16 @@ def _kb_admin_eps_pick(data: Dict[str, Any], cb_prefix: str) -> InlineKeyboardMa
     eps = data.get("episodes", {})
     items = list(eps.items())
     items.sort(key=lambda x: x[1].get("order", 9999))
-    rows = []
+
+    PAD = "\u2800"  # 💬 невидимый символ (Braille blank) для выравнивания текста в кнопках
+
+    def _pad_btn(text: str, target_len: int) -> str:
+        # 💬 добавляем невидимые символы справа, чтобы все кнопки были одинаковой длины
+        t = (text or "").strip()
+        if len(t) >= target_len:
+            return t
+        return t + (PAD * (target_len - len(t)))
+
     # 💬 готовим тексты и выравниваем длину, чтобы 🎧 не "прыгало" из-за центрирования
     titles = []
     for eid, e in items:
@@ -841,10 +850,13 @@ def _kb_admin_eps_pick(data: Dict[str, Any], cb_prefix: str) -> InlineKeyboardMa
 
     rows = []
     for eid, t in titles:
-        rows.append([InlineKeyboardButton(text=_pad_btn(t, max_len), callback_data=f"pod:ep:{eid}")])
+        rows.append(
+            [InlineKeyboardButton(text=_pad_btn(t, max_len), callback_data=f"{cb_prefix}:{eid}")]
+        )  # 💬 важно: используем cb_prefix, чтобы попасть в админ-хендлеры
 
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
 
 
 def _kb_admin_episode_edit_menu(eid: str) -> InlineKeyboardMarkup:
