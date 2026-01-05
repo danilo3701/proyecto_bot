@@ -183,6 +183,15 @@ def _read_fragments_from_pack(topic: Dict[str, Any], pack_idx: int) -> List[Dict
     frags = packs[pack_idx].get("fragments") or []
     return frags if isinstance(frags, list) else []
 
+def _read_fragments(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
+    # 💬 совместимость: собираем все fragments из всех пакетов чтения в один список
+    packs = _read_packs(topic)
+    out: List[Dict[str, Any]] = []
+    for p in packs:
+        fr = p.get("fragments") or []
+        if isinstance(fr, list):
+            out.extend(fr)
+    return out
 
 
 def _item_type(item: Dict[str, Any]) -> str:
@@ -596,6 +605,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
             q = str(item.get("question") or "Выбери ответ")
             opts = item.get("options") or item.get("answers") or []
             opts = [str(x) for x in opts][:10]
+
             correct = 0  # 💬 по умолчанию первый
             if "correct_option_id" in item:
                 try:
@@ -605,8 +615,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
             elif isinstance(item.get("correct"), int):
                 correct = int(item.get("correct"))
             elif item.get("correct_answer") in opts:
-                correct = opts.index(item.get("correct_answer"))  # 💬 CreateLessonBlock: correct_answer = текст
-
+                correct = opts.index(item.get("correct_answer"))  # 💬 correct_answer = текст правильного варианта
 
             poll_msg = await _bot.send_poll(
                 chat_id=chat_id,
@@ -616,15 +625,16 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                 correct_option_id=correct,
                 is_anonymous=False,
             )
-            await state.set_state(GrammarStates.theory_poll)
+            await state.set_state(GrammarStates.theory_poll)  # 💬 ждём PollAnswer для теории
             await state.update_data(
                 gram_poll_id=poll_msg.poll.id,
                 gram_poll_msg_id=poll_msg.message_id,
                 gram_poll_correct=correct,
                 gram_poll_options=opts,
-                gram_poll_section="theory",
+                gram_poll_section="theory",  # 💬 отмечаем, что это теория
             )
             return
+
 
         if t == "photo":
             photo = item.get("photo") or item.get("file_id") or item.get("image") or item.get("url")
@@ -781,6 +791,7 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
         q = str(item.get("question") or "Выбери ответ")
         opts = item.get("options") or item.get("answers") or []
         opts = [str(x) for x in opts][:10]
+
         correct = 0  # 💬 по умолчанию первый
         if "correct_option_id" in item:
             try:
@@ -790,8 +801,7 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
         elif isinstance(item.get("correct"), int):
             correct = int(item.get("correct"))
         elif item.get("correct_answer") in opts:
-            correct = opts.index(item.get("correct_answer"))  # 💬 CreateLessonBlock: correct_answer = текст
-        
+            correct = opts.index(item.get("correct_answer"))  # 💬 correct_answer = текст правильного варианта
 
         poll_msg = await _bot.send_poll(
             chat_id=chat_id,
@@ -801,15 +811,16 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
             correct_option_id=correct,
             is_anonymous=False,
         )
-        await state.set_state(GrammarStates.practice_poll)
+        await state.set_state(GrammarStates.practice_poll)  # 💬 ждём PollAnswer для практики
         await state.update_data(
             gram_poll_id=poll_msg.poll.id,
             gram_poll_msg_id=poll_msg.message_id,
             gram_poll_correct=correct,
             gram_poll_options=opts,
-            gram_poll_section="practice",
+            gram_poll_section="practice",  # 💬 отмечаем, что это практика
         )
         return
+
 
     if t == "photo":
         photo = item.get("photo") or item.get("file_id") or item.get("image") or item.get("url")
