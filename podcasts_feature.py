@@ -380,7 +380,7 @@ def _format_note_screen(notes: List[Dict[str, Any]], idx: int) -> str:
 
 SPEAKER_EMOJI = {
     "roi": "🌝",
-    "paco": "🌞",
+    "paco": "🌚",
 }
 
 def _split_speaker_prefix(text: str) -> Tuple[Optional[str], str]:
