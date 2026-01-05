@@ -1213,7 +1213,7 @@ init_grammar_feature(
     load_user_data=load_user_data,
     save_user_data=save_user_data,
     show_topics_for_category_level=(lambda *args, **kwargs: globals()["show_topics_for_category_level"](*args, **kwargs)),  # 💬 прокси чтобы избежать NameError при импорте
-    start_handler=(lambda message, state: globals()["start_handler"](message, state)),  # 💬 прокси чтобы избежать NameError при импорте
+    start_handler=(lambda *args, **kwargs: globals()["start_handler"](*args, **kwargs)),  # 💬 прокси чтобы избежать NameError при импорте
     admin_chat_id=ADMIN_CHAT_ID,
     bot=bot,
 )  # 💬 пробрасываем зависимости в модуль грамматики
@@ -2004,7 +2004,9 @@ async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
         return
         
     elif action == "gram":
-        await show_topics_for_category_level(callback.message, state, category="gram", level=level)  # 💬 показываем темы грамматики
+        await state.update_data(chosen_category="gram")  # 💬 фиксируем категорию грамматики
+        await show_topics_for_category_level(callback, state, category="gram", level=level)  # 💬 показываем темы грамматики
+        await callback.answer()  # 💬 закрываем loading
         return
 
 
@@ -2923,7 +2925,7 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
             if topics.get(topic_key, {}).get("category") == "gram":
                 return await open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню
 
-            return await lesson_menu_handler(callback.message, state)  # 💬 старое поведение для lex и остального
+            return await lesson_menu_handler(query.message, state)  # 💬 query = текущий CallbackQuery
 
 
     elif active:
