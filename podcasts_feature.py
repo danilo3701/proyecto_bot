@@ -101,6 +101,9 @@ class PodcastAdminStates(StatesGroup):
     choosing_action = State()
 
     waiting_author_name = State()
+    choosing_author_for_edit_name = State()  # 💬 выбор автора для переименования
+    waiting_edit_author_name = State()  # 💬 ввод нового имени автора
+
 
     choosing_author_for_episode = State()
     choosing_episode_category = State()  # 💬 выбор категории перед названием эпизода
@@ -780,17 +783,30 @@ def _admin_only(message_or_cb) -> bool:
 
 
 def _kb_admin_menu() -> InlineKeyboardMarkup:
+    # 💬 главное меню админки подкастов
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Добавить автора", callback_data="podadm:add_author")],
+            [InlineKeyboardButton(text="✏️ Редактировать автора", callback_data="podadm:edit_author")],  # 💬 подменю автора
             [InlineKeyboardButton(text="➕ Добавить эпизод", callback_data="podadm:add_episode")],
             [InlineKeyboardButton(text="➕ Добавить фрагменты", callback_data="podadm:add_frags")],
-            [InlineKeyboardButton(text="✏️ Редактировать фрагменты", callback_data="podadm:edit_frags")],  # 💬 очистить и вставить заново
+            [InlineKeyboardButton(text="✏️ Редактировать эпизод", callback_data="podadm:edit_frags")],  # 💬 редактирование эпизода
             [InlineKeyboardButton(text="🗑 Удалить эпизод", callback_data="podadm:del_ep")],
             [InlineKeyboardButton(text="📋 Список", callback_data="podadm:list")],
             [InlineKeyboardButton(text="❌ Закрыть", callback_data="podadm:close")],
         ]
     )
+
+
+def _kb_admin_author_edit_menu() -> InlineKeyboardMarkup:
+    # 💬 подменю редактирования автора
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить автора", callback_data="podadm:add_author")],  # 💬 существующий поток
+            [InlineKeyboardButton(text="✏️ Редактировать имя автора", callback_data="podadm:edit_author_name")],  # 💬 новый поток
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")],
+        ]
+    )
+
 
 def _kb_admin_frags_continue() -> InlineKeyboardMarkup:
     # 💬 кнопка выхода из режима добавления фрагментов без зависаний
@@ -902,12 +918,15 @@ async def podcasts_admin_text_alias(message: Message, state: FSMContext) -> None
     "podadm:close",
     "podadm:back",
     "podadm:list",
+    "podadm:edit_author",
+    "podadm:edit_author_name",
     "podadm:add_author",
     "podadm:add_episode",
     "podadm:add_frags",
     "podadm:edit_frags",
     "podadm:del_ep",
 ]))
+
 async def podcasts_admin_cb(cb: CallbackQuery, state: FSMContext) -> None:
     # 💬 ловим только “меню-экшены”, а pick_* отдадим отдельным хендлерам
 
@@ -936,6 +955,23 @@ async def podcasts_admin_cb(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.message.answer(txt)
         await cb.answer()
         return
+
+    if action == "edit_author":
+        await state.set_state(PodcastAdminStates.choosing_action)
+        await cb.message.answer("✏️ Автор:", reply_markup=_kb_admin_author_edit_menu())
+        await cb.answer()
+        return
+
+    if action == "edit_author_name":
+        data = _read_podcasts()
+        await state.set_state(PodcastAdminStates.choosing_author_for_edit_name)
+        await cb.message.answer(
+            "Выбери автора для переименования:",
+            reply_markup=_kb_admin_authors_pick(data, "podadm:pick_author_rename"),
+        )  # 💬 выбираем автора, потом просим новое имя
+        await cb.answer()
+        return
+
 
     if action == "add_author":
         await state.set_state(PodcastAdminStates.waiting_author_name)
@@ -998,6 +1034,14 @@ async def admin_pick_episode_category(cb: CallbackQuery, state: FSMContext) -> N
     await cb.message.answer("Теперь пришли название эпизода (одной строкой).")
     await cb.answer()
 
+@router.callback_query(F.data.startswith("podadm:pick_author_rename:"))
+async def admin_pick_author_rename(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 выбрали автора, просим новое имя
+    author_id = cb.data.split(":")[-1]
+    await state.update_data(adm_edit_author_id=author_id)  # 💬 запоминаем автора для переименования
+    await state.set_state(PodcastAdminStates.waiting_edit_author_name)
+    await cb.message.answer("Пришли новое имя автора одним сообщением:")
+    await cb.answer()
 
 
 @router.message(PodcastAdminStates.waiting_author_name)
@@ -1019,7 +1063,31 @@ async def admin_add_author_name(message: Message, state: FSMContext) -> None:
 
     await state.clear()
     await message.answer(f"✅ Автор добавлен\nid = {aid}\nИмя = {name}\n\n/podcasts_admin")
-    
+
+
+@router.message(PodcastAdminStates.waiting_edit_author_name)
+async def admin_save_author_new_name(message: Message, state: FSMContext) -> None:
+    # 💬 сохраняем новое имя автора в podcasts_data.json
+    st = await state.get_data()
+    aid = st.get("adm_edit_author_id")
+    new_name = (message.text or "").strip()
+    if not aid or not new_name:
+        await message.answer("Имя пустое. Пришли ещё раз.")
+        return
+
+    data = _read_podcasts()
+    authors = data.get("authors", {})
+    if aid not in authors:
+        await message.answer("Автор не найден. /podcasts_admin")
+        await state.clear()
+        return
+
+    authors[aid]["name"] = new_name  # 💬 обновляем имя автора
+    _write_podcasts(data)  # 💬 сохраняем в RailwayData (/data)
+
+    await state.set_state(PodcastAdminStates.choosing_action)
+    await message.answer("✅ Имя автора обновлено.", reply_markup=_kb_admin_menu())
+
 
 @router.message(PodcastAdminStates.waiting_episode_title)
 async def admin_episode_title(message: Message, state: FSMContext) -> None:
