@@ -270,6 +270,10 @@ class EditTopicStates(StatesGroup):
     waiting_dialog_description = State()
     waiting_dialog_photo    = State()
 
+class EditGrammarStates(StatesGroup):
+    waiting_section = State()        # 💬 выбор: теория, практика, видео, читать
+    waiting_phase = State()          # 💬 выбор фазы теории
+    waiting_delete_index = State()   # 💬 ввод индекса для удаления
 
 
 def get_main_menu(category: str | None = None) -> ReplyKeyboardMarkup:
@@ -502,6 +506,77 @@ async def get_topic_description(message: Message, state: FSMContext):
 
 
 
+def _preview_text(s: str, limit: int = 30) -> str:
+    # 💬 короткое превью текста без падений
+    s = (s or "").strip().replace("\n", " ")
+    if not s:
+        return "<пусто>"
+    return s[:limit] + ("…" if len(s) > limit else "")
+
+
+def _preview_url_title(url: str) -> str:
+    # 💬 имя ссылки по домену если нет title
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(url).netloc or "").replace("www.", "")
+        return host or "ссылка"
+    except Exception:
+        return "ссылка"
+
+
+def _preview_item(item: dict) -> str:
+    # 💬 универсальное превью для блоков грамматики (text, photo, quiz, poll, link, asset)
+    if not isinstance(item, dict):
+        return "элемент"
+
+    t = (item.get("type") or item.get("media_type") or "").strip().lower()
+
+    # text
+    if t in {"text"}:
+        return f"📝 {_preview_text(str(item.get('text') or item.get('content') or ''))}"
+
+    # quiz
+    if t in {"quiz", "textquiz"}:
+        q = str(item.get("question") or item.get("q") or "вопрос")
+        return f"🎯 {_preview_text(q)}"
+
+    # poll (на всякий)
+    if t in {"poll"}:
+        q = str(item.get("question") or "вопрос")
+        return f"📊 {_preview_text(q)}"
+
+    # photo blocks from vocab or exercises
+    if t in {"photo"}:
+        mt = (item.get("media_type") or "").lower()
+        if mt == "sticker":
+            return "🖼 стикер"
+        if mt == "animation":
+            return "🖼 гиф/видео"
+        return "🖼 фото"
+
+    # assets inside reading
+    if t in {"asset"}:
+        mt = (item.get("media_type") or "").lower()
+        if mt == "photo":
+            return "🖼 фото"
+        if mt == "document":
+            return "📎 файл"
+        if mt == "url":
+            return f"🔗 {_preview_url_title(str(item.get('file') or ''))}"
+        return "📎 ассет"
+
+    # link blocks
+    if "link" in item:
+        url = str(item.get("link") or "")
+        title = str(item.get("title") or "") or _preview_url_title(url)
+        return f"🔗 {_preview_text(title)}"
+
+    # fallback by fields
+    if item.get("title"):
+        return f"📌 {_preview_text(str(item.get('title')))}"
+    if item.get("file"):
+        return "📎 ассет"
+    return "элемент"
 
 
 
@@ -596,119 +671,97 @@ async def handle_main_menu(message: Message, state: FSMContext):
     # ----------------------- Просмотреть то, что уже создали -----------------------
 
     if text == "👁 Просмотреть":
-        topic_path = data.get("topic_path")  # 💬 что делает эта часть: фикс NameError, используем актуальный путь
+        # 💬 всегда читаем JSON с диска, чтобы обзор был актуальный
+        topic_path = data.get("topic_path")
+        if not topic_path or not os.path.exists(topic_path):
+            await message.answer("Ошибка: файл темы не найден.", disable_web_page_preview=True)
+            keyboard = get_main_menu((data.get("topic") or {}).get("category"))
+            await message.answer("С чего начнём?", reply_markup=keyboard)
+            await state.set_state(NewTopicStates.waiting_first_choice)
+            return
 
-        # 💬 Читаем текущий JSON-файл
-        if topic_path and os.path.exists(topic_path):
-            with open(topic_path, "r", encoding="utf-8") as f:
-                topic_data = json.load(f)
+        with open(topic_path, "r", encoding="utf-8") as f:
+            topic_data = json.load(f) or {}
 
-            lines = []
+        category_now = (topic_data.get("category") or (data.get("topic") or {}).get("category") or "").strip()
 
-            # 1) Словари (quiz/text/link)
-            vocab_list = topic_data.get("vocab", [])
-            if vocab_list:
-                lines.append("🗂 <b>Словари:</b>")
-                for idx, block in enumerate(vocab_list, start=1):
-                    # Quiz-блок
-                    if block.get("type") == "quiz":
-                        preview = block.get("question", "<без вопроса>")
-                    # Text-блок
-                    elif block.get("type") == "text":
-                        txt = block.get("text", "")
-                        words = txt.split()
-                        preview = " ".join(words[:5]) + ("…" if len(words) > 5 else "")
-                    # Link-блок
-                    else:
-                        title = block.get("title") or "Без названия"
-                        url   = block.get("link", "")
-                        preview = f'{title} — <a href="{url}">ссылка</a> ({url})'
-                    lines.append(f"  {idx}) {preview}")
-                lines.append("")
+        lines = []
+        lines.append(f"📌 <b>{topic_data.get('visible_title') or topic_data.get('title') or 'Тема'}</b>")
+        if topic_data.get("description"):
+            lines.append(f"🧾 {_preview_text(str(topic_data.get('description')), 80)}")
+        lines.append("")
 
-            # 2) Общие упражнения (quiz/text/link)
-            ex_list = topic_data.get("exercises", [])
-            if ex_list:
-                lines.append("✏️ <b>Упражнения:</b>")
-                for idx, block in enumerate(ex_list, start=1):
-                    if block.get("type") == "quiz":
-                        preview = block.get("question", "<без вопроса>")
-                    elif block.get("type") == "text":
-                        txt = block.get("text", "")
-                        words = txt.split()
-                        preview = " ".join(words[:5]) + ("…" if len(words) > 5 else "")
-                    else:
-                        title = block.get("title") or "Без названия"
-                        url   = block.get("link", "")
-                        preview = f'{title} — <a href="{url}">ссылка</a> ({url})'
-                    lines.append(f"  {idx}) {preview}")
-                lines.append("")
-
-            # 3) Видео (link)
-            vid_list = topic_data.get("videos", [])
-            if vid_list:
-                lines.append("🎥 <b>Видео:</b>")
-                for idx, vid in enumerate(vid_list, start=1):
-                    title = vid.get("title") or "Без названия"
-                    url   = vid.get("link", "")
-                    lines.append(f'  {idx}) <a href="{url}">{title}</a>')
-                lines.append("")
-
-            # 4) Диалоги и упражнения внутри них
-            dlg_list = topic_data.get("dialogs", [])
-            if dlg_list:
-                lines.append("💬 <b>Диалоги:</b>")
-                for d_idx, dlg in enumerate(dlg_list, start=1):
-                    # Заголовок диалога
-                    lines.append(f"  {d_idx}) 💬 <b>{dlg.get('title','Без названия')}</b>")
-                    # Упражнения по диалогу
-                    for ex_idx, block in enumerate(dlg.get("exercises", []), start=1):
-                        if block.get("type") == "quiz":
-                            preview = block.get("question", "<без вопроса>")
-                        elif block.get("type") == "text":
-                            txt = block.get("text", "")
-                            words = txt.split()
-                            preview = " ".join(words[:5]) + ("…" if len(words) > 5 else "")
-                        else:
-                            title = block.get("title") or "Без названия"
-                            url   = block.get("link", "")
-                            preview = f'{title} — <a href="{url}">ссылка</a> ({url})'
-                        lines.append(f"      {d_idx}.{ex_idx}) {preview}")
-                lines.append("")
-
-            # 5) Чтение (как подкасты)
-            reading_list = topic_data.get("reading", [])
-            if reading_list:
-                lines.append("📖 <b>Чтение:</b>")
-                for r_idx, pack in enumerate(reading_list, start=1):
-                    ttl = pack.get("title") or "Без названия"
-                    cnt = len(pack.get("fragments", []))
-                    lines.append(f"  {r_idx}) 📖 <b>{ttl}</b> (фрагментов: {cnt})")
-                lines.append("")  # 💬 что делает эта часть: добавили краткий список пакетов чтения
-
-
-            # Если ничего не добавлено
-            if not lines:
-                await message.answer(
-                    "Пока нет добавленных блоков.",
-                    disable_web_page_preview=True
-                )
+        if category_now == "gram":
+            # ====== ТЕОРИЯ (vocab phases) ======
+            phases = topic_data.get("vocab") or []
+            lines.append("📖 <b>Теория (фазы):</b>")
+            if not phases:
+                lines.append("  — пусто")
             else:
-                # Отправляем всё одним сообщением
-                preview_text = "\n".join(lines)
-                await message.answer(
-                    preview_text,
-                    parse_mode="HTML",
-                    disable_web_page_preview=True
-                )
-        else:
-            await message.answer(
-                "Ошибка: файл темы не найден.",
-                disable_web_page_preview=True
-            )
+                for p_idx, ph in enumerate(phases, start=1):
+                    ph_name = str(ph.get("phase_name") or f"Фаза {p_idx}")
+                    items = ph.get("vocab") or []
+                    lines.append(f"  {p_idx}) <b>{_preview_text(ph_name, 40)}</b> (элементов: {len(items)})")
+                    for i_idx, it in enumerate(items[:8], start=1):
+                        lines.append(f"      {p_idx}.{i_idx}) {_preview_item(it)}")
+                    if len(items) > 8:
+                        lines.append("      …")
+            lines.append("")
 
-        # 💡 Восстанавливаем главное меню кнопок и состояние
-        keyboard = get_main_menu((data.get("topic") or {}).get("category"))  # 💬 возвращаем правильное меню (lex/gram)
+            # ====== ПРАКТИКА (exercises) ======
+            ex_list = topic_data.get("exercises") or []
+            lines.append("📝 <b>Практика:</b>")
+            if not ex_list:
+                lines.append("  — пусто")
+            else:
+                for idx, it in enumerate(ex_list[:15], start=1):
+                    lines.append(f"  {idx}) {_preview_item(it)}")
+                if len(ex_list) > 15:
+                    lines.append("  …")
+            lines.append("")
+
+            # ====== ВИДЕО ======
+            vid_list = topic_data.get("videos") or []
+            lines.append("🎥 <b>Видео:</b>")
+            if not vid_list:
+                lines.append("  — пусто")
+            else:
+                for idx, v in enumerate(vid_list[:15], start=1):
+                    title = str(v.get("title") or _preview_url_title(str(v.get("link") or "")) or "видео")
+                    lines.append(f"  {idx}) 🎬 {_preview_text(title, 50)}")
+                if len(vid_list) > 15:
+                    lines.append("  …")
+            lines.append("")
+
+            # ====== ЧИТАТЬ (reading packs) ======
+            reading_list = topic_data.get("reading") or []
+            lines.append("📚 <b>Читать:</b>")
+            if not reading_list:
+                lines.append("  — пусто")
+            else:
+                for r_idx, pack in enumerate(reading_list[:15], start=1):
+                    ttl = str(pack.get("title") or "Чтение")
+                    fr = pack.get("fragments") or []
+                    assets = pack.get("assets") or []
+                    first = ""
+                    if fr:
+                        first = _preview_text(str(fr[0]), 40)
+                    elif assets:
+                        first = _preview_item(assets[0])
+                    lines.append(f"  {r_idx}) 📖 <b>{_preview_text(ttl, 40)}</b> (fr={len(fr)}, assets={len(assets)})")
+                    if first:
+                        lines.append(f"      ↳ {first}")
+                if len(reading_list) > 15:
+                    lines.append("  …")
+            lines.append("")
+
+        else:
+            # 💬 fallback для лексики оставляем как было, но без падений
+            lines.append("ℹ️ Это не грамматика. Для лексики оставляем старый просмотр.")
+
+        await message.answer("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+
+        keyboard = get_main_menu(category_now)
         await message.answer("С чего начнём?", reply_markup=keyboard)
         await state.set_state(NewTopicStates.waiting_first_choice)
         return
@@ -720,6 +773,21 @@ async def handle_main_menu(message: Message, state: FSMContext):
         data = await state.get_data()
         topic = data.get("topic")
         path  = data.get("topic_path")
+        category_now = (topic or {}).get("category")
+        if category_now == "gram":
+            # 💬 отдельное редактирование для грамматики
+            kb = ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="📖 Теория"), KeyboardButton(text="📝 Практика")],
+                    [KeyboardButton(text="🎥 Видео"), KeyboardButton(text="📚 Читать")],
+                    [KeyboardButton(text="🚫 Отмена")],
+                ],
+                resize_keyboard=True,
+            )
+            await message.answer("✏️ Редактирование грамматики. Выберите раздел:", reply_markup=kb)
+            await state.set_state(EditGrammarStates.waiting_section)
+            return
+
         if not topic or not path:
             await message.answer("❗ Ошибка: тема не загружена. Пожалуйста, создайте или откройте тему заново.")
             return
@@ -742,6 +810,235 @@ async def handle_main_menu(message: Message, state: FSMContext):
     # ----------------------- Обработка ввода не из списка -----------------------
     # Если сообщение не соответствует ни одной кнопке, просим выбрать ещё раз
     await message.answer("❗ Выберите, пожалуйста, одну из кнопок Главного меню.")
+
+
+
+
+@router.message(EditGrammarStates.waiting_section)
+async def edit_grammar_choose_section(message: Message, state: FSMContext):
+    # 💬 выбираем раздел грамматики для удаления
+    section = (message.text or "").strip()
+    data = await state.get_data()
+    topic_path = data.get("topic_path")
+
+    if section == "🚫 Отмена":
+        keyboard = get_main_menu("gram")
+        await message.answer("Ок. Возвращаемся в меню.", reply_markup=keyboard)
+        await state.set_state(NewTopicStates.waiting_first_choice)
+        return
+
+    if not topic_path or not os.path.exists(topic_path):
+        await message.answer("❗ Ошибка: файл темы не найден.")
+        keyboard = get_main_menu("gram")
+        await message.answer("Возвращаемся в меню.", reply_markup=keyboard)
+        await state.set_state(NewTopicStates.waiting_first_choice)
+        return
+
+    with open(topic_path, "r", encoding="utf-8") as f:
+        topic_data = json.load(f) or {}
+
+    await state.update_data(topic=topic_data, edit_gram_section=section)
+
+    if section == "📖 Теория":
+        phases = topic_data.get("vocab") or []
+        if not phases:
+            await message.answer("Теория пустая.")
+            kb = get_main_menu("gram")
+            await message.answer("Меню.", reply_markup=kb)
+            await state.set_state(NewTopicStates.waiting_first_choice)
+            return
+
+        buttons = [[KeyboardButton(text=f"{i}. {p.get('phase_name') or f'Фаза {i}'}")] for i, p in enumerate(phases, 1)]
+        buttons.append([KeyboardButton(text="↩️ Назад")])
+        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+        await message.answer("Выбери фазу для редактирования:", reply_markup=kb)
+        await state.set_state(EditGrammarStates.waiting_phase)
+        return
+
+    # Практика, Видео, Читать сразу показываем список
+    await _edit_grammar_show_list(message, state)
+
+
+@router.message(EditGrammarStates.waiting_phase)
+async def edit_grammar_choose_phase(message: Message, state: FSMContext):
+    # 💬 выбор фазы теории для удаления элемента
+    text = (message.text or "").strip()
+    if text == "↩️ Назад":
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📖 Теория"), KeyboardButton(text="📝 Практика")],
+                [KeyboardButton(text="🎥 Видео"), KeyboardButton(text="📚 Читать")],
+                [KeyboardButton(text="🚫 Отмена")],
+            ],
+            resize_keyboard=True,
+        )
+        await message.answer("Выбери раздел:", reply_markup=kb)
+        await state.set_state(EditGrammarStates.waiting_section)
+        return
+
+    try:
+        phase_idx = int(text.split(".", 1)[0].strip()) - 1
+    except Exception:
+        await message.answer("❗ Нажми кнопку фазы.")
+        return
+
+    data = await state.get_data()
+    topic = data.get("topic") or {}
+    phases = topic.get("vocab") or []
+    if not (0 <= phase_idx < len(phases)):
+        await message.answer("❗ Фаза не найдена.")
+        return
+
+    await state.update_data(edit_gram_phase_index=phase_idx)
+    await _edit_grammar_show_list(message, state)
+
+
+async def _edit_grammar_show_list(message: Message, state: FSMContext):
+    # 💬 показываем список элементов выбранного раздела и просим индекс для удаления
+    data = await state.get_data()
+    topic = data.get("topic") or {}
+    section = data.get("edit_gram_section")
+    phase_idx = data.get("edit_gram_phase_index")
+
+    lines = ["👁 Вот что есть сейчас:"]
+    items = []
+
+    if section == "📖 Теория":
+        phases = topic.get("vocab") or []
+        ph = phases[phase_idx] if isinstance(phase_idx, int) and 0 <= phase_idx < len(phases) else None
+        items = (ph or {}).get("vocab") or []
+        lines.append(f"📖 Фаза: {ph.get('phase_name') if ph else 'не найдена'}")
+        if not items:
+            lines.append("— пусто")
+    elif section == "📝 Практика":
+        items = topic.get("exercises") or []
+        if not items:
+            lines.append("— пусто")
+    elif section == "🎥 Видео":
+        items = topic.get("videos") or []
+        if not items:
+            lines.append("— пусто")
+    elif section == "📚 Читать":
+        items = topic.get("reading") or []
+        if not items:
+            lines.append("— пусто")
+    else:
+        await message.answer("❗ Неизвестный раздел.")
+        return
+
+    # формируем строки
+    for i, it in enumerate(items, start=1):
+        if section == "🎥 Видео":
+            title = str((it or {}).get("title") or _preview_url_title(str((it or {}).get("link") or "")) or "видео")
+            lines.append(f"{i}) 🎬 {_preview_text(title, 50)}")
+        elif section == "📚 Читать":
+            ttl = str((it or {}).get("title") or "Чтение")
+            fr = (it or {}).get("fragments") or []
+            assets = (it or {}).get("assets") or []
+            lines.append(f"{i}) 📖 {_preview_text(ttl, 40)} (fr={len(fr)}, assets={len(assets)})")
+        else:
+            lines.append(f"{i}) {_preview_item(it)}")
+
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🗑 Удалить по индексу")],
+            [KeyboardButton(text="↩️ Назад"), KeyboardButton(text="🚫 Отмена")],
+        ],
+        resize_keyboard=True,
+    )
+    await message.answer("\n".join(lines), reply_markup=kb, disable_web_page_preview=True)
+    await state.set_state(EditGrammarStates.waiting_delete_index)
+
+
+@router.message(EditGrammarStates.waiting_delete_index)
+async def edit_grammar_delete_index(message: Message, state: FSMContext):
+    # 💬 удаляем элемент по индексу и сохраняем JSON
+    text = (message.text or "").strip()
+
+    if text == "🚫 Отмена":
+        keyboard = get_main_menu("gram")
+        await message.answer("Ок. Меню.", reply_markup=keyboard)
+        await state.set_state(NewTopicStates.waiting_first_choice)
+        return
+
+    if text == "↩️ Назад":
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📖 Теория"), KeyboardButton(text="📝 Практика")],
+                [KeyboardButton(text="🎥 Видео"), KeyboardButton(text="📚 Читать")],
+                [KeyboardButton(text="🚫 Отмена")],
+            ],
+            resize_keyboard=True,
+        )
+        await message.answer("Выбери раздел:", reply_markup=kb)
+        await state.set_state(EditGrammarStates.waiting_section)
+        return
+
+    if text == "🗑 Удалить по индексу":
+        await message.answer("Напиши номер индекса (например 1):", reply_markup=ReplyKeyboardRemove())
+        return
+
+    if not text.isdigit():
+        await message.answer("❗ Напиши номер (например 1) или нажми «↩️ Назад».")
+        return
+
+    idx = int(text) - 1
+
+    data = await state.get_data()
+    topic = data.get("topic") or {}
+    topic_path = data.get("topic_path")
+    section = data.get("edit_gram_section")
+    phase_idx = data.get("edit_gram_phase_index")
+
+    if not topic_path:
+        await message.answer("❗ Ошибка: topic_path не найден.")
+        return
+
+    # выбираем список
+    if section == "📖 Теория":
+        phases = topic.get("vocab") or []
+        if not (isinstance(phase_idx, int) and 0 <= phase_idx < len(phases)):
+            await message.answer("❗ Фаза не найдена.")
+            return
+        items = phases[phase_idx].get("vocab") or []
+        if not (0 <= idx < len(items)):
+            await message.answer("❗ Индекс вне диапазона.")
+            return
+        items.pop(idx)
+        phases[phase_idx]["vocab"] = items
+        topic["vocab"] = phases
+    elif section == "📝 Практика":
+        items = topic.get("exercises") or []
+        if not (0 <= idx < len(items)):
+            await message.answer("❗ Индекс вне диапазона.")
+            return
+        items.pop(idx)
+        topic["exercises"] = items
+    elif section == "🎥 Видео":
+        items = topic.get("videos") or []
+        if not (0 <= idx < len(items)):
+            await message.answer("❗ Индекс вне диапазона.")
+            return
+        items.pop(idx)
+        topic["videos"] = items
+    elif section == "📚 Читать":
+        items = topic.get("reading") or []
+        if not (0 <= idx < len(items)):
+            await message.answer("❗ Индекс вне диапазона.")
+            return
+        items.pop(idx)
+        topic["reading"] = items
+    else:
+        await message.answer("❗ Неизвестный раздел.")
+        return
+
+    with open(topic_path, "w", encoding="utf-8") as f:
+        json.dump(topic, f, ensure_ascii=False, indent=2)
+
+    await state.update_data(topic=topic)
+    await message.answer("✅ Удалено. Обновляю список…")
+    await _edit_grammar_show_list(message, state)
+
 
 
 
@@ -1907,7 +2204,6 @@ async def save_reading_fragments(message: Message, state: FSMContext):
     )
     await message.answer("✅ Фрагменты добавлены. Что ещё добавить?", reply_markup=kb)
     return await state.set_state(NewTopicStates.waiting_reading_action)
-waiting_first_choice)
 
 
 
@@ -2231,6 +2527,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
