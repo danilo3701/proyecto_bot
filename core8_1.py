@@ -210,8 +210,7 @@ from bonuses_feature import (
     bonus_try_qualify_referral,
 )  # 💬 модуль «🎁 Бонусы»
 from podcasts_feature import router as podcasts_router, init_podcasts_feature, podcasts_open  # 💬 модуль "Подкасты"
-from grammar_feature import router as grammar_router, init_grammar_feature, grammar_open_from_topic  # 💬 модуль грамматики
-
+from grammar_feature import router as grammar_router, init_grammar_feature, set_topics_ref as set_grammar_topics_ref, open_grammar_topic  # 💬 модуль "Грамматика"
 
 
 # ——— Сценарии для учеников ——————————————————————————————————————
@@ -1208,6 +1207,14 @@ init_podcasts_feature(
     bot=bot,
 )  # 💬 пробрасываем зависимости в модуль "Подкасты"
 
+init_grammar_feature(
+    load_user_data=load_user_data,
+    save_user_data=save_user_data,
+    show_topics_for_category_level=show_topics_for_category_level,
+    start_handler=start_handler,
+    admin_chat_id=ADMIN_CHAT_ID,
+    bot=bot,
+)  # 💬 пробрасываем зависимости в модуль грамматики
 
 
 # ─── УТИЛИТЫ XP ───────────────────────────────────────
@@ -1592,7 +1599,10 @@ async def start_handler(message: Message, state: FSMContext):
     await cancel_battle_if_running(bot, message.chat.id, message.from_user.id)  # 💬 если шла битва = останавливаем её на /start
 
     await state.clear()
+
+    
     global topics
+    set_grammar_topics_ref(topics)  # 💬 даём модулю грамматики доступ к topics
     topics = load_topics()
     set_topics_ref(topics)  # 💬 обновляем topics для "Битвы" после /start
 
@@ -1989,6 +1999,11 @@ async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
         await show_topics_for_category_level(callback, state, category="lex", level=level)
         await callback.answer()
         return
+        
+    elif action == "gram":
+        await show_topics_for_category_level(callback.message, state, category="gram", level=level)  # 💬 показываем темы грамматики
+        return
+
 
 
 
@@ -2902,9 +2917,9 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
                 save_user_data(data)
             topic = topics.get(topic_key, {})  # 💬 достаём тему, чтобы понять category
             
-            if topic.get("category") == "gram":
-                return await grammar_open_from_topic(callback.message, state)  # 💬 открываем меню грамматики
-            
+            if topics.get(topic_key, {}).get("category") == "gram":
+                return await open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню
+
             return await lesson_menu_handler(callback.message, state)  # 💬 старое поведение для lex и остального
 
 
