@@ -318,6 +318,15 @@ def _kb_authors(data: Dict[str, Any]) -> InlineKeyboardMarkup:
 
 
 def _kb_episodes(data: Dict[str, Any], author_id: str) -> InlineKeyboardMarkup:
+    PAD = "\u2800"  # 💬 невидимый символ (Braille blank) для выравнивания текста в кнопках
+
+    def _pad_btn(text: str, target_len: int) -> str:
+        # 💬 добавляем невидимые символы справа, чтобы все кнопки были одинаковой длины
+        t = (text or "").strip()
+        if len(t) >= target_len:
+            return t
+        return t + (PAD * (target_len - len(t)))
+
     eps = data.get("episodes", {})
     items = [(eid, e) for eid, e in eps.items() if e.get("author_id") == author_id]
     items.sort(key=lambda x: x[1].get("order", 9999))
@@ -819,8 +828,21 @@ def _kb_admin_eps_pick(data: Dict[str, Any], cb_prefix: str) -> InlineKeyboardMa
     items = list(eps.items())
     items.sort(key=lambda x: x[1].get("order", 9999))
     rows = []
+    # 💬 готовим тексты и выравниваем длину, чтобы 🎧 не "прыгало" из-за центрирования
+    titles = []
     for eid, e in items:
-        rows.append([InlineKeyboardButton(text=e.get("title", "🎧 Эпизод"), callback_data=f"{cb_prefix}:{eid}")])
+        t = (e.get("title") or "Эпизод").strip()
+        if not t.startswith("🎧"):
+            t = f"🎧 {t}"  # 💬 единый префикс
+        titles.append((eid, t))
+
+    max_len = max((len(t) for _, t in titles), default=0)
+    max_len = min(max_len, 60)  # 💬 защита, чтобы не раздувать кнопки при очень длинных названиях
+
+    rows = []
+    for eid, t in titles:
+        rows.append([InlineKeyboardButton(text=_pad_btn(t, max_len), callback_data=f"pod:ep:{eid}")])
+
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
