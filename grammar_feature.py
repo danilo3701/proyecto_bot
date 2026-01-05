@@ -34,25 +34,31 @@ _bot = None
 _topics: Dict[str, Any] = {}  # 💬 topics ref из core
 
 
-def init_grammar_feature(
-    *,
-    load_user_data: Callable[[], Dict[str, Any]],
-    save_user_data: Callable[[Dict[str, Any]], None],
-    show_topics_for_category_level: Callable[..., Any],
-    start_handler: Callable[..., Any],
-    admin_chat_id: int,
-    bot,
-) -> None:
+def init_grammar_feature(*args, **kwargs) -> None:
     """
-    💬 пробрасываем зависимости из core8_1 (76).py
+    💬 пробрасываем зависимости из core8_1
+    💬 совместимость = если старый core вызывает init_grammar_feature(topics)
     """
     global _load_user_data, _save_user_data, _show_topics_for_category_level, _start_handler, _ADMIN_CHAT_ID, _bot
+
+    # 💬 Backward compatibility: старый вызов init_grammar_feature(topics)
+    if args and len(args) == 1 and isinstance(args[0], dict) and not kwargs:
+        set_topics_ref(args[0])  # 💬 принимаем topics и сохраняем как ref
+        return
+
+    load_user_data = kwargs.get("load_user_data")
+    save_user_data = kwargs.get("save_user_data")
+    show_topics_for_category_level = kwargs.get("show_topics_for_category_level")
+    start_handler = kwargs.get("start_handler")
+    admin_chat_id = kwargs.get("admin_chat_id")
+    bot = kwargs.get("bot")
+
     _load_user_data = load_user_data
     _save_user_data = save_user_data
     _show_topics_for_category_level = show_topics_for_category_level
     _start_handler = start_handler
     try:
-        _ADMIN_CHAT_ID = int(admin_chat_id)  # 💬 приводим к int
+        _ADMIN_CHAT_ID = int(admin_chat_id) if admin_chat_id is not None else None  # 💬 приводим к int
     except Exception:
         _ADMIN_CHAT_ID = None
     _bot = bot
