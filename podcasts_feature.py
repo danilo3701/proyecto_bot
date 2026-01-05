@@ -110,6 +110,9 @@ class PodcastAdminStates(StatesGroup):
 
     choosing_episode_for_fragments = State()
     choosing_episode_for_edit_fragments = State()  # 💬 выбор эпизода для очистки/перезаписи фрагментов
+    waiting_edit_episode_title = State()  # 💬 ввод нового названия эпизода
+    waiting_edit_episode_desc = State()  # 💬 ввод нового описания эпизода
+
 
     waiting_fragments_text = State()
 
@@ -821,6 +824,33 @@ def _kb_admin_eps_pick(data: Dict[str, Any], cb_prefix: str) -> InlineKeyboardMa
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+
+def _kb_admin_episode_edit_menu(eid: str) -> InlineKeyboardMarkup:
+    # 💬 меню редактирования выбранного эпизода (внутри "Редактировать фрагменты")
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🗑 Удалить фрагменты и вставить заново", callback_data=f"podadm:clear_frags:{eid}")],
+            [InlineKeyboardButton(text="✏️ Редактировать название", callback_data=f"podadm:edit_title:{eid}")],
+            [InlineKeyboardButton(text="📝 Редактировать описание", callback_data=f"podadm:edit_desc:{eid}")],
+            [InlineKeyboardButton(text="🗂 Редактировать категорию", callback_data=f"podadm:edit_cat:{eid}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")],
+        ]
+    )
+
+
+def _kb_admin_episode_categories_edit(eid: str) -> InlineKeyboardMarkup:
+    # 💬 выбор категории для сохранения в JSON (редактирование эпизода)
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🧩 Грамматика", callback_data=f"podadm:set_cat:{eid}:grammar")],
+            [InlineKeyboardButton(text="📚 Лексика", callback_data=f"podadm:set_cat:{eid}:lexica")],
+            [InlineKeyboardButton(text="☀️ Дневной подкаст", callback_data=f"podadm:set_cat:{eid}:daily")],
+            [InlineKeyboardButton(text="💬 Разговоры", callback_data=f"podadm:set_cat:{eid}:talks")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"podadm:pick_ep_edit_frags:{eid}")],
+        ]
+    )
+
+
 @router.message(Command(commands=["podcasts_admin", "podcast_admin", "pod_admin"]))
 async def podcasts_admin_cmd(message: Message, state: FSMContext) -> None:
     # 💬 секретная команда без проверки админа
@@ -1035,24 +1065,123 @@ async def admin_episode_audio(message: Message, state: FSMContext) -> None:
     await message.answer(f"✅ Эпизод создан\nid = {eid}\n\nТеперь можешь добавить фрагменты: /podcasts_admin")
 
 
+@router.message(PodcastAdminStates.waiting_edit_episode_title)
+async def admin_save_episode_title(message: Message, state: FSMContext) -> None:
+    # 💬 сохраняем новое название выбранного эпизода
+    st = await state.get_data()
+    eid = st.get("adm_edit_eid")
+    title = (message.text or "").strip()
+    if not eid or not title:
+        await message.answer("Название пустое. Пришли ещё раз.")
+        return
+
+    data = _read_podcasts()
+    ep = (data.get("episodes", {}) or {}).get(eid)
+    if not ep:
+        await message.answer("Эпизод не найден. /podcasts_admin")
+        await state.clear()
+        return
+
+    ep["title"] = title  # 💬 обновляем title
+    _write_podcasts(data)  # 💬 сохраняем в RailwayData (/data)
+
+    await state.set_state(PodcastAdminStates.choosing_action)
+    await message.answer("✅ Название обновлено.", reply_markup=_kb_admin_episode_edit_menu(eid))
+
+
+@router.message(PodcastAdminStates.waiting_edit_episode_desc)
+async def admin_save_episode_desc(message: Message, state: FSMContext) -> None:
+    # 💬 сохраняем новое описание выбранного эпизода
+    st = await state.get_data()
+    eid = st.get("adm_edit_eid")
+    desc = (message.text or "").strip()
+    if not eid or not desc:
+        await message.answer("Описание пустое. Пришли ещё раз.")
+        return
+
+    data = _read_podcasts()
+    ep = (data.get("episodes", {}) or {}).get(eid)
+    if not ep:
+        await message.answer("Эпизод не найден. /podcasts_admin")
+        await state.clear()
+        return
+
+    ep["description"] = desc  # 💬 обновляем description
+    _write_podcasts(data)  # 💬 сохраняем в RailwayData (/data)
+
+    await state.set_state(PodcastAdminStates.choosing_action)
+    await message.answer("✅ Описание обновлено.", reply_markup=_kb_admin_episode_edit_menu(eid))
+
+
 @router.callback_query(F.data.startswith("podadm:pick_ep_edit_frags:"))
 async def admin_pick_ep_edit_frags(cb: CallbackQuery, state: FSMContext) -> None:
     # 💬 подтверждение очистки + переход в режим перезаписи
     eid = cb.data.split(":")[-1]
     await state.update_data(adm_frag_eid=eid, adm_frag_mode="replace")  # 💬 replace = перезаписываем список фрагментов
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🗑 Удалить фрагменты и вставить заново", callback_data=f"podadm:clear_frags:{eid}")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")],
-    ])
+    kb = _kb_admin_episode_edit_menu(eid)  # 💬 расширенное меню редактирования эпизода
+
 
     await cb.message.answer(
-        "⚠️ Это удалит ВСЕ фрагменты у выбранного эпизода.\n"
-        "Аудио, автора и описание не трогаем.\n\n"
-        "Нажми кнопку ниже:",
+        "✏️ Редактирование эпизода.\n",
         reply_markup=kb,
     )
     await cb.answer()
+
+
+@router.callback_query(F.data.startswith("podadm:edit_title:"))
+async def admin_edit_episode_title(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 просим новое название эпизода
+    eid = cb.data.split(":")[-1]
+    await state.update_data(adm_edit_eid=eid)  # 💬 запоминаем эпизод для редактирования
+    await state.set_state(PodcastAdminStates.waiting_edit_episode_title)
+    await cb.message.answer("Пришли новое название эпизода (одной строкой).", reply_markup=_kb_admin_episode_edit_menu(eid))
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("podadm:edit_desc:"))
+async def admin_edit_episode_desc(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 просим новое описание эпизода
+    eid = cb.data.split(":")[-1]
+    await state.update_data(adm_edit_eid=eid)  # 💬 запоминаем эпизод для редактирования
+    await state.set_state(PodcastAdminStates.waiting_edit_episode_desc)
+    await cb.message.answer("Пришли новое описание эпизода.", reply_markup=_kb_admin_episode_edit_menu(eid))
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("podadm:edit_cat:"))
+async def admin_edit_episode_cat(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 показываем категории для редактирования
+    eid = cb.data.split(":")[-1]
+    await state.update_data(adm_edit_eid=eid)  # 💬 запоминаем эпизод для редактирования
+    await cb.message.answer("Выбери категорию:", reply_markup=_kb_admin_episode_categories_edit(eid))
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("podadm:set_cat:"))
+async def admin_set_episode_cat(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 сохраняем категорию эпизода в podcasts_data.json
+    parts = cb.data.split(":")
+    if len(parts) < 4:
+        await cb.answer()
+        return
+
+    eid = parts[2]
+    category = parts[3]
+
+    data = _read_podcasts()
+    ep = (data.get("episodes", {}) or {}).get(eid)
+    if not ep:
+        await cb.message.answer("Эпизод не найден. /podcasts_admin")
+        await cb.answer()
+        return
+
+    ep["category"] = category  # 💬 сохраняем категорию для будущей фильтрации
+    _write_podcasts(data)  # 💬 сохраняем в RailwayData (/data)
+
+    await cb.message.answer("✅ Категория обновлена.", reply_markup=_kb_admin_episode_edit_menu(eid))
+    await cb.answer()
+
 
 
 @router.callback_query(F.data.startswith("podadm:clear_frags:"))
