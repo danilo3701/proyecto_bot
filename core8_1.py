@@ -2495,9 +2495,10 @@ async def show_leaderboard(message: Message, state: FSMContext):
             5: "🍀",
         }
         nbsp = " "               # 💬 обычный пробел = будет ровно работать внутри <pre> (моноширинный блок)
-        indent = nbsp * 2        # 💬 2 пробела отступа перед 1) 2) 3)
+        indent = ""              # 💬 убрали стартовые пробелы, чтобы на телефоне не переносило
 
-        NAME_COL = 20            # 💬 ширина колонки имени
+        NAME_COL = 16            # 💬 минус 2 пробела между именем и 🍪, чтобы всё влезало
+
         RANK_COL = 4             # 💬 ширина колонки ранга (1) / 10) / 223)
 
         def _name_cell(raw: str) -> str:
@@ -2522,28 +2523,30 @@ async def show_leaderboard(message: Message, state: FSMContext):
 
 
         def _mark_cell(is_me: bool) -> str:
-            # 💬 маркер ">" для строки пользователя, ширина ячейки всегда 2 = ранги не съезжают
-            return f">{nbsp}" if is_me else indent
-
+            # 💬 маркер для строки пользователя без лишних пробелов (телефонная версия не ломается)
+            return "> " if is_me else ""
 
 
         def _rank_cell(pos: int) -> str:
-            # 💬 фикс-ячейка ранга без ">" (сам ">" живёт в _mark_cell), чтобы колонки не съезжали
+            # 💬 фикс-ячейка ранга без лишнего пробела в конце
             base = f"{pos})"
             pad = nbsp * max(0, RANK_COL - len(base))
-            return f"{base}{pad}{nbsp}"  # 💬 пробел между "1)" и эмодзи мест
+            return f"{base}{pad}"
+
 
         def _under_name(text: str) -> str:
-            # 💬 строка строго под колонкой имени (чтобы ↳91 стояло ровно как на скрине)
-            name_pad = f"{indent}{(nbsp * (RANK_COL + 1))}{(nbsp * 2)}"
+            # 💬 строка под колонкой имени с меньшими отступами
+            # формат строки теперь = "{rank} {icon} {name} {emoji} {val}"
+            name_pad = nbsp * (RANK_COL + 3)
             return f"{name_pad}{text}"
 
 
         def _line(pos: int, name: str, val: int, is_me: bool = False) -> str:
-            # 💬 собирает строку рейтинга с фикс колонкой имени и 🍪 (и без съезда из-за ">")
-            icon = "🤓" if is_me else (place_icons.get(pos) or nbsp)  # 💬 у тебя всегда 🤓
+            # 💬 компактная строка, чтобы не переносило на телефоне
+            icon = "🤓" if is_me else (place_icons.get(pos) or nbsp)
             name_cell = _name_cell(name)
-            return f"{_mark_cell(is_me)}{_rank_cell(pos)}{icon}{nbsp}{name_cell}{nbsp}{emoji}{nbsp}{val}"
+            return f"{_mark_cell(is_me)}{_rank_cell(pos)} {icon} {name_cell} {emoji} {val}"
+
 
     
         sorted_all = sorted(
