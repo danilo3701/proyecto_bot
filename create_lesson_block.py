@@ -1766,115 +1766,222 @@ async def get_reading_title(message: Message, state: FSMContext):
     await message.answer("Что добавляем в чтение?", reply_markup=kb)
     return await state.set_state(NewTopicStates.waiting_reading_action)
 
+@router.message(NewTopicStates.waiting_reading_action)
+async def handle_reading_action(message: Message, state: FSMContext):
+    # 💬 меню действий внутри одного пакета "Чтение"
+    action = (message.text or "").strip()
+
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🧩 Ассет блоки"), KeyboardButton(text="🖼 Фото")],
+            [KeyboardButton(text="✅ Готово"), KeyboardButton(text="↩️ Назад")],
+        ],
+        resize_keyboard=True,
+    )
+
+    if action == "🧩 Ассет блоки":
+        await message.answer(
+            "Отправь ассет блоки текстом.\n"
+            "Каждый фрагмент с новой строки.\n"
+            "Пустые строки игнорируются.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
+
+    if action == "🖼 Фото":
+        await message.answer(
+            "Напиши подпись к фото одним сообщением.\n"
+            "Если подпись не нужна, отправь -",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return await state.set_state(NewTopicStates.waiting_reading_photo_text)
+
+    if action == "✅ Готово":
+        # 💬 завершаем добавление пакета чтения
+        await state.update_data(
+            current_reading_pack_index=None,
+            current_reading_title=None,
+            reading_photo_caption=None,
+        )
+        await message.answer("✅ Пакет чтения сохранён.", reply_markup=get_main_menu())
+        return await state.set_state(NewTopicStates.waiting_first_choice)
+
+    if action == "↩️ Назад":
+        # 💬 отмена: если пакет пустой, удаляем его, чтобы не плодить мусор
+        data = await state.get_data()
+        topic = data.get("topic") or {}
+        topic_path = data.get("topic_path")
+
+        try:
+            idx = int(data.get("current_reading_pack_index"))
+        except Exception:
+            idx = -1
+
+        if (
+            topic_path
+            and isinstance(topic.get("reading"), list)
+            and 0 <= idx < len(topic["reading"])
+        ):
+            pack = topic["reading"][idx] or {}
+            if not (pack.get("fragments") or pack.get("assets")):
+                topic["reading"].pop(idx)
+                try:
+                    import json
+
+                    with open(topic_path, "w", encoding="utf-8") as f:
+                        json.dump(topic, f, ensure_ascii=False, indent=2)
+                    await state.update_data(topic=topic)
+                except Exception:
+                    pass
+
+        await state.update_data(
+            current_reading_pack_index=None,
+            current_reading_title=None,
+            reading_photo_caption=None,
+        )
+        await message.answer("↩️ Вернулись назад.", reply_markup=get_main_menu())
+        return await state.set_state(NewTopicStates.waiting_first_choice)
+
+    await message.answer("Выбери действие кнопками.", reply_markup=kb)
+
+
 
 @router.message(NewTopicStates.waiting_reading_fragments_text)
 async def save_reading_fragments(message: Message, state: FSMContext):
-    import json
-
+    # 💬 сохраняем фрагменты в текущий пак чтения и возвращаемся в меню действий
     raw = (message.text or "").strip()
-    if not raw:
-        await message.answer("❗ Пусто. Вставь фрагменты в формате ES | RU (и опционально | 💡 подсказка).")
-        return
+    if raw.lower() in {"назад", "↩️ назад"}:
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="🧩 Ассет блоки"), KeyboardButton(text="🖼 Фото")],
+                [KeyboardButton(text="✅ Готово"), KeyboardButton(text="↩️ Назад")],
+            ],
+            resize_keyboard=True,
+        )
+        await message.answer("Ок, выбери действие.", reply_markup=kb)
+        return await state.set_state(NewTopicStates.waiting_reading_action)
 
-    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    fragments = []
-
-    for ln in lines:
-        parts = [p.strip() for p in ln.split("|")]
-        if len(parts) < 2 or not parts[0] or not parts[1]:
-            await message.answer("❗ Ошибка формата. Пример: Estoy en casa | Я дома | 💡 estar = место")
-            return  # 💬 остаёмся в этом же состоянии
-
-        frag = {"es": parts[0], "ru": parts[1]}  # 💬 базовый фрагмент
-        if len(parts) >= 3 and parts[2]:
-            frag["hint"] = parts[2]  # 💬 подсказка опционально
-        fragments.append(frag)
+    fragments = [line.strip() for line in raw.split("\n") if line.strip()]
+    if not fragments:
+        await message.answer(
+            "⚠️ Пусто. Пришли ассет блоки текстом.\n"
+            "Каждый фрагмент с новой строки.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
 
     data = await state.get_data()
     topic = data.get("topic") or {}
     topic_path = data.get("topic_path")
-    title = (data.get("current_reading_title") or "Чтение").strip()
 
-    if not topic_path:
-        await message.answer("❗ Ошибка: не найден путь темы (topic_path).")
-        return
+    try:
+        pack_index = int(data.get("current_reading_pack_index"))
+    except Exception:
+        pack_index = -1
 
-    idx = data.get("current_reading_pack_index")
-    if not isinstance(idx, int) or idx < 0 or idx >= len(topic.get("reading", [])):
-        await message.answer("❗ Ошибка: не найден текущий пакет чтения. Начни заново через «Добавить чтение».")
-        return
+    packs = topic.setdefault("reading", [])
+    if not (topic_path and 0 <= pack_index < len(packs)):
+        await message.answer(
+            "⚠️ Не найден активный пак чтения. Начни добавление чтения заново.",
+            reply_markup=get_main_menu(),
+        )
+        return await state.set_state(NewTopicStates.waiting_first_choice)
 
-    topic["reading"][idx].setdefault("fragments", []).extend(fragments)  # 💬 добавляем фрагменты в текущий пакет
+    pack = packs[pack_index]
+    pack.setdefault("fragments", [])
+    pack["fragments"].extend(fragments)
 
-
+    import json
 
     with open(topic_path, "w", encoding="utf-8") as f:
         json.dump(topic, f, ensure_ascii=False, indent=2)
 
-    await state.update_data(topic=topic, current_reading_title=None)  # 💬 чистим временный заголовок
-    await message.answer("✅ Чтение сохранено.", reply_markup=get_main_menu())
-    return await state.set_state(NewTopicStates.waiting_first_choice)
+    await state.update_data(topic=topic)
+
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🧩 Ассет блоки"), KeyboardButton(text="🖼 Фото")],
+            [KeyboardButton(text="✅ Готово"), KeyboardButton(text="↩️ Назад")],
+        ],
+        resize_keyboard=True,
+    )
+    await message.answer("✅ Фрагменты добавлены. Что ещё добавить?", reply_markup=kb)
+    return await state.set_state(NewTopicStates.waiting_reading_action)
+waiting_first_choice)
 
 
 
 @router.message(NewTopicStates.waiting_reading_photo_text)
 async def handle_reading_photo_text(message: Message, state: FSMContext):
-    # 💬 сохраняем подпись для следующего медиа
-    txt = (message.text or "").strip()
-    await state.update_data(reading_photo_caption=None if txt == "-" else txt)
-    await message.answer("🖼 Пришлите фото/GIF/MP4/стикер или URL:", reply_markup=ReplyKeyboardRemove())
+    # 💬 сохраняем подпись к фото и просим прислать фото или файл
+    caption = (message.text or "").strip()
+
+    if caption.lower() in {"назад", "↩️ назад"}:
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="🧩 Ассет блоки"), KeyboardButton(text="🖼 Фото")],
+                [KeyboardButton(text="✅ Готово"), KeyboardButton(text="↩️ Назад")],
+            ],
+            resize_keyboard=True,
+        )
+        await message.answer("Ок, выбери действие.", reply_markup=kb)
+        return await state.set_state(NewTopicStates.waiting_reading_action)
+
+    if caption == "-":
+        caption = ""
+
+    await state.update_data(reading_photo_caption=caption)
+    await message.answer("Теперь пришли фото или файл (документ).", reply_markup=ReplyKeyboardRemove())
     return await state.set_state(NewTopicStates.waiting_reading_photo)
 
 
-@router.message(NewTopicStates.waiting_reading_photo, F.content_type.in_(["photo", "video", "animation", "sticker", "text"]))
-async def save_reading_photo(message: Message, state: FSMContext):
-    import time
-    from pathlib import Path
 
+@router.message(NewTopicStates.waiting_reading_photo, F.photo | F.document | F.text)
+async def save_reading_photo(message: Message, state: FSMContext):
+    # 💬 сохраняем фото или файл в текущий пак чтения и возвращаемся в меню действий
     data = await state.get_data()
     topic = data.get("topic") or {}
     topic_path = data.get("topic_path")
-    idx = data.get("current_reading_pack_index")
+    caption = (data.get("reading_photo_caption") or "").strip()
 
-    if not topic_path:
-        await message.answer("❗ Ошибка: не найден путь темы (topic_path).")
-        return
-    if not isinstance(idx, int) or idx < 0 or idx >= len(topic.get("reading", [])):
-        await message.answer("❗ Ошибка: не найден текущий пакет чтения. Начни заново через «Добавить чтение».")
-        return
+    try:
+        pack_index = int(data.get("current_reading_pack_index"))
+    except Exception:
+        pack_index = -1
 
-    pack = topic["reading"][idx]
-    pack.setdefault("assets", [])
+    packs = topic.setdefault("reading", [])
+    if not (topic_path and 0 <= pack_index < len(packs)):
+        await message.answer(
+            "⚠️ Не найден активный пак чтения. Начни добавление чтения заново.",
+            reply_markup=get_main_menu(),
+        )
+        return await state.set_state(NewTopicStates.waiting_first_choice)
 
-    entry = {"type": "asset"}  # 💬 единый формат ассета для чтения
+    file_value = None
+    media_type = None
 
-    if message.sticker:
-        entry["media_type"] = "sticker"
-        entry["file"] = message.sticker.file_id
-    elif message.animation or message.video:
-        media = message.animation or message.video
-        entry["media_type"] = "animation"
-        entry["file"] = media.file_id
-    elif message.photo:
-        ph = message.photo[-1]
-        entry["media_type"] = "photo"
-        entry["file"] = ph.file_id
+    if message.photo:
+        file_value = message.photo[-1].file_id
+        media_type = "photo"
+    elif message.document:
+        file_value = message.document.file_id
+        media_type = "document"
     else:
-        url = (message.text or "").strip()
-        lower = url.lower()
-        if lower.endswith((".mp4", ".gif")):
-            entry["media_type"] = "animation"
-        elif lower.endswith((".jpg", ".jpeg", ".png")):
-            entry["media_type"] = "photo"
-        else:
-            entry["media_type"] = "sticker"
-        entry["file"] = url
+        file_value = (message.text or "").strip()
+        media_type = "url"
 
-    cap = data.get("reading_photo_caption")
-    if cap:
-        entry["text"] = cap  # 💬 подпись к ассету
+    entry = {
+        "type": "asset",
+        "media_type": media_type,
+        "file": file_value,
+        "text": caption,
+    }
 
+    pack = packs[pack_index]
+    pack.setdefault("assets", [])
     pack["assets"].append(entry)
+
+    import json
 
     with open(topic_path, "w", encoding="utf-8") as f:
         json.dump(topic, f, ensure_ascii=False, indent=2)
@@ -1884,13 +1991,12 @@ async def save_reading_photo(message: Message, state: FSMContext):
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🧩 Ассет блоки"), KeyboardButton(text="🖼 Фото")],
-            [KeyboardButton(text="✅ Готово"), KeyboardButton(text="↩️ Назад")]
+            [KeyboardButton(text="✅ Готово"), KeyboardButton(text="↩️ Назад")],
         ],
-        resize_keyboard=True
+        resize_keyboard=True,
     )
-    await message.answer("✅ Фото добавлено. Что дальше?", reply_markup=kb)
+    await message.answer("✅ Добавлено. Что ещё добавить?", reply_markup=kb)
     return await state.set_state(NewTopicStates.waiting_reading_action)
-
 
 
 
@@ -2125,6 +2231,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
