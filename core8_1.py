@@ -1217,6 +1217,7 @@ init_grammar_feature(
 )  # 💬 пробрасываем зависимости в модуль грамматики
 
 
+
 # ─── УТИЛИТЫ XP ───────────────────────────────────────
 
 async def award_xp(amount: int, state: FSMContext):
