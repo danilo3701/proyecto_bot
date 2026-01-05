@@ -310,7 +310,7 @@ sync_topics_volume_to_local()  # 💬 подтягиваем темы из Volum
 
 # ——— Загружаем уроки ——————————————————————————————————————————
 topics = load_topics()
-init_grammar_feature(topics)  # 💬 передаём темы в модуль грамматики
+set_grammar_topics_ref(topics)   # 💬 передаём темы в модуль грамматики
 set_topics_ref(topics)  # 💬 передаём topics в модуль "Битва" без круговых импортов
 
 
@@ -1602,9 +1602,9 @@ async def start_handler(message: Message, state: FSMContext):
 
     
     global topics
-    set_grammar_topics_ref(topics)  # 💬 даём модулю грамматики доступ к topics
-    topics = load_topics()
-    set_topics_ref(topics)  # 💬 обновляем topics для "Битвы" после /start
+    topics = load_topics()  # 💬 перезагружаем JSON темы
+    set_topics_ref(topics)  # 💬 обновляем topics для "Битвы"
+    set_grammar_topics_ref(topics)  # 💬 обновляем topics для "Грамматики"
 
 
     # 💬 Убираем старую Reply-клавиатуру и отправляем нормальное приветствие
