@@ -310,8 +310,10 @@ sync_topics_volume_to_local()  # 💬 подтягиваем темы из Volum
 
 # ——— Загружаем уроки ——————————————————————————————————————————
 topics = load_topics()
-set_grammar_topics_ref(topics)   # 💬 передаём темы в модуль грамматики
+set_grammar_topics_ref(topics)  # 💬 передаём topics в модуль грамматики
 set_topics_ref(topics)  # 💬 передаём topics в модуль "Битва" без круговых импортов
+
+
 
 
 from collections import deque
