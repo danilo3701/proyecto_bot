@@ -103,6 +103,7 @@ class PodcastAdminStates(StatesGroup):
     waiting_author_name = State()
 
     choosing_author_for_episode = State()
+    choosing_episode_category = State()  # 💬 выбор категории перед названием эпизода
     waiting_episode_title = State()
     waiting_episode_desc = State()
     waiting_episode_audio = State()
@@ -787,6 +788,19 @@ def _kb_admin_frags_continue() -> InlineKeyboardMarkup:
         ]
     )
 
+def _kb_admin_episode_categories() -> InlineKeyboardMarkup:
+    # 💬 выбор категории эпизода для сохранения в JSON
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🧩 Грамматика", callback_data="podadm:epcat:grammar")],
+            [InlineKeyboardButton(text="📚 Лексика", callback_data="podadm:epcat:lexica")],
+            [InlineKeyboardButton(text="☀️ Дневной подкаст", callback_data="podadm:epcat:daily")],
+            [InlineKeyboardButton(text="💬 Разговоры", callback_data="podadm:epcat:talks")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")],
+        ]
+    )
+
+
 def _kb_admin_authors_pick(data: Dict[str, Any], cb_prefix: str) -> InlineKeyboardMarkup:
     authors = data.get("authors", {})
     items = sorted(authors.items(), key=lambda x: (x[1].get("order", 9999), x[1].get("name", "")))
@@ -906,9 +920,20 @@ async def admin_pick_author(cb: CallbackQuery, state: FSMContext) -> None:
 
     author_id = cb.data.split(":")[-1]
     await state.update_data(adm_author_id=author_id)
+    await state.set_state(PodcastAdminStates.choosing_episode_category)  # 💬 перед названием выбираем категорию
+    await cb.message.answer("Выбери категорию эпизода:", reply_markup=_kb_admin_episode_categories())
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("podadm:epcat:"))
+async def admin_pick_episode_category(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 сохраняем категорию эпизода и идём к вводу названия
+    cat = cb.data.split(":")[-1]
+    await state.update_data(adm_episode_category=cat)  # 💬 пишем в FSM, потом положим в JSON
     await state.set_state(PodcastAdminStates.waiting_episode_title)
     await cb.message.answer("Теперь пришли название эпизода (одной строкой).")
     await cb.answer()
+
 
 
 @router.message(PodcastAdminStates.waiting_author_name)
@@ -979,6 +1004,8 @@ async def admin_episode_audio(message: Message, state: FSMContext) -> None:
     author_id = st.get("adm_author_id")
     title = st.get("adm_episode_title")
     desc = st.get("adm_episode_desc")
+    category = (st.get("adm_episode_category") or "").strip()  # 💬 категория эпизода из выбора кнопкой
+
 
     if not author_id or not title:
         await message.answer("Ошибка состояния. Зайди заново: /podcasts_admin")
@@ -994,6 +1021,7 @@ async def admin_episode_audio(message: Message, state: FSMContext) -> None:
         "author_id": author_id,
         "title": title,
         "description": desc,
+        "category": category,
         "audio_file_id": audio_file_id,
         "audio_type": audio_type,
         "order": order,
