@@ -5282,7 +5282,9 @@ async def send_one_vocab(message: Message, state: FSMContext):
                 lex_mode_active=False  # 💬 активируем только после нажатия Готово
             )
 
-        text = _lex_render_phrase_list(await state.get_data().get("lex_active_phrases", []))
+        data_now = await state.get_data()
+        text = _lex_render_phrase_list(data_now.get("lex_active_phrases", []))
+
         kb = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="✅ Готово", callback_data="lex_phrases_done")]]
         )
