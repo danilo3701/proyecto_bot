@@ -1392,8 +1392,16 @@ async def choose_phase(message: Message, state: FSMContext):
 
     # — Выбрать существующую фазу по номеру
     #    ожидаем формат "1. Фразовые глаголы"
-    phase_id = int(text.split(".", 1)[0].strip())
+    try:
+        phase_id = int(text.split(".", 1)[0].strip())
+    except ValueError:
+        await message.answer(
+            "⚠️ Сначала выбери фазу номером (пример: 1. ...), либо нажми «➕ Новая фаза».",
+        )  # 💬 защита от ValueError, если прислали ALL IN не в том состоянии
+        return
+
     await state.update_data(current_phase_id=phase_id)
+
 
     # 💬 подтвердить выбор и убрать клавиатуру
     await message.answer(f"Фаза выбрана: {text}", reply_markup=ReplyKeyboardRemove())
@@ -2856,6 +2864,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
