@@ -1920,25 +1920,28 @@ def _parse_allin_block(text: str):
 
             # 💬 новый формат внутри [POLL]
             if section == "POLL":
-                payload = line.replace("\\n", "\n")
-                parts = [p.strip() for p in payload.split("|") if p.strip()]
-
-                # 💬 формат теперь: вопрос | ВЕРНЫЙ | НЕВЕРНЫЙ1 | НЕВЕРНЫЙ2 (всего 4 поля)
-                # 💬 если кто то пришлёт больше полей, лишнее игнорируем, берём первые 3 варианта
-                if len(parts) >= 4:
-                    q = parts[0]
-                    options = parts[1:4]                 # 💬 всегда 3 варианта
-                    correct = options[0]                 # 💬 правильный всегда первый
-                    polls.append({
-                        "type": "quiz",
-                        "question": q,
-                        "options": options,
-                        "correct_answer": correct
-                    })
-                else:
+                # 💬 [POLL] поддержка 4 полей и совместимость со старым форматом из 5 полей
+                parts = [p.strip() for p in line.split("|")]
+                if len(parts) < 4:
                     errors.append(f"PHRASE #{total_blocks}: строка [POLL] мало полей")
-                i += 1
+                    continue
+
+                q = parts[0]
+                correct = parts[1]  # 💬 правильный всегда первый после |
+                wrongs = parts[2:4]  # 💬 только 2 ошибки = всего 3 варианта
+
+                extra_correct = parts[4] if len(parts) >= 5 else ""  # 💬 старый формат: режем лишнее, но можем сохранить как пояснение
+
+                polls.append({
+                    "type": "quiz",
+                    "question": q,
+                    "options": [correct] + [w for w in wrongs if w],
+                    "correct_answer": correct,
+                    "explanation_correct": extra_correct,
+                })
                 continue
+
+
 
 
             # 💬 новый формат внутри [TEXT]
@@ -3232,6 +3235,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
