@@ -547,61 +547,72 @@ class LoggingMiddleware(BaseMiddleware):
 dp.update.middleware.register(LoggingMiddleware())
 
 
-# 💬 Фабрика: возвращает нужный vocab-список (по фазе или всё сразу)
+def _get_vocab_phase(topic_key: str, phase_id: str) -> dict:
+    topic_data = topics.get(topic_key, {})
+    phases = topic_data.get("vocab", [])
+    return next((p for p in phases if p.get("phase_id") == phase_id), {}) or {}
+
+
+def _get_active_phrase_indexes(phrases: list, hidden: set) -> list:
+    return [i for i in range(len(phrases)) if i not in hidden]
+
+
 def get_vocab_list(data: dict) -> list:
-    """
-    💬 Новая логика компоновки (пакеты по 6):
-       • После КАЖДОГО link добавляем РОВНО 6 обычных Quiz (или меньше, если осталось меньше).
-       • Когда обычные Quiz закончились, ТОЛЬКО ПОТОМ добавляем все TextQuiz (также могут идти пакетом по 6 на показ).
-       • Inline-квизы, зашитые внутрь text/photo, не трогаем.
-       • Если ссылок нет — сначала весь пул обычных Quiz (батчами по 6), затем весь пул TextQuiz.
-    """
     topic_key = data.get("selected_topic")
-    topic     = topics.get(topic_key, {})
-    ph_id     = data.get("selected_phase_id")
+    phase_id = data.get("selected_vocab_phase_id")
 
-    # legacy: без фазы — как раньше
-    if not ph_id:
-        return topic.get("vocab", [])
+    phase = _get_vocab_phase(topic_key, phase_id)
 
-    # берём фазу по её ID (фазы лежат в topic["vocab"] как блоки с phase_id)
-    phase = next((ph for ph in topic.get("vocab", []) if ph.get("phase_id") == ph_id), None)
-    if not phase:
-        return []
+    # ✅ НОВЫЙ РЕЖИМ = phrases + 4 раунда
+    phrases = phase.get("phrases", [])
+    if phrases:
+        hidden = set(data.get("session_hidden_phrases", []))
+        active_indexes = _get_active_phrase_indexes(phrases, hidden)
+        active_phrases = [phrases[i] for i in active_indexes]
 
-    base          = list(phase.get("vocab", []))            # текст/линки/прочее
-    quiz_pool     = list(phase.get("quiz_pool", []))        # обычные квизы (3 варианта)
-    textquiz_pool = list(phase.get("textquiz_pool", []))    # текст-квизы (вписать ответ)
+        vocab_list = []
 
-    PACK = 6
-    compiled = []
+        # 1) первым = выбор фраз (сессионный)
+        vocab_list.append({"type": "phrase_select"})  # 💬 список фраз с индексами и кнопкой Готово
 
-    # helper: забрать очередной пакет из pool
-    def take_pack(pool, start, pack=PACK):
-        return pool[start:start+pack], start + min(pack, max(0, len(pool) - start))
+        # 2) раунды pull-quiz (по порядку в каждой фразе)
+        total_rounds = 4
+        for r in range(total_rounds):
+            vocab_list.append({"type": "round_header", "round": r + 1, "total_rounds": total_rounds})  # 💬 заголовок раунда
+            for phrase_obj in active_phrases:
+                pull = phrase_obj.get("pull_quizzes") or phrase_obj.get("poll_quizzes") or []
+                if r < len(pull):
+                    vocab_list.append(pull[r])  # 💬 pull-quiz раунда r для этой фразы
 
-    qi = 0  # указатель в обычных квизах
+        # 3) textquiz = в конце (прыгаем к нему после каждого раунда)
+        for phrase_obj in active_phrases:
+            tqs = phrase_obj.get("text_quizzes") or []
+            if tqs:
+                vocab_list.append(tqs[0])  # 💬 1 textquiz на фразу
 
-    # 1) Проходим базовые блоки и после каждого link кладём пакет из 6 обычных квизов
-    for block in base:
-        compiled.append(block)
-        if ("link" in block) or ("url" in block) or (block.get("type") == "link"):
-            if qi < len(quiz_pool):
-                chunk, qi = take_pack(quiz_pool, qi)
-                compiled.extend(chunk)
+        return vocab_list
 
-    # 2) Если обычные квизы ещё остались (линков было мало или не было) — докладываем всё, батчами по 6
-    while qi < len(quiz_pool):
-        chunk, qi = take_pack(quiz_pool, qi)
-        compiled.extend(chunk)
+    # 🧩 СТАРЫЙ РЕЖИМ = оставляем как был
+    base_vocab = phase.get("vocab", [])
+    quiz_pool = phase.get("quiz_pool", [])
+    textquiz_pool = phase.get("textquiz_pool", [])
 
-    # 3) Текстовые квизы добавляем ТОЛЬКО после всех обычных
-    #    (порядок сохраняем; разбиение по 6 делает уже логика показа/offer_continue)
-    compiled.extend(textquiz_pool)
+    vocab_list = list(base_vocab)
 
-    return compiled
-# 💬 что делает эта часть: собирает последовательность "link → 6 обычных квизов" по всей фазе,
-#                         затем в конец добавляет все text-квизы. Старое чередование убрано.
+    for i in range(0, len(quiz_pool), 6):
+        pack = quiz_pool[i:i + 6]
+        vocab_list.extend(pack)
+
+        if textquiz_pool:
+            tq_pack = textquiz_pool[:2]
+            textquiz_pool = textquiz_pool[2:]
+            vocab_list.extend(tq_pack)
+
+        if i + 6 < len(quiz_pool):
+            vocab_list.append({"type": "link", "url": "continue"})
+
+    vocab_list.extend(textquiz_pool)
+    return vocab_list
 
 
 
@@ -3863,6 +3874,55 @@ async def mywords_text_answer(message: Message, state: FSMContext):
     await state.update_data(mywords_text_queue=queue, mywords_current_word_id=None)
     return await mywords_send_next_text(message, state)
 
+
+@router.callback_query(F.data == "lex_phrases_done")
+async def lex_phrases_done(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if data.get("current_stage") != "phrase_select":
+        await callback.answer()
+        return
+
+    topic_key = data.get("selected_topic")
+    phase_id = data.get("selected_vocab_phase_id")
+    phase = _get_vocab_phase(topic_key, phase_id)
+
+    phrases = phase.get("phrases", [])
+    hidden = set(data.get("session_hidden_phrases", []))
+    active_indexes = _get_active_phrase_indexes(phrases, hidden)
+
+    if not active_indexes:
+        # 💬 не даём уйти в пустой раунд
+        await callback.answer("Нужно оставить хотя бы 1 фразу.", show_alert=True)
+        return
+
+    # 💬 фиксируем размер сета = число активных фраз
+    await state.update_data(
+        quiz_set_size=len(active_indexes),
+        redo_stack=[],
+        pending_textquiz=[],
+        current_stage="vocab",
+        offer_continue_resume_index=None,
+    )
+
+    # 💬 удаляем сообщение со списком фраз
+    chat_id = data.get("phrase_select_chat_id") or (callback.message.chat.id if callback.message else None)
+    msg_id = data.get("phrase_select_msg_id")
+    try:
+        if chat_id and msg_id:
+            await callback.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+    except Exception:
+        pass
+
+    # 💬 стартуем с первого round_header
+    vocab_list = get_vocab_list(await state.get_data())
+    start_idx = next((i for i, b in enumerate(vocab_list) if b.get("type") == "round_header"), 0)
+
+    await state.update_data(vocab_index=start_idx)
+    await callback.answer()
+    if callback.message:
+        await send_one_vocab(callback.message, state)
+
+
 # ─────────────────────────────────────────────────────────────
 #   offer_continue: продолжить или домой
 # ─────────────────────────────────────────────────────────────
@@ -5058,6 +5118,65 @@ async def send_one_vocab(message: Message, state: FSMContext):
     block = vocab_list[idx]
     btype = block.get("type", "link")
 
+    btype = block.get("type")
+
+    if btype == "phrase_select":
+        # 💬 показываем список фраз и ждём ввод номера
+        topic_key = data.get("selected_topic")
+        phase_id = data.get("selected_vocab_phase_id")
+        phase = _get_vocab_phase(topic_key, phase_id)
+
+        phrases = phase.get("phrases", [])
+        hidden = set(data.get("session_hidden_phrases", []))
+        active_indexes = _get_active_phrase_indexes(phrases, hidden)
+
+        lines = [
+            "📚 Фразы",
+            "",
+            "Напиши номер фразы, которую знаешь, чтобы скрыть из pull-quiz и textquiz.",
+            "Когда закончишь = нажми ✅ Готово.",
+            ""
+        ]
+        for n, real_idx in enumerate(active_indexes, start=1):
+            ph = (phrases[real_idx] or {}).get("phrase", {}) or {}
+            es = (ph.get("es") or "").strip()
+            ru = (ph.get("ru") or "").strip()
+            lines.append(f"{n}) {es} = {ru}".strip())
+
+        if not active_indexes:
+            lines.append("Пока нет фраз.")
+
+        text = "\n".join(lines)
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Готово", callback_data="lex_phrases_done")]
+        ])
+
+        sent = await message.answer(text, reply_markup=kb)
+        await state.update_data(
+            phrase_select_msg_id=sent.message_id,
+            phrase_select_chat_id=sent.chat.id,
+            current_stage="phrase_select",
+            quiz_set_size=len(active_indexes),
+        )
+        return
+
+    if btype == "round_header":
+        # 💬 коротко показываем заголовок раунда и идём дальше
+        round_num = int(block.get("round", 1))
+        total_rounds = int(block.get("total_rounds", 4))
+
+        header_msg = await message.answer(f"🔹 Раунд {round_num} из {total_rounds}")
+        try:
+            await asyncio.sleep(1.2)
+            await header_msg.delete()
+        except Exception:
+            pass
+
+        await state.update_data(vocab_index=idx + 1)
+        await send_one_vocab(message, state)
+        return
+
 
 
     # ——— Фото-блок ———
@@ -5342,6 +5461,84 @@ async def ad_ok_handler(callback: CallbackQuery, state: FSMContext):
     return await send_one_vocab(callback.message, state)
 
 
+@router.message(LessonStates.showing_vocab, F.text.regexp(r"^\s*\d+\s*$"))
+async def lex_hide_phrase_by_number(message: Message, state: FSMContext):
+    data = await state.get_data()
+    if data.get("current_stage") != "phrase_select":
+        return
+
+    topic_key = data.get("selected_topic")
+    phase_id = data.get("selected_vocab_phase_id")
+    phase = _get_vocab_phase(topic_key, phase_id)
+
+    phrases = phase.get("phrases", [])
+    hidden = set(data.get("session_hidden_phrases", []))
+    active_indexes = _get_active_phrase_indexes(phrases, hidden)
+
+    try:
+        n = int((message.text or "").strip())
+    except Exception:
+        return
+
+    if n < 1 or n > len(active_indexes):
+        # 💬 мягкая валидация индекса
+        warn = await message.answer("⚠️ Нет такой строки. Напиши номер из списка.")
+        try:
+            await asyncio.sleep(1.2)
+            await warn.delete()
+            await message.delete()
+        except Exception:
+            pass
+        return
+
+    real_idx = active_indexes[n - 1]
+    hidden.add(real_idx)
+
+    await state.update_data(
+        session_hidden_phrases=sorted(hidden),
+        quiz_set_size=max(len(active_indexes) - 1, 0),
+    )
+
+    # 💬 обновляем список фраз (редактируем то же сообщение)
+    new_active = _get_active_phrase_indexes(phrases, hidden)
+
+    lines = [
+        "📚 Фразы",
+        "",
+        "Напиши номер фразы, которую знаешь, чтобы скрыть из pull-quiz и textquiz.",
+        "Когда закончишь = нажми ✅ Готово.",
+        ""
+    ]
+    for nn, idx2 in enumerate(new_active, start=1):
+        ph = (phrases[idx2] or {}).get("phrase", {}) or {}
+        es = (ph.get("es") or "").strip()
+        ru = (ph.get("ru") or "").strip()
+        lines.append(f"{nn}) {es} = {ru}".strip())
+
+    if not new_active:
+        lines.append("Пока нет фраз.")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Готово", callback_data="lex_phrases_done")]
+    ])
+
+    msg_id = data.get("phrase_select_msg_id")
+    chat_id = data.get("phrase_select_chat_id") or message.chat.id
+    try:
+        if msg_id:
+            await message.bot.edit_message_text(
+                "\n".join(lines),
+                chat_id=chat_id,
+                message_id=msg_id,
+                reply_markup=kb
+            )
+    except Exception:
+        pass
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
 
 
