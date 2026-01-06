@@ -6928,17 +6928,31 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
                     )
                     return await send_one_vocab(_fake_msg(), state)
 
-                # 💬 textquiz нет — обычный offer_continue
+
+                # 💬 textquiz нет = показываем inline offer_continue, чтобы не захламлять чат
                 oc_scene = random.choice(scenarios["offer_continue"])
-                buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
-                kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
                 await state.update_data(
                     current_stage="offer_continue",
                     current_scene=oc_scene,
                 )
-                await state.set_state(LessonStates.showing_vocab)
-                return await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
-        else:
+                await state.set_state(LessonStates.showing_vocab)  # 💬 важно: cb_scenario_vocab слушает showing_vocab
+
+                kb = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")]
+                        for btn in oc_scene["buttons"]
+                    ]
+                )
+
+                oc_msg = await bot.send_message(
+                    poll_answer.user.id,
+                    oc_scene["text"],
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
+                await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 чтобы удалить этот кусок после клика
+                return
+
             # 💬 на неверный в redo — повторяем ТОТ ЖЕ квиз (ставим idx в голову очереди без дублей)
             redo = [i for i in redo if i != idx]
             redo.insert(0, idx)
