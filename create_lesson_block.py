@@ -1458,124 +1458,165 @@ async def import_vocab_textquiz_bulk(message: Message, state: FSMContext):
 
     await send_post_menu(message, state)
 
-def _parse_allin_block(text: str) -> list[dict]:
-    # 💬 парсим ALL IN блок в формате [PHRASE]...[POLL]...[TEXT]...[/PHRASE] + совместимость со старым POLL:/TEXTQUIZ:
+
+def _parse_allin_block(text: str):
+    # 💬 парсим ALL IN блок и возвращаем (phrases, errors, meta) как ожидает import_vocab_allin_bulk
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+
     phrases: list[dict] = []
-    current: dict | None = None
-    section: str | None = None  # "POLL" | "TEXT" | None
+    errors: list[str] = []
 
-    def _ensure_current():
-        nonlocal current
-        if current is None:
-            current = {"es": "", "ru": "", "polls": [], "textquizzes": []}  # 💬 базовая структура фразы
+    total_blocks = 0
+    invalid_blocks = 0
+    truncated_at: dict | None = None
 
-    def _cleanup_phrase(ph: dict) -> dict:
-        # 💬 убираем пустые списки, чтобы JSON был чище
-        if isinstance(ph.get("polls"), list) and not ph["polls"]:
-            ph.pop("polls", None)
-        if isinstance(ph.get("textquizzes"), list) and not ph["textquizzes"]:
-            ph.pop("textquizzes", None)
-        return ph
-
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue  # 💬 пустые строки игнорируем
-
-        up = line.upper()
-
-        # --- ТЕГИ БЛОКА ---
-        if up == "[PHRASE]":
-            current = {"es": "", "ru": "", "polls": [], "textquizzes": []}  # 💬 новая фраза
-            section = None
+    i = 0
+    while i < len(lines):
+        if lines[i] != "[PHRASE]":
+            i += 1
             continue
 
-        if up == "[/PHRASE]":
-            if current and (current.get("es") or current.get("ru")):
-                phrases.append(_cleanup_phrase(current))
-            current = None
-            section = None
+        total_blocks += 1
+        i += 1
+
+        es = None
+        ru = None
+        polls: list[dict] = []
+        textquizzes: list[dict] = []
+        section = None  # 💬 None | "POLL" | "TEXT"
+
+        while i < len(lines) and lines[i] != "[/PHRASE]":
+            line = lines[i].strip()
+
+            up = line.upper()
+            if up == "[POLL]":
+                section = "POLL"  # 💬 далее каждая строка = один poll-quiz
+                i += 1
+                continue
+            if up in ("[TEXT]", "[TEXTQUIZ]"):
+                section = "TEXT"  # 💬 далее каждая строка = один text-quiz
+                i += 1
+                continue
+
+            if line.startswith("ES:"):
+                es = line[3:].strip()
+                section = None
+                i += 1
+                continue
+
+            if line.startswith("RU:"):
+                ru = line[3:].strip()
+                section = None
+                i += 1
+                continue
+
+            # 💬 совместимость со старым форматом
+            if line.startswith("POLL:"):
+                payload = line[5:].strip().replace("\\n", "\n")
+                parts = [p.strip() for p in payload.split("|") if p.strip()]
+                # старый формат: вопрос | правильный | неверный1 | неверный2 | неверный3
+                if len(parts) >= 5:
+                    q = parts[0]
+                    correct = parts[1]
+                    options = parts[1:5]
+                    polls.append({
+                        "type": "quiz",  # 💬 формат под core8_1
+                        "question": q,
+                        "options": options,
+                        "correct_answer": correct
+                    })
+                else:
+                    errors.append(f"PHRASE #{total_blocks}: POLL мало полей")
+                i += 1
+                continue
+
+            if line.startswith("TEXTQUIZ:") or line.startswith("TEXT:"):
+                payload = line.split(":", 1)[1].strip().replace("\\n", "\n")
+                parts = [p.strip() for p in payload.split("|") if p.strip()]
+                if len(parts) >= 2:
+                    q = "|".join(parts[:-1]).strip()
+                    ans = parts[-1].strip()
+                    textquizzes.append({
+                        "type": "textquiz",
+                        "question": q,
+                        "correct_answer": ans
+                    })
+                else:
+                    errors.append(f"PHRASE #{total_blocks}: TEXT мало полей")
+                i += 1
+                continue
+
+            # 💬 новый формат внутри [POLL]
+            if section == "POLL":
+                payload = line.replace("\\n", "\n")
+                parts = [p.strip() for p in payload.split("|") if p.strip()]
+                # формат: вопрос | opt1 | opt2 | opt3 | correct (correct = последний)
+                if len(parts) >= 5:
+                    q = parts[0]
+                    options = parts[1:5]
+                    correct = options[-1]
+                    polls.append({
+                        "type": "quiz",
+                        "question": q,
+                        "options": options,
+                        "correct_answer": correct
+                    })
+                else:
+                    errors.append(f"PHRASE #{total_blocks}: строка [POLL] мало полей")
+                i += 1
+                continue
+
+            # 💬 новый формат внутри [TEXT]
+            if section == "TEXT":
+                payload = line.replace("\\n", "\n")
+                parts = [p.strip() for p in payload.split("|") if p.strip()]
+                # формат: вопрос | ответ
+                if len(parts) >= 2:
+                    q = "|".join(parts[:-1]).strip()
+                    ans = parts[-1].strip()
+                    textquizzes.append({
+                        "type": "textquiz",
+                        "question": q,
+                        "correct_answer": ans
+                    })
+                else:
+                    errors.append(f"PHRASE #{total_blocks}: строка [TEXT] мало полей")
+                i += 1
+                continue
+
+            # 💬 неизвестное содержимое внутри PHRASE игнорируем
+            i += 1
+
+        # 💬 если [/PHRASE] не найден = сообщение оборвалось = этот блок не сохраняем
+        if i >= len(lines) or lines[i] != "[/PHRASE]":
+            truncated_at = {"block": total_blocks, "es_preview": (es or "")[:60]}
+            break
+
+        # 💬 пропускаем [/PHRASE]
+        i += 1
+
+        if not es or not ru:
+            invalid_blocks += 1
+            errors.append(f"PHRASE #{total_blocks}: нет ES или RU")
             continue
 
-        if up == "[POLL]":
-            section = "POLL"  # 💬 следующие строки = poll-квизы
-            continue
+        ph = {"es": es, "ru": ru}
+        if polls:
+            ph["polls"] = polls
+        if textquizzes:
+            ph["textquizzes"] = textquizzes  # 💬 core8_1 v100 это понимает
 
-        if up in ("[TEXT]", "[TEXTQUIZ]"):
-            section = "TEXT"  # 💬 следующие строки = text-quiz
-            continue
+        phrases.append(ph)
 
-        # --- ES/RU ---
-        if line.startswith("ES:"):
-            _ensure_current()
-            current["es"] = line[3:].strip()
-            continue
+    meta = {
+        "found": total_blocks,
+        "saved": len(phrases),
+        "invalid": invalid_blocks,
+        "truncated": 1 if truncated_at else 0,
+        "truncated_at": truncated_at
+    }
+    return phrases, errors, meta
 
-        if line.startswith("RU:"):
-            _ensure_current()
-            current["ru"] = line[3:].strip()
-            continue
-
-        # --- СОВМЕСТИМОСТЬ СО СТАРЫМ ФОРМАТОМ POLL:/TEXTQUIZ: ---
-        if line.startswith("POLL:"):
-            _ensure_current()
-            payload = line[5:].strip().replace("\\n", "\n")
-            parts = [p.strip() for p in payload.split("|") if p.strip()]
-            # старый формат: question | correct | wrong1 | wrong2 | wrong3
-            if len(parts) >= 5:
-                question = parts[0]
-                correct = parts[1]
-                options = parts[1:]  # correct + wrongs
-                current.setdefault("polls", []).append(
-                    {"question": question, "options": options, "correct_answer": correct}  # 💬 структура quiz
-                )
-            continue
-
-        if line.startswith("TEXTQUIZ:") or line.startswith("TEXT:"):
-            _ensure_current()
-            payload = line.split(":", 1)[1].strip().replace("\\n", "\n")
-            parts = [p.strip() for p in payload.split("|") if p.strip()]
-            if len(parts) >= 2:
-                question = parts[0]
-                correct = parts[1]
-                current.setdefault("textquizzes", []).append(
-                    {"question": question, "correct_answer": correct}  # 💬 textquiz хранит correct_answer
-                )
-            continue
-
-        # --- НОВЫЙ ФОРМАТ ВНУТРИ [POLL] / [TEXT] ---
-        if section == "POLL":
-            _ensure_current()
-            payload = line.replace("\\n", "\n")
-            parts = [p.strip() for p in payload.split("|") if p.strip()]
-            # новый формат: question | opt1 | opt2 | opt3 | correct (correct = последний)
-            if len(parts) >= 3:
-                question = parts[0]
-                options = parts[1:]
-                correct = options[-1]
-                current.setdefault("polls", []).append(
-                    {"question": question, "options": options, "correct_answer": correct}  # 💬 структура quiz
-                )
-            continue
-
-        if section == "TEXT":
-            _ensure_current()
-            payload = line.replace("\\n", "\n")
-            parts = [p.strip() for p in payload.split("|") if p.strip()]
-            # формат: question | correct
-            if len(parts) >= 2:
-                current.setdefault("textquizzes", []).append(
-                    {"question": parts[0], "correct_answer": parts[1]}  # 💬 структура textquiz
-                )
-            continue
-
-        # 💬 неизвестные строки вне секций игнорируем
-
-    # 💬 если забыли закрыть [/PHRASE], всё равно сохраним последнюю фразу
-    if current and (current.get("es") or current.get("ru")):
-        phrases.append(_cleanup_phrase(current))
-
-    return phrases
 
 
 
@@ -2815,6 +2856,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
