@@ -5926,6 +5926,66 @@ async def handle_lex_phrases_done(cb: CallbackQuery, state: FSMContext):
     return await send_one_vocab(cb.message, state)
 
 
+@dp.message(LessonStates.vocab_phrase_select)
+async def lex_phrase_select_remove_by_number(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+
+    # 💬 чистим чат, если это не цифра
+    if not text.isdigit():
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        return
+
+    idx = int(text)
+    data = await state.get_data()
+
+    active_phrases = data.get("lex_active_phrases") or []
+    if not isinstance(active_phrases, list) or not active_phrases:
+        # 💬 если по какой то причине список не в стейте, просто чистим сообщение пользователя
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        return
+
+    # 💬 жёсткая валидация индекса
+    if idx < 1 or idx > len(active_phrases):
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        return
+
+    # 💬 скрываем фразу из сессионного списка, JSON не трогаем
+    active_phrases.pop(idx - 1)
+    await state.update_data(lex_active_phrases=active_phrases)
+
+    phrases_msg_id = data.get("lex_phrases_msg_id")
+
+    # 💬 обновляем тот же самый фрагмент сообщения со списком фраз
+    if phrases_msg_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=phrases_msg_id,
+                text=_lex_render_phrase_list(active_phrases),
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="✅ Готово", callback_data="lex_phrases_done")]
+                    ]
+                ),
+                disable_web_page_preview=True
+            )
+        except Exception:
+            pass
+
+    # 💬 удаляем цифру пользователя, чтобы чат не засорялся
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
 # ------------------------------  
 #   ПОТОК по показу type: quiz по VOCAB 📘📘📘
