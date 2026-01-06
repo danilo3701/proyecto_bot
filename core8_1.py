@@ -4030,7 +4030,7 @@ async def mywords_text_answer(message: Message, state: FSMContext):
     return await mywords_send_next_text(message, state)
 
 
-@dp.callback_query(F.data == "lex_phrases_done", StateFilter(LessonStates.showing_vocab))  # 💬 dp вместо router
+@dp.callback_query(StateFilter(LessonStates.vocab_phrase_select), F.data == "lex_phrases_done")  # 💬 "Готово" в выборе фраз
 @track_handler
 async def lex_phrases_done(callback: CallbackQuery, state: FSMContext):
 
@@ -7722,7 +7722,8 @@ async def handle_feedback_difficulty_vocab(message: Message, state: FSMContext):
 
     # 💬 НЕ перепрыгиваем в textquiz; пропускаем только если следующий — обычный quiz
     next_idx = data.get("vocab_index", 0) + 1
-    vocab_list = topics.get(topic_key, {}).get("vocab", [])
+    vocab_list = get_vocab_list(await state.get_data())  # 💬 берём сессионную лексику (после скрытия фраз)
+
     if next_idx < len(vocab_list) and vocab_list[next_idx].get("type") == "quiz":
         # 🎭 небольшой префейс перед квизом
         prefix = random.choice(["👮‍♂️","👮‍♀️","🚓"])           # 💬 что делает эта часть: эмодзи-префейс
