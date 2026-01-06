@@ -558,63 +558,191 @@ def _get_active_phrase_indexes(phrases: list, hidden: set) -> list:
 
 
 def get_vocab_list(data: dict) -> list:
+    """
+    💬 Логика:
+      1) Если есть lex_session_vocab_list в state = используем её (ALL IN раунды)
+      2) Если фаза содержит phrases = показываем base-блоки фазы + спец-блок phrase_selector
+      3) Иначе = старая логика "link → 6 quiz" + потом textquiz_pool
+    """
+    # 0) ALL IN: если уже собрана сессия раунда = возвращаем её
+    lex_session = data.get("lex_session_vocab_list")
+    if isinstance(lex_session, list) and lex_session:
+        return lex_session  # 💬 что делает эта часть: отдаём уже собранный раунд без пересборки
+
     topic_key = data.get("selected_topic")
-    phase_id = data.get("selected_vocab_phase_id")
+    topic     = topics.get(topic_key, {})
+    ph_id     = data.get("selected_phase_id")
 
-    phase = _get_vocab_phase(topic_key, phase_id)
+    # legacy: без фазы — как раньше
+    if not ph_id:
+        return topic.get("vocab", [])
 
-    # ✅ НОВЫЙ РЕЖИМ = phrases + 4 раунда
-    phrases = phase.get("phrases", [])
-    if phrases:
-        hidden = set(data.get("session_hidden_phrases", []))
-        active_indexes = _get_active_phrase_indexes(phrases, hidden)
-        active_phrases = [phrases[i] for i in active_indexes]
+    # берём фазу по её ID (фазы лежат в topic["vocab"] как блоки с phase_id)
+    phase = next((ph for ph in topic.get("vocab", []) if ph.get("phase_id") == ph_id), None)
+    if not phase:
+        return []
 
-        vocab_list = []
+    # 1) ALL IN: если в фазе есть phrases = сначала база, потом selector, а квизы соберём после выбора
+    if isinstance(phase.get("phrases"), list) and phase.get("phrases"):
+        base = list(phase.get("vocab", []))  # 💬 link/text/photo и т п
+        base.append({"type": "phrase_selector"})  # 💬 спец-блок: выбор известных фраз
+        return base
 
-        # 1) первым = выбор фраз (сессионный)
-        vocab_list.append({"type": "phrase_select"})  # 💬 список фраз с индексами и кнопкой Готово
+    # 2) Старый режим (пакеты по 6)
+    base          = list(phase.get("vocab", []))            # текст/линки/прочее
+    quiz_pool     = list(phase.get("quiz_pool", []))        # обычные квизы
+    textquiz_pool = list(phase.get("textquiz_pool", []))    # текст-квизы
 
-        # 2) раунды pull-quiz (по порядку в каждой фразе)
-        total_rounds = 4
-        for r in range(total_rounds):
-            vocab_list.append({"type": "round_header", "round": r + 1, "total_rounds": total_rounds})  # 💬 заголовок раунда
-            for phrase_obj in active_phrases:
-                pull = phrase_obj.get("pull_quizzes") or phrase_obj.get("poll_quizzes") or []
-                if r < len(pull):
-                    vocab_list.append(pull[r])  # 💬 pull-quiz раунда r для этой фразы
+    PACK = 6
+    compiled = []
 
-        # 3) textquiz = в конце (прыгаем к нему после каждого раунда)
-        for phrase_obj in active_phrases:
-            tqs = phrase_obj.get("text_quizzes") or []
-            if tqs:
-                vocab_list.append(tqs[0])  # 💬 1 textquiz на фразу
+    def take_pack(pool, start, pack=PACK):
+        return pool[start:start + pack], start + min(pack, max(0, len(pool) - start))
 
-        return vocab_list
+    qi = 0
+    for block in base:
+        compiled.append(block)
+        if ("link" in block) or ("url" in block) or (block.get("type") == "link"):
+            if qi < len(quiz_pool):
+                chunk, qi = take_pack(quiz_pool, qi)
+                compiled.extend(chunk)
 
-    # 🧩 СТАРЫЙ РЕЖИМ = оставляем как был
-    base_vocab = phase.get("vocab", [])
-    quiz_pool = phase.get("quiz_pool", [])
-    textquiz_pool = phase.get("textquiz_pool", [])
+    while qi < len(quiz_pool):
+        chunk, qi = take_pack(quiz_pool, qi)
+        compiled.extend(chunk)
 
-    vocab_list = list(base_vocab)
-
-    for i in range(0, len(quiz_pool), 6):
-        pack = quiz_pool[i:i + 6]
-        vocab_list.extend(pack)
-
-        if textquiz_pool:
-            tq_pack = textquiz_pool[:2]
-            textquiz_pool = textquiz_pool[2:]
-            vocab_list.extend(tq_pack)
-
-        if i + 6 < len(quiz_pool):
-            vocab_list.append({"type": "link", "url": "continue"})
-
-    vocab_list.extend(textquiz_pool)
-    return vocab_list
+    compiled.extend(textquiz_pool)
+    return compiled
+# 💬 что делает эта часть: добавили режим "phrases → phrase_selector → раунды", старое поведение сохранено
 
 
+def _lex_get_selected_phase(data: dict) -> dict | None:
+    # 💬 что делает эта часть: достаём текущую фазу из topics по selected_topic + selected_phase_id
+    topic_key = data.get("selected_topic")
+    topic = topics.get(topic_key, {})
+    ph_id = data.get("selected_phase_id")
+    if not ph_id:
+        return None
+    return next((ph for ph in topic.get("vocab", []) if ph.get("phase_id") == ph_id), None)
+
+
+def _lex_render_phrase_list(phrases: list) -> str:
+    # 💬 что делает эта часть: рендерим список фраз с индексами 1..N без лишнего форматирования
+    if not phrases:
+        return "Ничего не осталось\n\nНажми ✅ Готово"
+    lines = ["Отметь известные фразы = отправь номер в чат", ""]
+    for i, ph in enumerate(phrases, start=1):
+        es = (ph.get("es") or "").strip()
+        ru = (ph.get("ru") or "").strip()
+        if not es and not ru:
+            continue
+        lines.append(f"{i}) {es} = {ru}")
+    lines.append("")
+    lines.append("Нажми ✅ Готово = начнём квизы")
+    return "\n".join(lines)
+
+
+def _lex_pick_round_item(seq, round_idx: int):
+    # 💬 что делает эта часть: безопасно берём элемент раунда (list или dict ключи 1..4)
+    if isinstance(seq, list):
+        return seq[round_idx] if 0 <= round_idx < len(seq) else None
+    if isinstance(seq, dict):
+        return seq.get(str(round_idx + 1)) or seq.get(round_idx) or None
+    return None
+
+
+def _lex_get_poll_round(phrase: dict, round_idx: int) -> dict | None:
+    # 💬 что делает эта часть: достаём poll-quiz текущего раунда из phrase
+    polls = (
+        phrase.get("polls")
+        or phrase.get("pulls")
+        or phrase.get("pull_quizzes")
+        or phrase.get("poll_quizzes")
+        or phrase.get("quiz_rounds")
+        or []
+    )
+    item = _lex_pick_round_item(polls, round_idx)
+    if isinstance(item, dict):
+        out = dict(item)
+        out["type"] = "quiz"
+        return out
+    return None
+
+
+def _lex_get_textquiz_first(phrase: dict) -> dict | None:
+    # 💬 что делает эта часть: берём первый textquiz (у тебя он один тип = угадать глагол)
+    tqs = phrase.get("textquizzes") or phrase.get("textquiz") or phrase.get("text_quiz") or []
+    if isinstance(tqs, list) and tqs:
+        if isinstance(tqs[0], dict):
+            out = dict(tqs[0])
+            out["type"] = "textquiz"
+            return out
+    if isinstance(tqs, dict):
+        out = dict(tqs)
+        out["type"] = "textquiz"
+        return out
+    return None
+
+
+def _lex_detect_total_rounds(phrases: list, default_total: int = 4) -> int:
+    # 💬 что делает эта часть: определяем сколько раундов реально есть (если где то меньше 4)
+    mx = 0
+    for ph in phrases:
+        polls = ph.get("polls") or ph.get("pulls") or ph.get("pull_quizzes") or ph.get("poll_quizzes") or ph.get("quiz_rounds")
+        if isinstance(polls, list):
+            mx = max(mx, len(polls))
+        elif isinstance(polls, dict):
+            mx = max(mx, len(polls.keys()))
+    return mx if mx > 0 else default_total
+
+
+async def _lex_prepare_round_session(state: FSMContext, round_idx: int):
+    # 💬 что делает эта часть: собираем lex_session_vocab_list = N poll-quiz (по фразам) + 1 textquiz (по очереди)
+    data = await state.get_data()
+    phrases = data.get("lex_active_phrases") or []
+    if not isinstance(phrases, list):
+        phrases = []
+
+    total_rounds = data.get("lex_round_total") or _lex_detect_total_rounds(phrases, default_total=4)
+    cursor = data.get("lex_textquiz_phrase_cursor", 0)
+
+    session = []
+    for ph in phrases:
+        poll_block = _lex_get_poll_round(ph, round_idx)
+        if poll_block:
+            session.append(poll_block)
+
+    # 1 textquiz после сета (по очереди по фразам)
+    if 0 <= cursor < len(phrases):
+        tq = _lex_get_textquiz_first(phrases[cursor])
+        if tq:
+            session.append(tq)
+        cursor += 1
+
+    quiz_count = sum(1 for b in session if b.get("type") == "quiz")
+
+    await state.update_data(
+        lex_mode_active=True,
+        lex_round=round_idx,
+        lex_round_total=total_rounds,
+        lex_textquiz_phrase_cursor=cursor,
+        lex_session_vocab_list=session,
+        lex_round_block_size=quiz_count,
+
+        # сброс сетовой механики под новый раунд
+        vocab_index=0,
+        redo_stack=[],
+        redo_active=False,
+        refusal_count=0,
+        pending_textquiz=[],
+        lex_textquiz_done_round=False,
+        last_main_quiz_index=-1,
+        vocab_set_anchor=0,
+        current_poll_id=None,
+        current_poll_correct=None,
+        failed_vocab=[],
+        failed_textquiz=[]
+    )
 
 
 
@@ -1173,6 +1301,8 @@ class LessonStates(StatesGroup):
 
     # 📚 Поток «Учить слова»
     showing_vocab         = State()  # показываем очередной блок (link/text/photo/quiz)
+    vocab_phrase_select  = State()  # 💬 выбор известных фраз по индексам перед раундами (ALL IN)
+
     vocab_exercise        = State()  # ожидаем ответ на встроенный quiz
     vocab_text_continue   = State()  # после текстового блока — «Я прочитал(a) / Пропустить»
     vocab_photo_continue  = State()  # после фото — «Я просмотрел(а) / Пропустить»
@@ -5120,6 +5250,39 @@ async def send_one_vocab(message: Message, state: FSMContext):
 
     btype = block.get("type")
 
+    if btype == "phrase_selector":
+        # 💬 что делает эта часть: показываем список фраз, даём удалить известные индексы, затем стартуем раунды
+        phase = _lex_get_selected_phase(data)
+        phrases = phase.get("phrases", []) if isinstance(phase, dict) else []
+        if not isinstance(phrases, list) or not phrases:
+            # если по ошибке нет phrases = пропускаем блок
+            await state.update_data(vocab_index=idx + 1)
+            return await send_one_vocab(message, state)
+
+        # инициализация только один раз на вход в фазу
+        if not isinstance(data.get("lex_active_phrases"), list):
+            await state.update_data(
+                lex_active_phrases=list(phrases),
+                lex_round=0,
+                lex_round_total=_lex_detect_total_rounds(list(phrases), default_total=4),
+                lex_textquiz_phrase_cursor=0,
+                lex_mode_active=False  # 💬 активируем только после нажатия Готово
+            )
+
+        text = _lex_render_phrase_list(await state.get_data().get("lex_active_phrases", []))
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="✅ Готово", callback_data="lex_phrases_done")]]
+        )
+        msg = await smart_reply(message, text, reply_markup=kb)
+
+        await state.update_data(
+            lex_phrases_msg_id=msg.message_id,
+            lex_phrases_chat_id=msg.chat.id
+        )
+        await state.set_state(LessonStates.vocab_phrase_select)
+        return
+
+
     if btype == "phrase_select":
         # 💬 показываем список фраз и ждём ввод номера
         topic_key = data.get("selected_topic")
@@ -5619,6 +5782,97 @@ async def send_failed_vocab(chat_id: int, state: FSMContext):
 
 
 
+@dp.message(LessonStates.vocab_phrase_select)
+@track_handler
+async def handle_vocab_phrase_select(message: Message, state: FSMContext):
+    # 💬 что делает эта часть: ученик вводит номер фразы = скрываем её из сессионного списка
+    txt = (message.text or "").strip()
+    if not txt.isdigit():
+        # чистим чат = удаляем мусорный ввод
+        try:
+            await bot.delete_message(message.chat.id, message.message_id)
+        except Exception:
+            pass
+        return
+
+    idx = int(txt)
+    data = await state.get_data()
+    phrases = data.get("lex_active_phrases") or []
+    if not isinstance(phrases, list) or not phrases:
+        try:
+            await bot.delete_message(message.chat.id, message.message_id)
+        except Exception:
+            pass
+        return
+
+    if idx < 1 or idx > len(phrases):
+        # чистим чат = удаляем неверный индекс без лишних сообщений
+        try:
+            await bot.delete_message(message.chat.id, message.message_id)
+        except Exception:
+            pass
+        return
+
+    # удаляем выбранную фразу (индексы всегда 1..N)
+    phrases.pop(idx - 1)
+
+    # корректируем курсор textquiz, чтобы "по очереди" не ломалось
+    cursor = data.get("lex_textquiz_phrase_cursor", 0)
+    if (idx - 1) < cursor:
+        cursor = max(0, cursor - 1)
+
+    await state.update_data(lex_active_phrases=phrases, lex_textquiz_phrase_cursor=cursor)
+
+    # обновляем сообщение со списком
+    chat_id = data.get("lex_phrases_chat_id", message.chat.id)
+    msg_id = data.get("lex_phrases_msg_id")
+    if msg_id:
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="✅ Готово", callback_data="lex_phrases_done")]]
+        )
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=_lex_render_phrase_list(phrases),
+                reply_markup=kb
+            )
+        except Exception:
+            pass
+
+    # удаляем сообщение пользователя = чат не засоряем
+    try:
+        await bot.delete_message(message.chat.id, message.message_id)
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data == "lex_phrases_done", StateFilter(LessonStates.vocab_phrase_select))
+@track_handler
+async def handle_lex_phrases_done(cb: CallbackQuery, state: FSMContext):
+    # 💬 что делает эта часть: фиксируем список фраз для сессии, собираем раунд 1, стартуем квизы
+    await cb.answer()
+    data = await state.get_data()
+
+    # удаляем сообщение со списком
+    chat_id = data.get("lex_phrases_chat_id")
+    msg_id = data.get("lex_phrases_msg_id")
+    if chat_id and msg_id:
+        try:
+            await bot.delete_message(chat_id, msg_id)
+        except Exception:
+            pass
+
+    # собираем 1-й раунд (round_idx=0)
+    await _lex_prepare_round_session(state, round_idx=0)
+
+    # заголовок раунда (авто-удаление)
+    data2 = await state.get_data()
+    total = data2.get("lex_round_total", 4)
+    asyncio.create_task(send_and_auto_delete_text(bot, cb.message.chat.id, f"Раунд 1 из {total}", delay=2))
+
+    await state.set_state(LessonStates.showing_vocab)
+    return await send_one_vocab(cb.message, state)
 
 
 
@@ -5881,7 +6135,9 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
     # 💬 Таймаут считаем ОШИБКОЙ и повторяем её внутри текущего сета (6)
     data = await state.get_data()
     vocab_list = get_vocab_list(data)
-    BLOCK = 6  # фиксированный размер сета
+    BLOCK = data.get("lex_round_block_size") or 6
+    if data.get("lex_mode_active"):
+        BLOCK = max(1, len(q_positions))  # 💬 что делает эта часть: один сет на весь раунд
 
     # позиции только для обычных quiz
     q_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "quiz"]
@@ -6034,6 +6290,17 @@ async def _select_pending_textquiz_for_set(state: FSMContext, limit: int = 2) ->
        - Наполняем список сначала из Redo, затем из Новых, пока не наберем limit.
     """
     data = await state.get_data()
+    if data.get("lex_mode_active"):
+        # 💬 что делает эта часть: в ALL IN показываем ровно 1 textquiz после завершения сета квизов
+        vocab_list = get_vocab_list(data)
+        t_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "textquiz"]
+        if not t_positions:
+            return []
+        if data.get("lex_textquiz_done_round"):
+            return []
+        await state.update_data(lex_textquiz_done_round=True)
+        return [t_positions[0]]
+
     vocab_list = get_vocab_list(data)
     
     # --- Сохранение якоря для обычных квизов ---
@@ -6311,7 +6578,10 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
     data = await state.get_data()
     vocab_list = get_vocab_list(data)
-    BLOCK = 6  # фиксированный размер сета
+    BLOCK = data.get("lex_round_block_size") or 6
+    if data.get("lex_mode_active"):
+        BLOCK = max(1, len(q_positions))  # 💬 что делает эта часть: один сет на весь раунд
+
     # 👇 строим карту позиций только для type=="quiz"
     q_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "quiz"]
     # текущая позиция внутри q_positions (handle_vocab_poll_answer всегда обрабатывает quiz)
@@ -7398,6 +7668,31 @@ async def handle_offer_continue_vocab(message: Message, state: FSMContext):
         # 💬 отправка стикера без await, чтобы не блочить поток
         asyncio.create_task(send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=3))
 
+        if data.get("lex_mode_active"):
+            # 💬 что делает эта часть: вместо старого "следующий сет" = запускаем следующий раунд
+            data2 = await state.get_data()
+            cur_round = data2.get("lex_round", 0)
+            total = data2.get("lex_round_total", 4)
+            next_round = cur_round + 1
+
+            if next_round >= total:
+                await state.update_data(
+                    lex_mode_active=False,
+                    lex_session_vocab_list=None,
+                    lex_active_phrases=None,
+                    lex_round=0,
+                    lex_round_total=0,
+                    lex_textquiz_phrase_cursor=0,
+                    lex_textquiz_done_round=False
+                )  # 💬 что делает эта часть: завершили все раунды = чистим и выходим
+                return await lesson_menu_handler(message, state)
+
+            await _lex_prepare_round_session(state, round_idx=next_round)
+
+            asyncio.create_task(send_and_auto_delete_text(bot, message.chat.id, f"Раунд {next_round + 1} из {total}", delay=2))
+            return await send_one_vocab(message, state)
+
+
         # 🚀 Переход к следующему сету или textquiz
         vocab_list = get_vocab_list(data)
 
@@ -8343,6 +8638,16 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
             return await send_one_vocab(cb.message, state)
 
         if next_stage == "home":
+            await state.update_data(
+                lex_mode_active=False,
+                lex_session_vocab_list=None,
+                lex_active_phrases=None,
+                lex_round=0,
+                lex_round_total=0,
+                lex_textquiz_phrase_cursor=0,
+                lex_textquiz_done_round=False
+            )  # 💬 что делает эта часть: чистим сессию ALL IN при выходе в меню
+
             return await lesson_menu_handler(cb.message, state)
 
 
