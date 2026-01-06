@@ -2970,6 +2970,7 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
         if topics.get(topic_key, {}).get("category") == "gram":
             return await open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню
 
+
         return await lesson_menu_handler(query.message, state)
 
     # 💬 Если юзер уже подписан на обязательный канал — не показываем окно подписки
