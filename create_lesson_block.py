@@ -923,8 +923,22 @@ async def confirm_delete_topic(message: Message, state: FSMContext):
         return await start_adding_topic(message, state)
 
     await state.clear()
-    await message.answer("✅ Тема удалена из /data/topics.")
-    return await start_adding_topic(message, state)
+
+    # 💬 возвращаемся в то же меню "Редактировать темы" (список файлов из /data/topics)
+    topics_dir = get_topics_dir()
+    files = [p.stem for p in topics_dir.glob("*.json")]
+
+    if not files:
+        await message.answer("✅ Тема удалена. Больше нет тем для редактирования.")
+        return await start_adding_topic(message, state)
+
+    buttons = [[KeyboardButton(text="🚫 Отмена")]] + [[KeyboardButton(text=name)] for name in files]
+    keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+    await message.answer("✅ Тема удалена. Выберите следующую тему для редактирования:", reply_markup=keyboard)
+    await state.set_state(NewTopicStates.waiting_edit_topic_choice)
+    return
+
 
 
 
@@ -2919,6 +2933,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
