@@ -5782,8 +5782,8 @@ async def send_failed_vocab(chat_id: int, state: FSMContext):
     # 💬 защитный сброс: при входе в ревью ошибок никаких запланированных textquiz быть не должно
     await state.update_data(pending_textquiz=[])
 
-    topic_key  = data["selected_topic"]
-    vocab_list = get_vocab_list(data)
+    vocab_list = get_vocab_list(data)  # 💬 берём актуальный список под текущую сессию (lex round или обычный)
+
     failed     = data.get("failed_vocab", [])
     idx        = failed[0]
     block      = vocab_list[idx]
@@ -5827,10 +5827,11 @@ async def send_failed_vocab(chat_id: int, state: FSMContext):
 
         # 💾 сохраняем poll.id и message_id, чтобы потом удалить и отследить ответ
         await state.update_data(
-            current_poll_id=poll_msg.poll.id,
-            current_poll_message_id=poll_msg.message_id,
-            current_correct_option_id=correct_id
+            current_poll_id=poll.id,
+            current_correct_option_id=correct_idx,
+            last_poll_msg_id=poll_msg.message_id  # 💬 фикс: сохраняем id реально отправленного poll
         )
+
         await state.update_data(lex_last_bot_msg_id=poll_message.message_id)  # 💬 poll = текущий фрагмент чата
 
         # 🔄 переключаем FSM в разбор ошибок quiz
@@ -5927,6 +5928,47 @@ async def handle_vocab_phrase_select(message: Message, state: FSMContext):
         await bot.delete_message(message.chat.id, message.message_id)
     except Exception:
         pass
+
+@dp.message(LessonStates.vocab_phrase_select)
+@track_handler
+async def handle_vocab_phrase_select(message: Message, state: FSMContext):
+    # 💬 пользователь пишет номер фразы, мы убираем её из сессионного списка и обновляем сообщение
+    txt = (message.text or "").strip()
+
+    if not txt.isdigit():
+        try:
+            await message.delete()
+        except TelegramBadRequest:
+            pass
+        return
+
+    idx = int(txt)
+    data = await state.get_data()
+    active = data.get("lex_active_phrases", [])
+
+    # жёсткая валидация индекса
+    if idx < 1 or idx > len(active):
+        try:
+            await message.delete()
+        except TelegramBadRequest:
+            pass
+        return
+
+    # удаляем выбранную фразу из сессионного списка
+    active.pop(idx - 1)
+    await state.update_data(lex_active_phrases=active)
+
+    # удаляем сообщение пользователя с цифрой, чтобы не засорять чат
+    try:
+        await message.delete()
+    except TelegramBadRequest:
+        pass
+
+    # обновляем текст списка фраз (через edit_text у уже отправленного сообщения)
+    phrases_msg_id = data.get("lex_phrases_msg_id")
+    if phrases_msg_id:
+        await _lex_update_phrase_list(message.chat.id, phrases_msg_id, state)  # 💬 перерисовываем список + кнопку "Готово"
+
 
 
 @dp.callback_query(F.data == "lex_phrases_done", StateFilter(LessonStates.vocab_phrase_select))
