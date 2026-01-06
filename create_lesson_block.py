@@ -58,12 +58,66 @@ from aiogram.filters import StateFilter
 
 
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, BotCommand
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery  # 💬 inline меню на callback
+from aiogram.exceptions import TelegramBadRequest  # 💬 защита от "message is not modified"
+import hashlib  # 💬 короткие id для callback_data
 
 from aiogram.filters.command import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
 router = Router()
+
+ADMIN_INLINE_MSG_ID_KEY = "admin_inline_msg_id"  # 💬 где хранится id последнего inline-меню
+ADMIN_TOPIC_MAP_KEY = "admin_topic_map"          # 💬 tid -> filename stem для callback
+
+def _ikb(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
+    # 💬 собираем InlineKeyboardMarkup из (text, callback_data)
+    keyboard = []
+    for row in rows:
+        keyboard.append([InlineKeyboardButton(text=t, callback_data=cb) for t, cb in row])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+async def _inline_replace(cb: CallbackQuery, state: FSMContext, text: str, kb: InlineKeyboardMarkup):
+    # 💬 редактируем текущее сообщение, чтобы не плодить новые
+    try:
+        await cb.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except TelegramBadRequest:
+        # 💬 если Telegram ругается на "not modified" или другое = просто игнорируем
+        try:
+            await cb.message.edit_reply_markup(reply_markup=kb)
+        except Exception:
+            pass
+    except Exception:
+        # 💬 fallback: если edit невозможен, отправим новое и запомним id
+        msg = await cb.message.answer(text, reply_markup=kb, parse_mode="HTML")
+        await state.update_data(**{ADMIN_INLINE_MSG_ID_KEY: msg.message_id})
+
+async def _inline_open(message: Message, state: FSMContext, text: str, kb: InlineKeyboardMarkup):
+    # 💬 при входе в админ-inline режим удаляем прошлое меню и показываем одно новое
+    st = await state.get_data()
+    old_id = st.get(ADMIN_INLINE_MSG_ID_KEY)
+    if old_id:
+        try:
+            await message.bot.delete_message(message.chat.id, int(old_id))
+        except Exception:
+            pass
+
+    msg = await message.answer(text, reply_markup=kb, parse_mode="HTML")
+    await state.update_data(**{ADMIN_INLINE_MSG_ID_KEY: msg.message_id})
+
+def _make_tid(name: str) -> str:
+    # 💬 короткий id для callback_data (лимит длины в Telegram)
+    return hashlib.sha1((name or "").encode("utf-8")).hexdigest()[:10]
+
+def _load_topics_index() -> tuple[dict, list[str]]:
+    # 💬 собираем индекс тем из /data/topics
+    topics_dir = get_topics_dir()
+    files = sorted([p.stem for p in topics_dir.glob("*.json")])
+    topic_map = {}
+    for name in files:
+        topic_map[_make_tid(name)] = name
+    return topic_map, files
 
 # 💬 Уровни, которые сохраняем в JSON (без эмодзи)
 ALLOWED_LEVELS = ["A0", "A1-A2", "B1-B2", "C1"]
@@ -364,22 +418,33 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 
     # 💬 Прямая кнопка в режим редактирования тем (аналог /edittopic)
     if text == "✏️ Редактировать темы":
-        # очищаем текущий FSM-поток конструктора
+        # 💬 переходим в единое inline-меню (без захламления чата)
         await state.clear()
 
-        topics_dir = get_topics_dir()  # 💬 что делает эта часть: читаем темы из Volume (/data/topics)
-        files = [p.stem for p in topics_dir.glob("*.json")]
+        topic_map, files = _load_topics_index()
+        await state.update_data(**{ADMIN_TOPIC_MAP_KEY: topic_map})
 
         if not files:
-            await message.answer("⚠️ Нет доступных тем для редактирования.")
+            await message.answer("⚠️ Нет доступных тем для редактирования.", reply_markup=ReplyKeyboardRemove())
             return
 
-        buttons = [[KeyboardButton(text="🚫 Отмена")]] + [[KeyboardButton(text=name)] for name in files]
-        keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+        rows = []
+        for name in files[:30]:
+            tid = _make_tid(name)
+            rows.append([(name, f"adm:topic:{tid}")])
 
-        await message.answer("✏️ Выберите тему для редактирования:", reply_markup=keyboard)
-        await state.set_state(NewTopicStates.waiting_edit_topic_choice)  # 💬 что делает эта часть: остаёмся в редакторе CreateLessonBlock
+        rows.append([("⬅️ Закрыть", "adm:close")])
+
+        kb = _ikb(rows)
+
+        await _inline_open(
+            message,
+            state,
+            "✏️ <b>Редактировать темы</b>\nВыбери тему:",
+            kb
+        )
         return
+
 
 
     if text == "ADD":
@@ -419,6 +484,169 @@ async def get_category_or_ads(message: Message, state: FSMContext):
     await message.answer("Теперь выбери уровень темы:", reply_markup=keyboard)
 
     await state.set_state(NewTopicStates.adding_category)
+
+
+
+@router.callback_query(F.data == "adm:close")
+async def admin_close(cb: CallbackQuery, state: FSMContext):
+    # 💬 закрываем inline меню
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+    await state.update_data(**{ADMIN_INLINE_MSG_ID_KEY: None})
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("adm:topic:"))
+async def admin_open_topic(cb: CallbackQuery, state: FSMContext):
+    # 💬 открываем тему по callback (без ввода названия)
+    tid = (cb.data or "").split("adm:topic:", 1)[1].strip()
+
+    st = await state.get_data()
+    topic_map = st.get(ADMIN_TOPIC_MAP_KEY) or {}
+
+    name = topic_map.get(tid)
+    if not name:
+        topic_map, _ = _load_topics_index()
+        await state.update_data(**{ADMIN_TOPIC_MAP_KEY: topic_map})
+        name = topic_map.get(tid)
+
+    if not name:
+        await cb.answer("Тема не найдена", show_alert=True)
+        return
+
+    topics_dir = get_topics_dir()
+    path = topics_dir / f"{name}.json"
+    if not path.exists():
+        await cb.answer("Файл темы не найден", show_alert=True)
+        return
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            topic_data = json.load(f) or {}
+    except Exception:
+        await cb.answer("Ошибка чтения JSON", show_alert=True)
+        return
+
+    await state.clear()
+    await state.update_data(
+        topic=topic_data,
+        topic_path=str(path),
+        topic_level=topic_data.get("level"),
+        **{ADMIN_TOPIC_MAP_KEY: topic_map},
+        **{ADMIN_INLINE_MSG_ID_KEY: cb.message.message_id},
+    )
+
+    title = topic_data.get("visible_title") or topic_data.get("name") or name
+    kb = _ikb([
+        [("🗑 Удалить тему", f"adm:topic_del:{tid}")],
+        [("⬅️ К списку тем", "adm:topics")],
+    ])
+
+    await _inline_replace(cb, state, f"✅ Открыта тема: <b>{title}</b>\nЧто сделать?", kb)
+    await cb.answer()
+
+@router.callback_query(F.data == "adm:topics")
+async def admin_topics_list(cb: CallbackQuery, state: FSMContext):
+    # 💬 возвращаемся к списку тем в том же сообщении
+    topic_map, files = _load_topics_index()
+    await state.update_data(**{ADMIN_TOPIC_MAP_KEY: topic_map})
+
+    if not files:
+        kb = _ikb([[("⬅️ Закрыть", "adm:close")]])
+        await _inline_replace(cb, state, "⚠️ Тем больше нет.", kb)
+        await cb.answer()
+        return
+
+    rows = []
+    for name in files[:30]:
+        tid = _make_tid(name)
+        rows.append([(name, f"adm:topic:{tid}")])
+
+    rows.append([("⬅️ Закрыть", "adm:close")])
+
+    kb = _ikb(rows)
+    await _inline_replace(cb, state, "✏️ <b>Редактировать темы</b>\nВыбери тему:", kb)
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("adm:topic_del:"))
+async def admin_delete_topic_ask(cb: CallbackQuery, state: FSMContext):
+    # 💬 подтверждение удаления
+    tid = (cb.data or "").split("adm:topic_del:", 1)[1].strip()
+
+    st = await state.get_data()
+    topic_map = st.get(ADMIN_TOPIC_MAP_KEY) or {}
+    name = topic_map.get(tid)
+
+    title = ""
+    topic = st.get("topic") or {}
+    if topic:
+        title = topic.get("visible_title") or topic.get("name") or ""
+
+    if not name:
+        await cb.answer("Тема не найдена", show_alert=True)
+        return
+
+    shown = title or name
+    kb = _ikb([
+        [("✅ Удалить", f"adm:topic_del_ok:{tid}"), ("🚫 Отмена", f"adm:topic:{tid}")],
+        [("⬅️ К списку тем", "adm:topics")],
+    ])
+
+    await _inline_replace(cb, state, f"🗑 Удалить тему: <b>{shown}</b>\nПодтверди действие.", kb)
+    await cb.answer()
+
+@router.callback_query(F.data.startswith("adm:topic_del_ok:"))
+async def admin_delete_topic_do(cb: CallbackQuery, state: FSMContext):
+    # 💬 удаляем файл темы из /data/topics и возвращаемся в список
+    tid = (cb.data or "").split("adm:topic_del_ok:", 1)[1].strip()
+
+    st = await state.get_data()
+    topic_map = st.get(ADMIN_TOPIC_MAP_KEY) or {}
+    name = topic_map.get(tid)
+
+    if not name:
+        await cb.answer("Тема не найдена", show_alert=True)
+        return
+
+    topics_dir = get_topics_dir()
+    path = topics_dir / f"{name}.json"
+    if not path.exists():
+        await cb.answer("Файл уже отсутствует", show_alert=True)
+        return
+
+    try:
+        os.remove(path)
+    except Exception:
+        logging.exception("admin_delete_topic_do: cannot remove %s", path)
+        await cb.answer("Не смог удалить файл", show_alert=True)
+        return
+
+    # 💬 после удаления сразу обновляем индекс и показываем список тем
+    topic_map, files = _load_topics_index()
+    await state.clear()
+    await state.update_data(
+        **{ADMIN_TOPIC_MAP_KEY: topic_map},
+        **{ADMIN_INLINE_MSG_ID_KEY: cb.message.message_id},
+    )
+
+    if not files:
+        kb = _ikb([[("⬅️ Закрыть", "adm:close")]])
+        await _inline_replace(cb, state, "✅ Тема удалена.\nТем больше нет.", kb)
+        await cb.answer()
+        return
+
+    rows = []
+    for nm in files[:30]:
+        t = _make_tid(nm)
+        rows.append([(nm, f"adm:topic:{t}")])
+
+    rows.append([("⬅️ Закрыть", "adm:close")])
+
+    kb = _ikb(rows)
+    await _inline_replace(cb, state, "✅ Тема удалена.\nВыбери следующую тему:", kb)
+    await cb.answer()
+
 
 
 @router.message(NewTopicStates.waiting_edit_topic_choice)
@@ -2933,6 +3161,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
