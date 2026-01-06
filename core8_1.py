@@ -6034,10 +6034,11 @@ import types
 
 
 @track_handler
-async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMContext, delay: int = QUIZ_TIMEOUT_TASK_S):
+async def _vocab_quiz_timeout_handler(chat_id, poll_id, delay=QUIZ_TIMEOUT_TASK_S):
+    # 💬 таймаут квиза: считаем как неправильный ответ и крутим внутри текущего сета
     await asyncio.sleep(delay)
 
-    # 💬 если мы уже НЕ в основном квизе — таймаут не срабатывает
+    # 💬 если мы уже НЕ в основном квизе = таймаут не срабатывает
     if await state.get_state() != LessonStates.vocab_exercise:
         return
 
@@ -6045,186 +6046,172 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
     if data.get("current_poll_id") != poll_id:
         return
 
-    # сброс poll_id
+    # 💬 сброс poll_id, чтобы не словить двойную обработку
     await state.update_data(current_poll_id=None)
 
-        # ── Время вышло! ──
-    asyncio.create_task(send_and_auto_delete_text(bot, chat_id, "⏱ Время вышло!", delay=AUTO_DELETE_TEXT_DELAY_S))  # 💬 авто-удаление
+    # 💬 короткий сигнал пользователю
+    asyncio.create_task(
+        send_and_auto_delete_text(bot, chat_id, "⏱ Время вышло!", delay=AUTO_DELETE_TEXT_DELAY_S)
+    )
 
+    await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)
 
-    data = await state.get_data()
-    idx  = data.get("vocab_index", 0)
-    block = get_vocab_list(data)[idx]
-    await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)  # 💬 короткая пауза перед штрафом
-
-    # ── Далее оригинальный код: снимаем XP, показываем штраф, удаляем, переход к следующему
-
-    # 💬 Синхронизируем штраф в xp_data (чтобы меню и файл совпадали)
+    # 💬 штраф XP синхронизируем в xp_data
     topic_key = (await state.get_data()).get("selected_topic", "unknown")
     await add_xp(chat_id, topic_key, -20)
 
+    fb = await bot.send_message(chat_id, "⚠️ -20 XP")
 
-    xp = (await state.get_data()).get("xp", 0)
-    fb = await bot.send_message(chat_id, f"⚠️ -20 XP")
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)
 
-    # ── Сохраняем этот индекс в failed_vocab ──
-    idx    = data.get("vocab_index", 0)
-    failed = data.get("failed_vocab", [])
-    if idx not in failed:
-        failed.append(idx)
-        await state.update_data(failed_vocab=failed)
+    # 💬 чистим сообщения (опрос + штраф) чтобы чат не заспамливался
+    data = await state.get_data()
+    try:
+        pmid = data.get("current_poll_message_id")
+        if pmid:
+            await bot.delete_message(chat_id, pmid)
+    except Exception:
+        pass
+    try:
+        await bot.delete_message(chat_id, fb.message_id)
+    except Exception:
+        pass
 
-    # ── Ждём и удаляем опрос + фидбек ──
-    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 время на чтение перед зачисткой
-
-    try: await bot.delete_message(chat_id, data.get("current_poll_message_id"))
-    except: pass
-    try: await bot.delete_message(chat_id, fb.message_id)
-    except: pass
-
-    # 💬 Таймаут считаем ОШИБКОЙ и повторяем её внутри текущего сета (6)
+    # ─────────────────────────────────────────────
+    # 💬 дальше = логика пересдачи внутри текущего сета
     data = await state.get_data()
     vocab_list = get_vocab_list(data)
+    idx = data.get("vocab_index", 0)
+
+    def _fake_msg():
+        fc = Chat(id=chat_id, type="private")
+        fu = User(id=chat_id, is_bot=False, first_name="")
+        return Message(
+            message_id=0,
+            date=datetime.datetime.now(),
+            chat=fc,
+            from_user=fu,
+            text=""
+        )
+
+    # 💬 защита от кривого idx или не quiz блока
+    if idx >= len(vocab_list) or vocab_list[idx].get("type") != "quiz":
+        await state.update_data(vocab_index=min(idx + 1, len(vocab_list)))
+        return await send_one_vocab(_fake_msg(), state)
+
+    # 💬 позиции только quiz блоков
+    q_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "quiz"]
+    if not q_positions:
+        # 💬 если вдруг квизов нет = просто идём дальше
+        await state.update_data(vocab_index=min(idx + 1, len(vocab_list)))
+        return await send_one_vocab(_fake_msg(), state)
+
+    try:
+        q_idx = q_positions.index(idx)
+    except ValueError:
+        # 💬 если таймаут пришёл не на quiz позиции = прыгаем на ближайший quiz
+        nxt_q = next((i for i in range(idx + 1, len(vocab_list)) if vocab_list[i].get("type") == "quiz"), None)
+        if nxt_q is None:
+            await state.update_data(vocab_index=min(idx + 1, len(vocab_list)))
+            return await send_one_vocab(_fake_msg(), state)
+        await state.update_data(vocab_index=nxt_q)
+        return await send_one_vocab(_fake_msg(), state)
+
     BLOCK = data.get("lex_round_block_size") or 6
     if data.get("lex_mode_active"):
-        BLOCK = max(1, len(q_positions))  # 💬 что делает эта часть: один сет на весь раунд
-
-    # позиции только для обычных quiz
-    q_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "quiz"]
-    try:
-        q_idx = q_positions.index(idx)  # idx у нас уже получен выше из state
-    except ValueError:
-        # защитный кейс: если вдруг таймаут пришёл не по quiz — прыгаем к ближ. quiz
-        nxt_q = next((i for i in range(idx + 1, len(vocab_list))
-                      if vocab_list[i].get("type") == "quiz"), None)
-        from aiogram.types import Chat, User, Message, KeyboardButton, ReplyKeyboardMarkup
-        chat = Chat(id=chat_id, type="private")
-        fu   = User(id=chat_id, is_bot=False, first_name="")
-        fake = Message(message_id=0, date=datetime.datetime.now(), chat=chat, from_user=fu, text="")
-        if nxt_q is None:
-            oc_scene = random.choice(scenarios["offer_continue"])
-            kb = ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]],
-                resize_keyboard=True
-            )
-            await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
-            await state.set_state(LessonStates.showing_vocab)
-            return await smart_reply(fake, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
-        else:
-            await state.update_data(vocab_index=nxt_q, current_poll_id=None)
-            return await send_one_vocab(fake, state)
+        BLOCK = max(1, len(q_positions))  # 💬 один сет на весь раунд
 
     block_start_q = (q_idx // BLOCK) * BLOCK
-    block_end_q   = min(block_start_q + BLOCK, len(q_positions))
+    block_end_q = min(block_start_q + BLOCK, len(q_positions))
 
-    # добавляем текущий индекс в стек повторов
     redo = data.get("redo_stack", [])
     if idx not in redo:
-        redo.append(idx)
+        redo.append(idx)  # 💬 таймаут = ошибка = кладём в конец текущего сета
 
-    # линейный следующий внутри текущего сета (если есть)
     next_linear = q_positions[q_idx + 1] if (q_idx + 1) < block_end_q else None
 
-    from aiogram.types import Chat, User, Message
-    chat = await bot.get_chat(chat_id)
-    fake = Message(
-        message_id=0,
-        date=datetime.datetime.now(),
-        chat=chat,
-        from_user=User(id=chat_id, is_bot=False, first_name=""),
-        text=""
-    )
-
-    # 💬 приоритет пересдач: если уже в redo — НЕ возвращаемся в линейку
-    data = await state.get_data()
-    redo = data.get("redo_stack", [])
-
-    # 💬 таймаут = неправильный ответ: кладём в пересдачу и в общий ревью
-    redo = data.get("redo_stack", [])
-    if idx not in redo:
-        redo.append(idx)  # 💬 пересдача внутри текущего сета
-
-    failed = data.get("failed_vocab", [])
-    if idx not in failed:
-        failed.append(idx)  # 💬 общий ревью-пул только из таймаутов
-
-    await state.update_data(redo_stack=redo, failed_vocab=failed)
-
-
+    # 💬 если уже в режиме пересдач = крутим только redo
     if data.get("redo_active"):
-        # остаёмся в режиме пересдач, пока очередь не опустеет
         if redo:
             nxt = redo.pop(0)
-            await state.update_data(vocab_index=nxt, redo_stack=redo, redo_active=True, current_poll_id=None)  # 💬 держим redo
-            return await send_one_vocab(fake, state)  # 💬 используем уже созданное fake-сообщение
+            await state.update_data(
+                vocab_index=nxt,
+                redo_stack=redo,
+                redo_active=True,
+                current_poll_id=None
+            )
+            return await send_one_vocab(_fake_msg(), state)
 
-        else:
-            # редо пуста — СЕТ ЗАКРЫТ → пробуем мини-сессию textquiz
-            await state.update_data(redo_active=False)
+        # 💬 redo пуста = сет закрыт = textquiz или offer_continue
+        await state.update_data(redo_active=False, redo_stack=[])
 
-            pending = await _select_pending_textquiz_for_set(state)  # 💬 вернёт 0–2 после сета или «финальный хвост»
-            if pending:
-                next_idx = pending[0]
-                await state.update_data(
-                    vocab_index=next_idx,
-                    pending_textquiz=pending,
-                    current_poll_id=None,   # 💬 сбрасываем poll
-                )
-                return await send_one_vocab(fake, state)
+        pending = await _select_pending_textquiz_for_set(state)  # 💬 0–2 textquiz или финальный хвост
+        if pending:
+            next_idx = pending[0]
+            await state.update_data(
+                vocab_index=next_idx,
+                pending_textquiz=pending,
+                current_poll_id=None
+            )
+            return await send_one_vocab(_fake_msg(), state)
 
-            # 💬 textquiz нет — обычный offer_continue
-            oc_scene = random.choice(scenarios["offer_continue"])
-            buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
-            kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-            await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
-            await state.set_state(LessonStates.showing_vocab)
-            return await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+        oc_scene = random.choice(scenarios["offer_continue"])
+        buttons = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
+        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+        await state.update_data(
+            current_stage="offer_continue",
+            current_scene=oc_scene,
+            redo_stack=[],
+            redo_active=False,
+            pending_textquiz=[],
+        )
+        await state.set_state(LessonStates.showing_vocab)
+        return await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
 
-
+    # 💬 обычный режим = сначала добиваем линейку сета
     if next_linear is not None:
-        # идём дальше по сету, ошибку оставляем в redo_stack
         await state.update_data(
             vocab_index=next_linear,
             redo_stack=redo,
             redo_active=False,
             current_poll_id=None
         )
-        return await send_one_vocab(fake, state)
-    else:
-        # край сета: сначала доигрываем ошибки, потом interleave с textquiz / offer_continue
-        if redo:
-            nxt = redo.pop(0)
-            await state.update_data(
-                vocab_index=nxt,
-                redo_stack=redo,
-                current_poll_id=None
-            )
-            return await send_one_vocab(fake, state)
-        else:
-            # 💬 пробуем запустить мини-сессию textquiz
-            pending = await _select_pending_textquiz_for_set(state)
+        return await send_one_vocab(_fake_msg(), state)
 
-            if pending:
-                next_idx = pending[0]
-                await state.update_data(
-                    vocab_index=next_idx,
-                    pending_textquiz=pending,
-                    current_poll_id=None
-                )
-                return await send_one_vocab(fake, state)
+    # 💬 конец линейки сета = стартуем пересдачу
+    if redo:
+        nxt = redo.pop(0)
+        await state.update_data(
+            vocab_index=nxt,
+            redo_stack=redo,
+            redo_active=True,
+            current_poll_id=None
+        )
+        return await send_one_vocab(_fake_msg(), state)
 
-            # 💬 textquiz нет — обычный offer_continue
-            oc_scene = random.choice(scenarios["offer_continue"])
-            from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
-            kb = ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]],
-                resize_keyboard=True
-            )
-            await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
-            await state.set_state(LessonStates.showing_vocab)
-            return await smart_reply(fake, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+    # 💬 вообще нечего пересдавать = textquiz или offer_continue
+    pending = await _select_pending_textquiz_for_set(state)
+    if pending:
+        next_idx = pending[0]
+        await state.update_data(
+            vocab_index=next_idx,
+            pending_textquiz=pending,
+            current_poll_id=None
+        )
+        return await send_one_vocab(_fake_msg(), state)
 
-
+    oc_scene = random.choice(scenarios["offer_continue"])
+    buttons = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
+    kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+    await state.update_data(
+        current_stage="offer_continue",
+        current_scene=oc_scene,
+        redo_stack=[],
+        redo_active=False,
+        pending_textquiz=[],
+    )
+    await state.set_state(LessonStates.showing_vocab)
+    return await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
 
 
 
