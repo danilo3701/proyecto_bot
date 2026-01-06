@@ -1901,7 +1901,8 @@ def _parse_allin_block(text: str):
                     options = [correct] + wrongs[:2]
 
                     if len(options) < 3 or not correct:
-                        errors.append(f"PHRASE #{total_blocks}: строка [POLL] не собрала 3 варианта")
+                        errors.append(f"PHRASE #{total_blocks}: строка [TEXT] не собрала 3 варианта")  # 💬 чтобы не путало с POLL
+
                     else:
                         polls.append({
                             "type": "quiz",
@@ -1910,7 +1911,8 @@ def _parse_allin_block(text: str):
                             "correct_answer": correct    # 💬 правильный до перемешки всегда первый
                         })
                 else:
-                    errors.append(f"PHRASE #{total_blocks}: строка [POLL] мало полей")
+                    errors.append(f"PHRASE #{total_blocks}: строка [TEXT] мало полей")  # 💬 чтобы не путало с POLL
+
 
                 i += 1
                 continue
@@ -1920,11 +1922,13 @@ def _parse_allin_block(text: str):
             if section == "POLL":
                 payload = line.replace("\\n", "\n")
                 parts = [p.strip() for p in payload.split("|") if p.strip()]
-                # формат: вопрос | opt1 | opt2 | opt3 | correct (correct = последний)
-                if len(parts) >= 5:
+
+                # 💬 формат теперь: вопрос | ВЕРНЫЙ | НЕВЕРНЫЙ1 | НЕВЕРНЫЙ2 (всего 4 поля)
+                # 💬 если кто то пришлёт больше полей, лишнее игнорируем, берём первые 3 варианта
+                if len(parts) >= 4:
                     q = parts[0]
-                    options = parts[1:5]
-                    correct = options[-1]
+                    options = parts[1:4]                 # 💬 всегда 3 варианта
+                    correct = options[0]                 # 💬 правильный всегда первый
                     polls.append({
                         "type": "quiz",
                         "question": q,
@@ -1935,6 +1939,7 @@ def _parse_allin_block(text: str):
                     errors.append(f"PHRASE #{total_blocks}: строка [POLL] мало полей")
                 i += 1
                 continue
+
 
             # 💬 новый формат внутри [TEXT]
             if section == "TEXT":
@@ -3227,6 +3232,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
