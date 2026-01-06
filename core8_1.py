@@ -8652,6 +8652,38 @@ async def handle_subscription_invalid_input(message: Message, state: FSMContext)
 
 
 
+@dp.callback_query(F.data == "lex_phrases_done", StateFilter(LessonStates.vocab_phrase_select, LessonStates.showing_vocab))
+async def lex_phrases_done(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()  # 💬 убираем часики, даже если дальше будет ранний выход
+
+    data = await state.get_data()
+    if data.get("current_stage") != "phrase_select":
+        return  # 💬 защита, чтобы кнопка не ломала другие этапы
+
+    # 💬 убираем кнопки "Готово", чтобы не спамили повторными кликами
+    try:
+        await callback.message.edit_reply_markup()
+    except Exception:
+        pass
+
+    topic_key = data.get("selected_topic")
+    vocab_list = topics.get(topic_key, {}).get("vocab", [])
+
+    # 💬 прыгаем на первый round_header (чтобы не показать снова список фраз)
+    start_idx = next(
+        (i for i, b in enumerate(vocab_list) if b.get("type") == "round_header"),
+        data.get("vocab_index", 0) + 1
+    )
+
+    await state.update_data(
+        vocab_index=start_idx,
+        current_stage="vocab"
+    )
+    await state.set_state(LessonStates.showing_vocab)
+
+    # 💬 готовим сессию раунда 1 из 4 и начинаем показ квизов
+    await _lex_prepare_round_session(state, round_idx=0)
+    return await send_one_vocab(callback.message, state)
 
 
 
