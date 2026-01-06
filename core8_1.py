@@ -4005,8 +4005,10 @@ async def mywords_text_answer(message: Message, state: FSMContext):
     return await mywords_send_next_text(message, state)
 
 
-@router.callback_query(F.data == "lex_phrases_done")
+@dp.callback_query(F.data == "lex_phrases_done", StateFilter(LessonStates.showing_vocab))  # 💬 dp вместо router
+@track_handler
 async def lex_phrases_done(callback: CallbackQuery, state: FSMContext):
+
     data = await state.get_data()
     if data.get("current_stage") != "phrase_select":
         await callback.answer()
@@ -5635,8 +5637,10 @@ async def ad_ok_handler(callback: CallbackQuery, state: FSMContext):
     return await send_one_vocab(callback.message, state)
 
 
-@router.message(LessonStates.showing_vocab, F.text.regexp(r"^\s*\d+\s*$"))
+@dp.message(LessonStates.showing_vocab, F.text.regexp(r"^\s*\d+\s*$"))  # 💬 dp вместо router
+@track_handler
 async def lex_hide_phrase_by_number(message: Message, state: FSMContext):
+
     data = await state.get_data()
     if data.get("current_stage") != "phrase_select":
         return
