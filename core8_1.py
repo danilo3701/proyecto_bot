@@ -566,8 +566,12 @@ def get_vocab_list(data: dict) -> list:
     """
     # 0) ALL IN: если уже собрана сессия раунда = возвращаем её
     lex_session = data.get("lex_session_vocab_list")
-    if isinstance(lex_session, list) and lex_session:
-        return lex_session  # 💬 что делает эта часть: отдаём уже собранный раунд без пересборки
+
+    # 💬 что делает эта часть: если режим раунда активирован = отдаём сессию даже если она пустая,
+    # чтобы не вернуться обратно к phrase_selector и не зациклиться
+    if isinstance(lex_session, list) and (lex_session or data.get("lex_mode_active")):
+        return lex_session
+
 
     topic_key = data.get("selected_topic")
     topic     = topics.get(topic_key, {})
@@ -4030,88 +4034,7 @@ async def mywords_text_answer(message: Message, state: FSMContext):
     return await mywords_send_next_text(message, state)
 
 
-@dp.callback_query(StateFilter(LessonStates.vocab_phrase_select), F.data == "lex_phrases_done")  # 💬 "Готово" в выборе фраз
-@track_handler
-async def lex_phrases_done(callback: CallbackQuery, state: FSMContext):
 
-    data = await state.get_data()
-    if data.get("current_stage") != "phrase_select":
-        await callback.answer()
-        return
-
-    topic_key = data.get("selected_topic")
-    phase_id = data.get("selected_vocab_phase_id")
-    phase = _get_vocab_phase(topic_key, phase_id)
-
-    phrases = phase.get("phrases", [])
-    hidden = set(data.get("session_hidden_phrases", []))
-    active_indexes = _get_active_phrase_indexes(phrases, hidden)
-
-    if not active_indexes:
-        # 💬 что делает эта часть: если ученик скрыл всё = считаем, что фазу знает, и выходим без зависаний
-        await callback.answer()
-        if callback.message:
-            await send_and_auto_delete_text(
-                callback.bot, callback.message.chat.id,
-                "✅ Похоже, в этой фазе всё уже знаешь.",
-                delay=2
-            )
-            return await lesson_menu_handler(callback.message, state)
-        return
-
-
-    active_phrases = [phrases[i] for i in active_indexes]
-
-    await state.update_data(
-        # фиксируем фразы сессии
-        lex_active_phrases=active_phrases,
-        lex_textquiz_phrase_cursor=0,
-        lex_round_total=_lex_detect_total_rounds(active_phrases, default_total=4),
-
-        # чистим сетовые штуки перед стартом
-        redo_stack=[],
-        pending_textquiz=[],
-        offer_continue_resume_index=None,
-        current_stage="vocab",
-    )
-
-    # удаляем сообщение со списком фраз
-    chat_id = data.get("phrase_select_chat_id") or (callback.message.chat.id if callback.message else None)
-    msg_id = data.get("phrase_select_msg_id")
-    try:
-        if chat_id and msg_id:
-            await callback.bot.delete_message(chat_id=chat_id, message_id=msg_id)
-    except Exception:
-        pass
-
-    # собираем 1-й раунд и стартуем
-    await _lex_prepare_round_session(state, round_idx=0)
-
-    data2 = await state.get_data()
-    session = data2.get("lex_session_vocab_list") or []
-    if not session:
-        # 💬 что делает эта часть: если в фазе нет polls/textquiz = не возвращаемся к списку фраз, а выходим
-        if callback.message:
-            await send_and_auto_delete_text(
-                callback.bot, callback.message.chat.id,
-                "⚠️ В этой фазе пока нет квизов. Проверь, что ALL IN сохранил polls и textquiz.",
-                delay=3
-            )
-            return await lesson_menu_handler(callback.message, state)
-        return
-
-
-    data2 = await state.get_data()
-    total = data2.get("lex_round_total", 4)
-    if callback.message:
-        asyncio.create_task(
-            send_and_auto_delete_text(callback.bot, callback.message.chat.id, f"Раунд 1 из {total}", delay=2)
-        )
-
-    await callback.answer()
-    await state.set_state(LessonStates.showing_vocab)
-    if callback.message:
-        return await send_one_vocab(callback.message, state)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -5990,6 +5913,18 @@ async def handle_lex_phrases_done(cb: CallbackQuery, state: FSMContext):
     # собираем 1-й раунд (round_idx=0)
     await _lex_prepare_round_session(state, round_idx=0)
 
+    data_check = await state.get_data()
+    if not data_check.get("lex_session_vocab_list"):
+        # 💬 что делает эта часть: если после сборки раунда нет poll/textquiz = выходим без зацикливания
+        await send_and_auto_delete_text(
+            bot, cb.message.chat.id,
+            "⚠️ В этом раунде нет pull-quiz/textquiz. Проверь ALL IN: у каждой фразы должны быть polls и textquiz.",
+            delay=3
+        )
+        await state.update_data(lex_mode_active=False, lex_session_vocab_list=[])
+        return await lesson_menu_handler(cb.message, state)
+
+
     # заголовок раунда (авто-удаление)
     data2 = await state.get_data()
     total = data2.get("lex_round_total", 4)
@@ -5999,66 +5934,6 @@ async def handle_lex_phrases_done(cb: CallbackQuery, state: FSMContext):
     return await send_one_vocab(cb.message, state)
 
 
-@dp.message(LessonStates.vocab_phrase_select)
-async def lex_phrase_select_remove_by_number(message: Message, state: FSMContext):
-    text = (message.text or "").strip()
-
-    # 💬 чистим чат, если это не цифра
-    if not text.isdigit():
-        try:
-            await message.delete()
-        except Exception:
-            pass
-        return
-
-    idx = int(text)
-    data = await state.get_data()
-
-    active_phrases = data.get("lex_active_phrases") or []
-    if not isinstance(active_phrases, list) or not active_phrases:
-        # 💬 если по какой то причине список не в стейте, просто чистим сообщение пользователя
-        try:
-            await message.delete()
-        except Exception:
-            pass
-        return
-
-    # 💬 жёсткая валидация индекса
-    if idx < 1 or idx > len(active_phrases):
-        try:
-            await message.delete()
-        except Exception:
-            pass
-        return
-
-    # 💬 скрываем фразу из сессионного списка, JSON не трогаем
-    active_phrases.pop(idx - 1)
-    await state.update_data(lex_active_phrases=active_phrases)
-
-    phrases_msg_id = data.get("lex_phrases_msg_id")
-
-    # 💬 обновляем тот же самый фрагмент сообщения со списком фраз
-    if phrases_msg_id:
-        try:
-            await message.bot.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=phrases_msg_id,
-                text=_lex_render_phrase_list(active_phrases),
-                reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [InlineKeyboardButton(text="✅ Готово", callback_data="lex_phrases_done")]
-                    ]
-                ),
-                disable_web_page_preview=True
-            )
-        except Exception:
-            pass
-
-    # 💬 удаляем цифру пользователя, чтобы чат не засорялся
-    try:
-        await message.delete()
-    except Exception:
-        pass
 
 # ------------------------------  
 #   ПОТОК по показу type: quiz по VOCAB 📘📘📘
@@ -8651,39 +8526,6 @@ async def handle_subscription_invalid_input(message: Message, state: FSMContext)
 
 
 
-
-@dp.callback_query(F.data == "lex_phrases_done", StateFilter(LessonStates.vocab_phrase_select, LessonStates.showing_vocab))
-async def lex_phrases_done(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()  # 💬 убираем часики, даже если дальше будет ранний выход
-
-    data = await state.get_data()
-    if data.get("current_stage") != "phrase_select":
-        return  # 💬 защита, чтобы кнопка не ломала другие этапы
-
-    # 💬 убираем кнопки "Готово", чтобы не спамили повторными кликами
-    try:
-        await callback.message.edit_reply_markup()
-    except Exception:
-        pass
-
-    topic_key = data.get("selected_topic")
-    vocab_list = topics.get(topic_key, {}).get("vocab", [])
-
-    # 💬 прыгаем на первый round_header (чтобы не показать снова список фраз)
-    start_idx = next(
-        (i for i, b in enumerate(vocab_list) if b.get("type") == "round_header"),
-        data.get("vocab_index", 0) + 1
-    )
-
-    await state.update_data(
-        vocab_index=start_idx,
-        current_stage="vocab"
-    )
-    await state.set_state(LessonStates.showing_vocab)
-
-    # 💬 готовим сессию раунда 1 из 4 и начинаем показ квизов
-    await _lex_prepare_round_session(state, round_idx=0)
-    return await send_one_vocab(callback.message, state)
 
 
 
