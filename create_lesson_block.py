@@ -185,7 +185,6 @@ class NewTopicStates(StatesGroup):
     # ——— BULK-ИМПОРТ ДЛЯ KVIZ ———
     waiting_vocab_textquiz_bulk = State()  # 💬 пакетный ввод: по строкам "вопрос | ответ" для TEXT_QUIZ
     waiting_vocab_allin_bulk = State()  # 💬 ждём вставку блока ALL IN
-    waiting_vocab_allin_post_action = State()  # 💬 меню после сохранения ALL IN (добавить ещё или назад)
     waiting_vocab_quiz_bulk     = State()  # 💬 пакетный ввод: по строкам "вопрос | правильный | неверный1 | неверный2 | объяснение(опц.)"
 
 
@@ -1293,13 +1292,13 @@ async def send_post_menu(message: Message, state: FSMContext):
                 [KeyboardButton(text="📥 Пулквизы")],
             ]
         else:
-            # 💬 лексика: старое меню словаря
-        rows = [
-            [KeyboardButton(text="📘VOC")],
-            [KeyboardButton(text="🔗 LINK"), KeyboardButton(text="🧩 ALL IN")],  # 💬 режимы добавления словаря
-            [KeyboardButton(text="📝ТЕКСТ"), KeyboardButton(text="🖼FOTO")],
-            [KeyboardButton(text="📥TXT_QUIZ"), KeyboardButton(text="📥QUIZ")],
-        ]
+            # 💬 лексика: быстрое меню, без bulk-кнопок TXT_QUIZ/QUIZ
+            rows = [
+                [KeyboardButton(text="📘VOC")],
+                [KeyboardButton(text="🔗 LINK"), KeyboardButton(text="🧩 ALL IN")],
+                [KeyboardButton(text="📝ТЕКСТ"), KeyboardButton(text="🖼FOTO")],
+            ]
+
 
 
 
@@ -1373,14 +1372,14 @@ async def choose_phase(message: Message, state: FSMContext):
 
     # 💬 подтвердить выбор и убрать клавиатуру
     await message.answer(f"Фаза выбрана: {text}", reply_markup=ReplyKeyboardRemove())
-
+    
     data = await state.get_data()
     topic = data.get("topic") or {}
-    if topic.get("category") == "gram":
-        # 💬 что делает эта часть: для грамматики сразу показываем меню Теории (текст/фото/пулквизы)
-        await state.update_data(last_block="vocab")
-        await send_post_menu(message, state)
-        return
+    
+    await state.update_data(last_block="vocab")  # 💬 после выбора фазы сразу открываем меню словаря
+    await send_post_menu(message, state)         # 💬 там уже есть ALL IN для быстрой заливки
+    return
+
 
     # 💬 для лексики оставляем старое поведение (заголовок + link)
     await message.answer("Введите ЗАГОЛОВОК словаря:")
@@ -1435,21 +1434,16 @@ async def import_vocab_textquiz_bulk(message: Message, state: FSMContext):
     await send_post_menu(message, state)
 
 
-
-def _parse_allin_block(text: str):  # 💬 парсим ALL IN в структуру фраз
-    raw = (text or "").strip()
-
-    # срезаем markdown fence если прилетел
-    if raw.startswith("```"):
-        lines = raw.splitlines()
-        if len(lines) >= 2 and lines[-1].strip().startswith("```"):
-            raw = "\n".join(lines[1:-1])
-        else:
-            raw = "\n".join(lines[1:])
-
+def _parse_allin_block(raw: str):
+    # 💬 парсим ALL IN блок, считаем статистику и НЕ сохраняем оборванные PHRASE (без [/PHRASE])
     lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    phrases = []
-    errors = []
+
+    phrases: list[dict] = []
+    errors: list[str] = []
+
+    total_blocks = 0
+    truncated_at: dict | None = None
+    invalid_blocks = 0
 
     i = 0
     while i < len(lines):
@@ -1457,145 +1451,169 @@ def _parse_allin_block(text: str):  # 💬 парсим ALL IN в структу
             i += 1
             continue
 
+        total_blocks += 1
         i += 1
-        es = ""
-        ru = ""
-        polls = []
-        textquiz = ""
-        mode = None
 
+        es = None
+        ru = None
+        polls: list[dict] = []
+        textquiz = None
+
+        # 💬 читаем до закрывающего тега
         while i < len(lines) and lines[i] != "[/PHRASE]":
-            ln = lines[i]
+            stripped = lines[i].strip()
 
-            if ln.startswith("ES:"):
-                es = ln.replace("ES:", "", 1).strip()
-            elif ln.startswith("RU:"):
-                ru = ln.replace("RU:", "", 1).strip()
-            elif ln == "[POLL]":
-                mode = "poll"
-            elif ln == "[TEXT]":
-                mode = "text"
-            else:
-                if mode == "poll":
-                    polls.append(ln)
-                elif mode == "text" and not textquiz:
-                    textquiz = ln
+            if stripped.startswith("ES:"):
+                es = stripped[3:].strip()
+
+            elif stripped.startswith("RU:"):
+                ru = stripped[3:].strip()
+
+            elif stripped.startswith("POLL:"):
+                # 💬 формат: POLL: question | correct | wrong1 | wrong2 | wrong3
+                content = stripped[5:].strip()
+                parts = [p.strip() for p in content.split("|")]
+                if len(parts) < 5:
+                    errors.append(f"PHRASE #{total_blocks}: POLL мало полей, нужно 5 через |")
+                else:
+                    q = parts[0]
+                    correct = parts[1]
+                    wrong1, wrong2, wrong3 = parts[2], parts[3], parts[4]
+                    polls.append({
+                        "type": "quiz",  # 💬 сразу в формате core8_1
+                        "question": q,
+                        "options": [correct, wrong1, wrong2, wrong3],
+                        "correct_answer": correct
+                    })
+
+            elif stripped.startswith("TEXTQUIZ:"):
+                # 💬 формат: TEXTQUIZ: question | answer
+                content = stripped[8:].strip()
+                parts = [p.strip() for p in content.split("|")]
+                if len(parts) < 2:
+                    errors.append(f"PHRASE #{total_blocks}: TEXTQUIZ мало полей, нужно 2 через |")
+                else:
+                    q = parts[0]
+                    ans = parts[1]
+                    textquiz = {
+                        "type": "textquiz",  # 💬 в формате core8_1
+                        "question": q,
+                        "answer": ans
+                    }
 
             i += 1
 
-        # пропускаем закрывающий
-        if i < len(lines) and lines[i] == "[/PHRASE]":
-            i += 1
+        # 💬 если не нашли [/PHRASE] = считаем, что сообщение оборвалось, этот блок НЕ сохраняем
+        if i >= len(lines) or lines[i] != "[/PHRASE]":
+            truncated_at = {
+                "block": total_blocks,
+                "es_preview": (es or "")[:60]
+            }
+            break
+
+        # 💬 пропускаем [/PHRASE]
+        i += 1
 
         if not es or not ru:
-            errors.append("PHRASE без ES или RU")  # 💬 базовая валидация
+            invalid_blocks += 1
+            errors.append(f"PHRASE #{total_blocks}: нет ES или RU")
             continue
 
-        # ожидаем 4 poll и 1 textquiz, но не роняем если формат частично
-        if len(polls) != 4:
-            errors.append(f"PHRASE {es}: poll строк не 4, сейчас {len(polls)}")  # 💬 мягкая валидация
-        if not textquiz:
-            errors.append(f"PHRASE {es}: нет TEXT строки")  # 💬 мягкая валидация
+        phrase_obj = {"es": es, "ru": ru}
+        if polls:
+            phrase_obj["polls"] = polls
+        if textquiz:
+            phrase_obj["textquiz"] = textquiz
 
-        phrases.append(
-            {
-                "es": es,
-                "ru": ru,
-                "polls": polls[:4],  # 💬 берём первые 4
-                "textquiz": textquiz,
-            }
-        )
+        phrases.append(phrase_obj)
 
-    if not phrases:
-        errors.append("Не найдено ни одного блока [PHRASE]")  # 💬 защита от пустой вставки
-
-    return phrases, errors
-
-
-def _persist_topic_from_state(data: dict, topic_data: dict):  # 💬 сохраняем в тот же JSON, что использует админка
-    topic_key = data.get("topic_key")
-    topics_data = data.get("topics_data") or globals().get("topics_data") or globals().get("TOPICS_DATA")
-
-    if isinstance(topics_data, dict) and topic_key:
-        topics_data[topic_key] = topic_data
-
-    path = (
-        globals().get("TOPICS_FILE")
-        or globals().get("TOPICS_PATH")
-        or globals().get("TOPICS_JSON_PATH")
-        or globals().get("TOPICS_JSON")
-        or globals().get("DATA_PATH")
-    )
-
-    if not path:
-        return False
-
-    try:
-        with open(str(path), "w", encoding="utf-8") as f:
-            json.dump(topics_data, f, ensure_ascii=False, indent=2)
-        return True
-    except Exception:
-        return False
+    meta = {
+        "found": total_blocks,
+        "saved": len(phrases),
+        "invalid": invalid_blocks,
+        "truncated": 1 if truncated_at else 0,
+        "truncated_at": truncated_at
+    }
+    return phrases, errors, meta
 
 
 @router.message(NewTopicStates.waiting_vocab_allin_bulk)
 async def import_vocab_allin_bulk(message: Message, state: FSMContext):
-    data = await state.get_data()
-    topic_data = data.get("topic")
-    cp = data.get("current_phase_id")
-
-    if not topic_data or not cp:
-        await message.answer("⚠️ Сначала выбери фазу через 📘VOC.")  # 💬 защита от сохранения без контекста
+    # 💬 авто-режим: вставил блок = сохранили = остаёмся в ожидании следующей вставки
+    text = (message.text or "").strip()
+    if text == "↩️ Назад":
+        # 💬 возвращаемся в меню фазы
         await send_post_menu(message, state)
         return
 
-    phrases, errors = _parse_allin_block(message.text)
+    data = await state.get_data()
+    topic_data = data["topic"]
+    topic_path = data["topic_path"]
+    cp = data.get("current_phase_id")
 
-    if errors and not phrases:
-        await message.answer("⚠️ ALL IN не распознан.\n" + "\n".join(errors[:6]))  # 💬 показываем первые ошибки
+    phrases_objs, errors, meta = _parse_allin_block(text)
+
+    # 💬 мягкая валидация: показываем ошибки, но всё равно сохраняем то, что корректно
+    warn_lines: list[str] = []
+    if errors:
+        warn_lines.append("⚠️ Ошибки (первые 10):")
+        warn_lines.extend(errors[:10])
+
+    truncated_at = (meta or {}).get("truncated_at")
+    if truncated_at:
+        warn_lines.append(
+            f"⚠️ Похоже сообщение оборвалось на PHRASE #{truncated_at.get('block')}"
+        )
+        es_prev = truncated_at.get("es_preview") or ""
+        if es_prev:
+            warn_lines.append(f"⚠️ ES: {es_prev}")
+
+    phases = topic_data.get("vocab", [])
+    phase = next((p for p in phases if p.get("phase_id") == cp), None)
+    if not phase:
+        await message.answer("❌ Фаза не найдена. Выберите фазу заново.")
+        await state.set_state(NewTopicStates.waiting_phase_choice)
         return
 
-    phase = topic_data["vocab"][cp - 1]
-    phase.setdefault("phrases", [])  # 💬 новый слой данных для фраз и их квизов
-    before = len(phase["phrases"])
-    phase["phrases"].extend(phrases)
+    before_cnt = len(phase.get("phrases", []) or [])
+    phase.setdefault("phrases", []).extend(phrases_objs)
+    added_cnt = len(phase.get("phrases", []) or []) - before_cnt
 
-    saved = _persist_topic_from_state(data, topic_data)
-    if not saved:
-        await message.answer("⚠️ Не смог сохранить JSON. Проверь переменную пути в CreateLessonBlock.")  # 💬 защита
-        return
+    # 💬 сохраняем строго в topic_path, чтобы не ломать Railway DATA
+    with open(topic_path, "w", encoding="utf-8") as f:
+        json.dump(topic_data, f, ensure_ascii=False, indent=2)
+
+    await state.update_data(topic=topic_data)
+
+    found = (meta or {}).get("found", 0)
+    saved = (meta or {}).get("saved", 0)
+    invalid = (meta or {}).get("invalid", 0)
+    truncated = (meta or {}).get("truncated", 0)
 
     kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➕ Добавить ещё"), KeyboardButton(text="↩️ Назад")]
-        ],
-        resize_keyboard=True,
+        keyboard=[[KeyboardButton(text="↩️ Назад")]],
+        resize_keyboard=True
     )
 
-    await message.answer(
-        f"✅ ALL IN сохранено. Добавлено: {len(phrases)}. Всего в фазе: {before + len(phrases)}",
-        reply_markup=kb,
-    )  # 💬 подтверждение и быстрые действия
+    msg_lines = [
+        "✅ ALL IN сохранено",
+        f"📌 Найдено PHRASE: {found}",
+        f"✅ Сохранено фраз: {saved}",
+        f"✅ Добавлено в фазу: {added_cnt}",
+    ]
+    if invalid:
+        msg_lines.append(f"⚠️ Пропущено из-за ES/RU: {invalid}")
+    if truncated:
+        msg_lines.append("⚠️ Обрезанный хвост не сохранён, пришли продолжение отдельным сообщением")
 
-    await state.set_state(NewTopicStates.waiting_vocab_allin_post_action)
+    if warn_lines:
+        msg_lines.append("")
+        msg_lines.extend(warn_lines)
 
+    await message.answer("\n".join(msg_lines), reply_markup=kb)
 
-@router.message(NewTopicStates.waiting_vocab_allin_post_action)
-async def allin_post_action(message: Message, state: FSMContext):
-    text = (message.text or "").strip()
-
-    if text == "➕ Добавить ещё":
-        await message.answer("Вставь следующий ALL IN блок одним сообщением.")  # 💬 повторный ввод без лишних кликов
-        await state.set_state(NewTopicStates.waiting_vocab_allin_bulk)
-        return
-
-    if text.startswith("↩️"):
-        await send_post_menu(message, state)  # 💬 возвращаемся в меню словаря выбранной фазы
-        return
-
-    await message.answer("Выбери действие кнопками ниже.")  # 💬 защита от ручного ввода
-
-
+    # 💬 остаёмся в режиме приёма следующего блока
+    await state.set_state(NewTopicStates.waiting_vocab_allin_bulk)
 
 
 
@@ -2760,6 +2778,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
