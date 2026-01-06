@@ -125,6 +125,9 @@ def _get_theory_phases(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
     phases = topic.get("vocab") or []
     return phases if isinstance(phases, list) else []
 
+def _phase_title(phase: Dict[str, Any], idx: int) -> str:
+    # 💬 название фазы, поддержка разных ключей (админка и ручные JSON)
+    return str(phase.get("title") or phase.get("name") or phase.get("phase_name") or f"Фаза {idx + 1}")
 
 def _phase_items(phase: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
