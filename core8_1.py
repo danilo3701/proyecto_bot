@@ -299,9 +299,20 @@ def sync_topics_volume_to_local():
                 continue
             src = os.path.join(volume_topics_dir, fname)
             dst = os.path.join(local_topics_dir, fname)
-            if os.path.exists(src) and not os.path.exists(dst):
+            if not os.path.exists(src):
+                continue
+
+            need_copy = not os.path.exists(dst)
+            if not need_copy:
+                try:
+                    need_copy = os.path.getmtime(src) > os.path.getmtime(dst)
+                except OSError:
+                    need_copy = True
+
+            if need_copy:
                 with open(src, "rb") as s, open(dst, "wb") as d:
-                    d.write(s.read())
+                    d.write(s.read())  # 💬 обновляем локальную тему, если в Volume версия новее
+
     except Exception:
         logging.exception("sync_topics_volume_to_local failed")
 
@@ -660,11 +671,14 @@ def _lex_get_poll_round(phrase: dict, round_idx: int) -> dict | None:
     polls = (
         phrase.get("polls")
         or phrase.get("pulls")
+        or phrase.get("pullquiz")
         or phrase.get("pull_quizzes")
+        or phrase.get("poll_quiz")
         or phrase.get("poll_quizzes")
         or phrase.get("quiz_rounds")
         or []
-    )
+    )  # 💬 поддерживаем старые ключи, чтобы старые темы тоже показывали квизы
+
     item = _lex_pick_round_item(polls, round_idx)
     if isinstance(item, dict):
         out = dict(item)
@@ -1773,7 +1787,8 @@ async def start_handler(message: Message, state: FSMContext):
 
     await state.clear()
 
-    
+    sync_topics_volume_to_local()  # 💬 подтягиваем новые темы из /data/topics перед перезагрузкой topics
+
     global topics
     topics = load_topics()  # 💬 перезагружаем JSON темы
     set_topics_ref(topics)  # 💬 обновляем topics для "Битвы"
