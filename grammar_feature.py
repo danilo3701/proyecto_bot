@@ -320,15 +320,16 @@ def _kb_read_controls() -> InlineKeyboardMarkup:
     )
 
 
-async def _replace_content(chat_id: int, state: FSMContext, send_coro) -> int:
-    # 💬 удаляем прошлый контент и ставим новый
+async def _replace_content(chat_id: int, state: FSMContext, send_coro) -> Message:
+    # 💬 удаляем прошлый контент и ставим новый (одно сообщение вместо спама)
     st = await state.get_data()
     old_id = st.get("gram_content_msg_id")
     if old_id:
         await _safe_delete_message(_bot, chat_id, int(old_id))
     msg = await send_coro
     await state.update_data(gram_content_msg_id=msg.message_id)
-    return msg.message_id
+    return msg
+
 
 
 def _progress_flags(uid: str, topic_key: str, phases_count: int) -> Tuple[List[bool], float]:
@@ -404,9 +405,14 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
     )
 
     await state.set_state(GrammarStates.menu)
-    await state.update_data(gram_ctx=True, gram_topic_key=str(topic_key), gram_content_msg_id=None)
+    await state.update_data(gram_ctx=True, gram_topic_key=str(topic_key))  # 💬 не сбрасываем id, чтобы удалять прошлый экран
 
-    await message.answer(text, reply_markup=_kb_menu(), parse_mode="HTML")
+    await _replace_content(
+        chat_id=message.chat.id,
+        state=state,
+        send_coro=message.answer(text, reply_markup=_kb_menu(), parse_mode="HTML"),
+    )  # 💬 показываем меню грамматики одним сообщением
+
 
 
 # -----------------------------
@@ -435,6 +441,12 @@ async def gram_home(cb: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "gram:topics")
 async def gram_topics(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
+    st = await state.get_data()
+    old_id = st.get("gram_content_msg_id")
+    if old_id:
+        await _safe_delete_message(_bot, cb.from_user.id, int(old_id))  # 💬 убираем экран грамматики перед списком тем
+    await state.update_data(gram_content_msg_id=None)  # 💬 сбрасываем текущий экран грамматики
+
     # 💬 возвращаемся к списку тем грамматики выбранного уровня
     st = await state.get_data()
     lvl = st.get("selected_level")
@@ -454,6 +466,12 @@ async def gram_topics(cb: CallbackQuery, state: FSMContext) -> None:
 async def gram_theory(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
     st = await state.get_data()
+    old_id = st.get("gram_content_msg_id")
+    if old_id:
+        await _safe_delete_message(_bot, cb.from_user.id, int(old_id))  # 💬 убираем экран грамматики перед выходом
+    await state.update_data(gram_content_msg_id=None)  # 💬 сбрасываем, чтобы главное меню не плодилось
+
+    st = await state.get_data()
     topic_key = st.get("selected_topic")
     if not topic_key:
         await cb.message.answer("⚠️ Не вижу тему.")
@@ -461,15 +479,22 @@ async def gram_theory(cb: CallbackQuery, state: FSMContext) -> None:
     topic = _get_topic(str(topic_key))
     phases = _get_theory_phases(topic)
     if not phases:
-        await cb.message.answer("Пока нет фаз в Теории.", reply_markup=_kb_back_to_menu())
+        await _replace_content(
+            chat_id=cb.from_user.id,
+            state=state,
+            send_coro=cb.message.answer("Пока нет фаз в Теории.", reply_markup=_kb_back_to_menu()),
+        )  # 💬 не плодим сообщения
         return
 
     uid = str(cb.from_user.id)
     done_flags, _ = _progress_flags(uid, str(topic_key), len(phases))
 
     await state.set_state(GrammarStates.theory_phases)
-    await cb.message.answer("Выбери фазу:", reply_markup=_kb_phases(phases, done_flags))
-
+    await _replace_content(
+        chat_id=cb.from_user.id,
+        state=state,
+        send_coro=cb.message.answer("Выбери фазу:", reply_markup=_kb_phases(phases, done_flags)),
+    )  # 💬 список фаз в одном сообщении
 
 @router.callback_query(F.data.startswith("gram:phase:"))
 async def gram_phase_open(cb: CallbackQuery, state: FSMContext) -> None:
@@ -574,8 +599,13 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
         phase_idx = int(st.get("gram_phase_idx") or 0)
         phases = _get_theory_phases(topic)
         if phase_idx < 0 or phase_idx >= len(phases):
-            await _bot.send_message(chat_id, "⚠️ Фаза не найдена.", reply_markup=_kb_back_to_menu())
+            await _replace_content(
+                chat_id,
+                state,
+                _bot.send_message(chat_id, "⚠️ Фаза не найдена.", reply_markup=_kb_back_to_menu()),
+            )  # 💬 показываем ошибку одним сообщением
             return
+
         phase = phases[phase_idx]
         items = _phase_items(phase)
         total = len(items)
@@ -585,8 +615,13 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
             idx = 0
         if idx >= total:
             # 💬 конец фазы
-            await _bot.send_message(chat_id, "✅ Фаза закончилась.", reply_markup=_kb_back_to_menu())
+            await _replace_content(
+                chat_id,
+                state,
+                _bot.send_message(chat_id, "✅ Фаза закончилась.", reply_markup=_kb_back_to_menu()),
+            )  # 💬 конец фазы без накопления сообщений
             return
+
 
         item = items[idx]
         t = _item_type(item)
@@ -621,14 +656,19 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
             elif item.get("correct_answer") in opts:
                 correct = opts.index(item.get("correct_answer"))  # 💬 correct_answer = текст правильного варианта
 
-            poll_msg = await _bot.send_poll(
-                chat_id=chat_id,
-                question=q,
-                options=opts,
-                type="quiz",
-                correct_option_id=correct,
-                is_anonymous=False,
-            )
+            poll_msg = await _replace_content(
+                chat_id,
+                state,
+                _bot.send_poll(
+                    chat_id=chat_id,
+                    question=q,
+                    options=opts,
+                    type="quiz",
+                    correct_option_id=correct,
+                    is_anonymous=False,
+                ),
+            )  # 💬 Poll заменяет прошлый экран, не добавляется новым сообщением
+
             await state.set_state(GrammarStates.theory_poll)  # 💬 ждём PollAnswer для теории
             await state.update_data(
                 gram_poll_id=poll_msg.poll.id,
@@ -660,7 +700,12 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
         return
 
     # 💬 safety
-    await _bot.send_message(chat_id, "⚠️ Не понимаю, что показывать.")
+    await _replace_content(
+        chat_id,
+        state,
+        _bot.send_message(chat_id, "⚠️ Не понимаю, что показывать ("),
+    )  # 💬 без спама сообщениями
+
 
 
 @router.poll_answer(GrammarStates.theory_poll)
@@ -773,8 +818,13 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
     if idx < 0:
         idx = 0
     if idx >= total:
-        await _bot.send_message(chat_id, "✅ Практика закончилась.", reply_markup=_kb_back_to_menu())
+        await _replace_content(
+            chat_id,
+            state,
+            _bot.send_message(chat_id, "✅ Практика закончилась.", reply_markup=_kb_back_to_menu()),
+        )  # 💬 конец практики одним сообщением
         return
+
 
     item = items[idx]
     t = _item_type(item)
@@ -807,14 +857,20 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
         elif item.get("correct_answer") in opts:
             correct = opts.index(item.get("correct_answer"))  # 💬 correct_answer = текст правильного варианта
 
-        poll_msg = await _bot.send_poll(
-            chat_id=chat_id,
-            question=q,
-            options=opts,
-            type="quiz",
-            correct_option_id=correct,
-            is_anonymous=False,
-        )
+        poll_msg = await _replace_content(
+            chat_id,
+            state,
+            _bot.send_poll(
+                chat_id=chat_id,
+                question=q,
+                options=opts,
+                type="quiz",
+                correct_option_id=correct,
+                is_anonymous=False,
+            ),
+        )  # 💬 Poll заменяет прошлый экран
+
+
         await state.set_state(GrammarStates.practice_poll)  # 💬 ждём PollAnswer для практики
         await state.update_data(
             gram_poll_id=poll_msg.poll.id,
@@ -920,8 +976,13 @@ async def _show_video(chat_id: int, state: FSMContext, topic: Dict[str, Any]) ->
     if idx < 0:
         idx = 0
     if idx >= total:
-        await _bot.send_message(chat_id, "✅ Видео закончились.", reply_markup=_kb_back_to_menu())
+        await _replace_content(
+            chat_id,
+            state,
+            _bot.send_message(chat_id, "✅ Видео закончились.", reply_markup=_kb_back_to_menu()),
+        )  # 💬 конец видео одним сообщением
         return
+
 
     vid = vids[idx]
     title = html.escape(str(vid.get("title") or f"Видео {idx + 1}"))
@@ -1012,8 +1073,13 @@ async def _show_read(chat_id: int, state: FSMContext, topic: Dict[str, Any]) -> 
     if idx < 0:
         idx = 0
     if idx >= total:
-        await _bot.send_message(chat_id, "✅ Читать закончено.", reply_markup=_kb_back_to_menu())
+        await _replace_content(
+            chat_id,
+            state,
+            _bot.send_message(chat_id, "✅ Читать закончено.", reply_markup=_kb_back_to_menu()),
+        )  # 💬 конец чтения одним сообщением
         return
+
 
     f = frags[idx]
     t = _item_type(f)
