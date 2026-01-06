@@ -1569,8 +1569,22 @@ LONG_STICKER_DELETE_S       = 10.0  # 🧹 редкий длинный пока�
 # 💬 если не нужен длинный кейс — можно обеих местами использовать AUTO_DELETE_STICKER_DELAY_S
 
 def _normalize_nl(text: str) -> str:
-    # 💬 что делает эта часть: превращаем "\\n" и "\\\\n из ALL IN в реальный перенос строки без лишнего слэша
-    return (text or "").replace("\\\\n", "\n").replace("\\n", "\n")
+    # 💬 нормализуем переносы строк из текста админки и убираем лишний слэш перед переносом
+    if not isinstance(text, str):
+        return ""
+
+    s = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    # 💬 кейс со скрина: "слэш + реальный перенос" = превращаем в чистый перенос
+    s = s.replace("\\\n", "\n")
+
+    # 💬 кейс из ALL IN: текст приходит как \\n или \\\\n
+    s = s.replace("\\\\n", "\n").replace("\\n", "\n")
+
+    # 💬 если где то остался слэш в конце строки = удаляем
+    s = "\n".join([line[:-1] if line.endswith("\\") else line for line in s.split("\n")])
+
+    return s
 
 
 # ─── Негативный фидбек при ошибке (квиз) ───────────────────────
@@ -5748,21 +5762,31 @@ async def send_failed_vocab(chat_id: int, state: FSMContext):
 
     # ——— Повтор встроенного quiz и запоминаем message_id для удаления
     if block.get("type") == "quiz":
-        # 💬 что делает эта часть: в пересдаче тоже всегда 3 варианта и нормальные переносы строк
-        correct_answer = (block.get("correct_answer") or "").strip()
+        # 💬 что делает эта часть: в пересдаче тоже всегда 3 варианта, правильный = первый в options
         raw_opts = list(block.get("options") or [])
-
-        pool = [correct_answer] + [o for o in raw_opts if o and o.strip() and o.strip() != correct_answer]
-        opts: list[str] = []
-        for o in pool:
-            o = o.strip()
-            if o and o not in opts:
-                opts.append(o)
-        opts = opts[:3]
-
+        correct_answer = (raw_opts[0].strip() if raw_opts and isinstance(raw_opts[0], str) else (block.get("correct_answer") or "").strip())
+    
+        wrong_pool: list[str] = []
+        for o in raw_opts[1:]:
+            if not o:
+                continue
+            oo = str(o).strip()
+            if oo and oo != correct_answer and oo not in wrong_pool:
+                wrong_pool.append(oo)
+    
+        opts = [correct_answer] + wrong_pool[:2]  # 💬 всегда 3 варианта
+    
+        if len(opts) < 3 or not correct_answer:
+            # 💬 если блок битый = не падаем, убираем из начала очереди и идём дальше
+            failed = (await state.get_data()).get("failed_vocab", [])
+            if failed:
+                await state.update_data(failed_vocab=failed[1:] + failed[:1])
+            return await send_failed_vocab(chat_id, state)
+    
+        opts = [str(x).strip() for x in opts]
         random.shuffle(opts)
         correct_id = opts.index(correct_answer)
-
+    
         poll_msg = await bot.send_poll(
             chat_id=chat_id,
             question=_normalize_nl(block.get("question", "")),
@@ -5773,20 +5797,23 @@ async def send_failed_vocab(chat_id: int, state: FSMContext):
             open_period=int(QUIZ_OPEN_PERIOD_S),
             explanation=f"✅ {correct_answer}"[:190]
         )
-
-
-        # 💾 сохраняем poll.id и message_id, чтобы потом удалить и отследить ответ
+    
+        # 💾 критично: сохраняем именно то, что реально отправили
         await state.update_data(
-            current_poll_id=poll.id,
-            current_correct_option_id=correct_idx,
-            last_poll_msg_id=poll_msg.message_id  # 💬 фикс: сохраняем id реально отправленного poll
+            last_chat_id=chat_id,  # 💬 нужно для удаления и реакций
+            current_poll_id=poll_msg.poll.id,  # 💬 фильтрация ответов
+            current_correct_option_id=correct_id,  # 💬 проверка правильности
+            current_poll_message_id=poll_msg.message_id  # 💬 автоудаление
         )
-
-        await state.update_data(lex_last_bot_msg_id=poll_message.message_id)  # 💬 poll = текущий фрагмент чата
-
-        # 🔄 переключаем FSM в разбор ошибок quiz
+    
+        # 🚨 таймаут в пересдаче тоже нужен = иначе зависает на окончании времени
+        asyncio.create_task(_review_failed_vocab_quiz_timeout_handler(
+            poll_msg.poll.id, chat_id, state, delay=int(QUIZ_TIMEOUT_TASK_S)
+        ))  # 💬 таймаут пересдачи
+    
         await state.set_state(LessonStates.review_failed_vocab)
         return
+
 
 
     # создаём «фейковый» Message с нужным chat.id
@@ -5993,29 +6020,32 @@ async def send_one_vocab_quiz(message: Message, state: FSMContext):
 
 
 
-    # 💬 что делает эта часть: готовим 3 варианта, перемешиваем, считаем correct_option_id
-    correct_answer = (block.get("correct_answer") or "").strip()
-
+    # 💬 что делает эта часть: всегда берём правильный как первый, выбираем ещё 2 неверных, перемешиваем
+    chat_id = message.chat.id  # 💬 фикс: гарантируем chat_id в этом хендлере
+    
     raw_opts = list(block.get("options") or [])
-    pool = [correct_answer] + [o for o in raw_opts if o and o.strip() and o.strip() != correct_answer]
-
-    opts: list[str] = []
-    for o in pool:
-        o = o.strip()
-        if o and o not in opts:
-            opts.append(o)
-
-    opts = opts[:3]  # 💬 всегда 3 варианта
-
+    correct_answer = (raw_opts[0].strip() if raw_opts and isinstance(raw_opts[0], str) else (block.get("correct_answer") or "").strip())
+    
+    wrong_pool: list[str] = []
+    for o in raw_opts[1:]:
+        if not o:
+            continue
+        oo = str(o).strip()
+        if oo and oo != correct_answer and oo not in wrong_pool:
+            wrong_pool.append(oo)
+    
+    opts = [correct_answer] + wrong_pool[:2]  # 💬 Telegram quiz = ровно 3 варианта
+    
     if len(opts) < 3 or not correct_answer:
         # 💬 если блок битый = не падаем, просто идём дальше
         await state.update_data(current_poll_id=None, current_correct_option_id=None, current_poll_message_id=None)
         await state.update_data(vocab_index=idx + 1)
         return await send_one_vocab(message, state)
-
+    
+    opts = [str(x).strip() for x in opts]
     random.shuffle(opts)
     correct_id = opts.index(correct_answer)
-
+    
     poll_message = await bot.send_poll(
         chat_id=chat_id,
         question=_normalize_nl(block.get("question", "")),
@@ -6026,16 +6056,24 @@ async def send_one_vocab_quiz(message: Message, state: FSMContext):
         open_period=int(QUIZ_OPEN_PERIOD_S),
         explanation=f"✅ {correct_answer}"[:190],  # 💬 показываем правильный ответ внутри poll
     )
-
-    await state.update_data(current_poll_message_id=poll_message.message_id)  # 💬 запоминаем id квиза-полла
-
+    
+    # 💾 критично: без этого poll ответы и таймаут не отрабатывают
+    await state.update_data(
+        last_chat_id=chat_id,  # 💬 нужно для реакций и удаления без chat_id из PollAnswer
+        current_poll_id=poll_message.poll.id,  # 💬 нужно для фильтрации ответов и таймаута
+        current_correct_option_id=correct_id,  # 💬 нужно для проверки правильности
+        current_poll_message_id=poll_message.message_id  # 💬 нужно для автоудаления
+    )
+    
     # 🚨 запускаем таймаут на ответ
     asyncio.create_task(_vocab_quiz_timeout_handler(
         poll_message.poll.id, chat_id, state, delay=int(QUIZ_TIMEOUT_TASK_S)
     ))  # 💬 единый таймаут watchdog
-
+    
     await state.set_state(LessonStates.vocab_exercise)
 
+    
+    
 
 
 
@@ -6379,6 +6417,31 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
     await state.set_state(LessonStates.showing_vocab)
     return await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
 
+@track_handler
+async def _review_failed_vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMContext, delay: int = 20):
+    # 💬 если в пересдаче не ответили = считаем как ошибку и переносим в конец очереди failed_vocab
+    await asyncio.sleep(delay)
+
+    data = await state.get_data()
+    if data.get("current_poll_id") != poll_id:
+        return
+
+    # 💬 сбрасываем poll_id, чтобы не сработало дважды
+    await state.update_data(current_poll_id=None)
+
+    failed = data.get("failed_vocab", [])
+    if failed:
+        await state.update_data(failed_vocab=failed[1:] + [failed[0]])  # 💬 ошибка = в конец очереди
+
+    # 💬 удаляем poll сообщение, чтобы чат не захламлялся
+    mid = data.get("current_poll_message_id")
+    if mid:
+        try:
+            await bot.delete_message(chat_id, mid)
+        except Exception:
+            pass
+
+    return await send_failed_vocab(chat_id, state)
 
 
 # 💬 Выбираем textquiz: по умолчанию 2 (мини-сессия), но можно запросить больше (финал)
