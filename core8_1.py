@@ -1569,28 +1569,24 @@ LONG_STICKER_DELETE_S       = 10.0  # 🧹 редкий длинный пока�
 # 💬 если не нужен длинный кейс — можно обеих местами использовать AUTO_DELETE_STICKER_DELAY_S
 
 def _normalize_nl(text: str) -> str:
-    # 💬 нормализуем переносы строк из текста админки и убираем лишний слэш перед переносом
+    # 💬 нормализуем переносы строк из ALL IN и убираем лишние слэши
     if not isinstance(text, str):
         return ""
-        
+
     if not text:
         return text
-    text = text.replace("\\\n", "\n").replace("\\\r\n", "\n")  # 💬 убираем одиночный слэш перед реальным переносом
-    text = text.replace("\\n", "\n")  # 💬 превращаем \\n в настоящий перенос
-    return text
 
     s = text.replace("\r\n", "\n").replace("\r", "\n")
 
     # 💬 кейс со скрина: "слэш + реальный перенос" = превращаем в чистый перенос
     s = s.replace("\\\n", "\n")
 
-    # 💬 кейс из ALL IN: текст приходит как \\n или \\\\n
-    s = s.replace("\\\\n", "\n").replace("\\n", "\n")
-
-    # 💬 если где то остался слэш в конце строки = удаляем
-    s = "\n".join([line[:-1] if line.endswith("\\") else line for line in s.split("\n")])
+    # 💬 кейс из ALL IN: приходит как \\n или \\\\n
+    s = s.replace("\\\\n", "\n")  # 💬 двойной слэш + n
+    s = s.replace("\\n", "\n")    # 💬 одиночный слэш + n
 
     return s
+
 
 
 # ─── Негативный фидбек при ошибке (квиз) ───────────────────────
@@ -6621,9 +6617,6 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     correct  = data["current_correct_option_id"]
     is_correct = (selected == correct)
 
-    if is_correct:
-        qc = data.get("quiz_correct_total", 0) + 1  # 💬 прогресс: считаем правильные poll-quiz
-        await state.update_data(quiz_correct_total=qc)
 
     poll_msg_id = data.get("current_poll_message_id")  # 💬 id сообщения с poll
     try:
@@ -6992,16 +6985,27 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
                 return await send_one_vocab(_fake_msg(), state)
 
             # 💬 textquiz тоже нет — обычный offer_continue
-            scene = scenario_vocab["offer_continue_block"]  # 💬 блок Continue
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text=btn, callback_data=f"scenario_vocab:offer_continue:{btn}")]
-                for btn in scene["buttons"]
-            ])  # 💬 inline-кнопки вместо reply keyboard
-            
-            oc_msg = await bot.send_message(poll_answer.user.id, scene["text"], reply_markup=kb)
-            await state.update_data(current_scene=scene, last_oc_msg_id=oc_msg.message_id)
+            # 💬 textquiz тоже нет — показываем inline offer_continue (единый формат с cb_scenario_vocab)
+            oc = random.choice(scenarios["offer_continue"])
+            await state.update_data(current_stage="offer_continue", current_scene=oc)
+
+            kb = InlineKeyboardMarkup(
+                inline_keyboard=[[
+                    InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
+                    for btn in oc["buttons"]
+                ]]
+            )  # 💬 inline-кнопки вместо reply keyboard
+
+            oc_msg = await bot.send_message(
+                poll_answer.user.id,
+                oc["text"],
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+            await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 запоминаем id, чтобы удалить после клика
             await state.set_state(LessonStates.showing_vocab)  # 💬 дальше ждём callback
             return
+
 
 
 
@@ -8869,6 +8873,22 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
             await cb.message.edit_reply_markup()
         except TelegramBadRequest:
             pass
+
+        # 💬 удаляем сообщение offer_continue целиком: текст, реакцию, кнопки
+        try:
+            last_oc_msg_id = data.get("last_oc_msg_id")
+            if last_oc_msg_id and last_oc_msg_id != cb.message.message_id:
+                await bot.delete_message(cb.message.chat.id, last_oc_msg_id)  # 💬 удаляем сохранённый offer_continue
+        except TelegramBadRequest:
+            pass
+
+        try:
+            await cb.message.delete()  # 💬 удаляем то сообщение, по кнопке которого кликнули
+        except TelegramBadRequest:
+            pass
+
+        await state.update_data(last_oc_msg_id=None)  # 💬 чистим, чтобы не пытаться удалить повторно
+
 
         # Переход по результату
         if next_stage == "next_item":
