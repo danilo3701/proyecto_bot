@@ -1568,6 +1568,11 @@ AUTO_DELETE_STICKER_DELAY_S = 2.3   # 🧹 авто-удаление стике�
 LONG_STICKER_DELETE_S       = 10.0  # 🧹 редкий длинный показ стикера (подписка/баннер)
 # 💬 если не нужен длинный кейс — можно обеих местами использовать AUTO_DELETE_STICKER_DELAY_S
 
+def _normalize_nl(text: str) -> str:
+    # 💬 что делает эта часть: превращаем "\\n" и "\\\\n из ALL IN в реальный перенос строки без лишнего слэша
+    return (text or "").replace("\\\\n", "\n").replace("\\n", "\n")
+
+
 # ─── Негативный фидбек при ошибке (квиз) ───────────────────────
 NEGATIVE_STICKERS = [
       "CAACAgIAAxkBAAIRIGlE3W3MzKs6hfGC6PBO1kNZnIkdAAKhMgACnIfBSFQYZ8fI6S5UNgQ.",  # 💬 вставь сюда ID стикера №1
@@ -5743,19 +5748,32 @@ async def send_failed_vocab(chat_id: int, state: FSMContext):
 
     # ——— Повтор встроенного quiz и запоминаем message_id для удаления
     if block.get("type") == "quiz":
-        opts = block["options"].copy()
+        # 💬 что делает эта часть: в пересдаче тоже всегда 3 варианта и нормальные переносы строк
+        correct_answer = (block.get("correct_answer") or "").strip()
+        raw_opts = list(block.get("options") or [])
+
+        pool = [correct_answer] + [o for o in raw_opts if o and o.strip() and o.strip() != correct_answer]
+        opts: list[str] = []
+        for o in pool:
+            o = o.strip()
+            if o and o not in opts:
+                opts.append(o)
+        opts = opts[:3]
+
         random.shuffle(opts)
-        correct_id = opts.index(block["correct_answer"])
-        # 💬 В повторе тоже используем explanation (тот же text из JSON)
+        correct_id = opts.index(correct_answer)
+
         poll_msg = await bot.send_poll(
             chat_id=chat_id,
-            question=block["question"],
+            question=_normalize_nl(block.get("question", "")),
             options=opts,
             type="quiz",
             correct_option_id=correct_id,
             is_anonymous=False,
-            explanation=f"✅ {block.get('correct_answer', '')}"[:190]  # 💬 показываем ответ в самом poll, без доп. сообщений
+            open_period=int(QUIZ_OPEN_PERIOD_S),
+            explanation=f"✅ {correct_answer}"[:190]
         )
+
 
         # 💾 сохраняем poll.id и message_id, чтобы потом удалить и отследить ответ
         await state.update_data(
@@ -5975,38 +5993,42 @@ async def send_one_vocab_quiz(message: Message, state: FSMContext):
 
 
 
-    # 4) Собираем и отправляем Quiz
-    opts = block["options"].copy()
+    # 💬 что делает эта часть: готовим 3 варианта, перемешиваем, считаем correct_option_id
+    correct_answer = (block.get("correct_answer") or "").strip()
+
+    raw_opts = list(block.get("options") or [])
+    pool = [correct_answer] + [o for o in raw_opts if o and o.strip() and o.strip() != correct_answer]
+
+    opts: list[str] = []
+    for o in pool:
+        o = o.strip()
+        if o and o not in opts:
+            opts.append(o)
+
+    opts = opts[:3]  # 💬 всегда 3 варианта
+
+    if len(opts) < 3 or not correct_answer:
+        # 💬 если блок битый = не падаем, просто идём дальше
+        await state.update_data(current_poll_id=None, current_correct_option_id=None, current_poll_message_id=None)
+        await state.update_data(vocab_index=idx + 1)
+        return await send_one_vocab(message, state)
+
     random.shuffle(opts)
-    correct_id = opts.index(block["correct_answer"])
-# — Отправляем Quiz через bot, чтобы не вызывать методы у ChatFullInfo —
-    chat_id = message.chat.id if hasattr(message, "chat") else message.id
+    correct_id = opts.index(correct_answer)
 
-    if data.get("lex_mode_active"):
-        await _lex_cleanup_last_bot_message(chat_id, state)  # 💬 чистим прошлое сообщение лексики перед новым poll
-
-    # 💬 explanation показываем через встроенный механизм Telegram Quiz
     poll_message = await bot.send_poll(
         chat_id=chat_id,
-        question=block["question"].replace("\\n", "\n"),   # 💬 конвертируем литерал "\n" из JSON в реальный перенос строки
+        question=_normalize_nl(block.get("question", "")),
         options=opts,
         type="quiz",
         correct_option_id=correct_id,
-        open_period=QUIZ_OPEN_PERIOD_S,  # 💬 единая константа времени жизни квиза
         is_anonymous=False,
-        explanation=block.get("explanation_wrong", "")
+        open_period=int(QUIZ_OPEN_PERIOD_S),
+        explanation=f"✅ {correct_answer}"[:190],  # 💬 показываем правильный ответ внутри poll
     )
 
-    # 💬 убрали объяснение «правильного» — оставляем только объяснение ошибки отдельно
-    if data.get("lex_mode_active"):
-        await state.update_data(lex_last_bot_msg_id=poll_message.message_id)  # 💬 запоминаем poll как последнее сообщение лексики
+    await state.update_data(current_poll_message_id=poll_message.message_id)  # 💬 запоминаем id квиза-полла
 
-    # 💾 сохраняем poll и message_id
-    await state.update_data(
-        current_poll_id=poll_message.poll.id,
-        current_poll_message_id=poll_message.message_id,
-        current_correct_option_id=correct_id
-    )
     # 🚨 запускаем таймаут на ответ
     asyncio.create_task(_vocab_quiz_timeout_handler(
         poll_message.poll.id, chat_id, state, delay=int(QUIZ_TIMEOUT_TASK_S)
@@ -6158,7 +6180,9 @@ import types
 
 
 @track_handler
-async def _vocab_quiz_timeout_handler(chat_id, poll_id, delay=QUIZ_TIMEOUT_TASK_S):
+async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMContext, delay: float = QUIZ_TIMEOUT_TASK_S):
+    # 💬 что делает эта часть: если юзер не ответил вовремя = считаем как ошибку, ставим реакцию, кидаем в повтор и двигаем дальше
+
     # 💬 таймаут квиза: считаем как неправильный ответ и крутим внутри текущего сета
     await asyncio.sleep(delay)
 
@@ -6168,6 +6192,24 @@ async def _vocab_quiz_timeout_handler(chat_id, poll_id, delay=QUIZ_TIMEOUT_TASK_
 
     data = await state.get_data()
     if data.get("current_poll_id") != poll_id:
+        poll_msg_id = data.get("current_poll_message_id")
+    
+        # 💬 что делает эта часть: закрываем poll, ставим реакцию таймаута прямо на poll
+        if poll_msg_id:
+            try:
+                await bot.stop_poll(chat_id=chat_id, message_id=poll_msg_id)
+            except Exception:
+                pass
+            try:
+                await bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=poll_msg_id,
+                    reaction=[ReactionTypeEmoji(emoji="⏱")],
+                    is_big=True
+                )
+            except Exception:
+                pass
+
         return
 
     # 💬 сброс poll_id, чтобы не словить двойную обработку
@@ -6500,6 +6542,19 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
             # без паники — если реакции запрещены/нет прав/временной лаг, просто пропускаем
             pass
 
+    else:
+        # 💬 что делает эта часть: реакция на неправильный ответ прямо на poll
+        try:
+            msg_id = data.get("current_poll_message_id")
+            if msg_id:
+                await bot.set_message_reaction(
+                    chat_id=poll_answer.user.id,
+                    message_id=msg_id,
+                    reaction=[ReactionTypeEmoji(emoji="❌")],
+                    is_big=True
+                )
+        except Exception:
+            pass
 
     delta = random.randint(28, 37) if is_correct else -10
     await award_xp(delta, state)
@@ -6617,8 +6672,12 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     chat_id = poll_answer.user.id
     try: await bot.delete_message(chat_id, data.get("current_poll_message_id"))
     except: pass
-    try: await bot.delete_message(chat_id, fb.message_id)
-    except: pass
+    if fb:
+        try:
+            await bot.delete_message(chat_id, fb.message_id)
+        except Exception:
+            pass
+
 
 
 
