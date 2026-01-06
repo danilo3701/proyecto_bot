@@ -5789,10 +5789,12 @@ async def send_failed_vocab(chat_id: int, state: FSMContext):
                 await state.update_data(failed_vocab=failed[1:] + failed[:1])
             return await send_failed_vocab(chat_id, state)
     
-        opts = [str(x).strip() for x in opts]
+        correct = block["correct_answer"]  # 💬 правильный ответ
+        wrongs = [o for o in block.get("options", []) if o != correct]
+        opts = [correct] + wrongs[:2]  # 💬 всегда 3 варианта
         random.shuffle(opts)
-        correct_id = opts.index(correct_answer)
-    
+        correct_id = opts.index(correct)
+
         poll_msg = await bot.send_poll(
             chat_id=chat_id,
             question=_normalize_nl(block.get("question", "")),
@@ -6070,9 +6072,12 @@ async def send_one_vocab_quiz(message: Message, state: FSMContext):
         await state.update_data(vocab_index=idx + 1)
         return await send_one_vocab(message, state)
     
-    opts = [str(x).strip() for x in opts]
+    correct = block["correct_answer"]  # 💬 правильный ответ
+    wrongs = [o for o in block.get("options", []) if o != correct]
+    opts = [correct] + wrongs[:2]  # 💬 всегда 3 варианта
     random.shuffle(opts)
-    correct_id = opts.index(correct_answer)
+    correct_id = opts.index(correct)
+
     
     poll_message = await bot.send_poll(
         chat_id=chat_id,
