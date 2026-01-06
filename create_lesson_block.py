@@ -8,6 +8,28 @@ import logging  # 💬 для логирования в receive_ad_source
 
 from pathlib import Path
 
+def atomic_save_json(path: str | Path, data: dict) -> bool:
+    # 💬 что делает эта часть: атомарно сохраняем JSON (tmp файл + replace), чтобы не получить битый файл при падении
+    try:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+
+        tmp_path = p.with_suffix(p.suffix + f".tmp_{uuid.uuid4().hex}")
+        with tmp_path.open("w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        os.replace(tmp_path, p)
+        return True
+    except Exception as e:
+        logging.exception("atomic_save_json: failed to save %s: %s", path, e)
+        try:
+            if "tmp_path" in locals() and Path(tmp_path).exists():
+                Path(tmp_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+
+
 def get_topics_dir() -> Path:
     # 💬 что делает эта часть: выбираем папку topics в Railway Volume (/data/topics); если нельзя = падаем обратно на локальную
     candidates = [Path("/data/topics"), Path(__file__).parent / "topics", Path("topics")]
@@ -26,30 +48,7 @@ def get_topics_dir() -> Path:
             continue
     return Path("topics")
 
-def atomic_save_json(path: str, data: dict) -> bool:
-    # 💬 атомарно сохраняем JSON: пишем во временный файл и заменяем основной через os.replace
-    try:
-        p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
 
-        tmp_path = p.with_suffix(p.suffix + ".tmp")
-
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-        os.replace(str(tmp_path), str(p))
-        return True
-    except Exception:
-        logging.exception("atomic_save_json: cannot save %s", path)
-        try:
-            # 💬 чистим временный файл если остался
-            p = Path(path)
-            tmp_path = p.with_suffix(p.suffix + ".tmp")
-            if tmp_path.exists():
-                tmp_path.unlink()
-        except Exception:
-            pass
-        return False
 
 
 
@@ -2799,6 +2798,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
