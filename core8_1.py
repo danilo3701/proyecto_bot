@@ -670,18 +670,26 @@ def _lex_get_poll_round(phrase: dict, round_idx: int) -> dict | None:
 
 
 def _lex_get_textquiz_first(phrase: dict) -> dict | None:
-    # 💬 что делает эта часть: берём первый textquiz (у тебя он один тип = угадать глагол)
+    # 💬 что делает эта часть: забираем 1-й textquiz из фразы и нормализуем ключ correct_answer
     tqs = phrase.get("textquizzes") or phrase.get("textquiz") or phrase.get("text_quiz") or []
-    if isinstance(tqs, list) and tqs:
-        if isinstance(tqs[0], dict):
-            out = dict(tqs[0])
-            out["type"] = "textquiz"
-            return out
-    if isinstance(tqs, dict):
+    out = None
+
+    if isinstance(tqs, list) and tqs and isinstance(tqs[0], dict):
+        out = dict(tqs[0])
+    elif isinstance(tqs, dict):
         out = dict(tqs)
-        out["type"] = "textquiz"
-        return out
-    return None
+
+    if not out:
+        return None
+
+    out["type"] = "textquiz"
+
+    # 💬 совместимость с ALL IN: answer -> correct_answer (handle_vocab_textquiz_answer читает correct_answer/correct_answers)
+    if "correct_answer" not in out and "answer" in out:
+        out["correct_answer"] = out.get("answer") or ""
+
+    return out
+
 
 
 def _lex_detect_total_rounds(phrases: list, default_total: int = 4) -> int:
@@ -4040,8 +4048,17 @@ async def lex_phrases_done(callback: CallbackQuery, state: FSMContext):
     active_indexes = _get_active_phrase_indexes(phrases, hidden)
 
     if not active_indexes:
-        await callback.answer("Нужно оставить хотя бы 1 фразу.", show_alert=True)
+        # 💬 что делает эта часть: если ученик скрыл всё = считаем, что фазу знает, и выходим без зависаний
+        await callback.answer()
+        if callback.message:
+            await send_and_auto_delete_text(
+                callback.bot, callback.message.chat.id,
+                "✅ Похоже, в этой фазе всё уже знаешь.",
+                delay=2
+            )
+            return await lesson_menu_handler(callback.message, state)
         return
+
 
     active_phrases = [phrases[i] for i in active_indexes]
 
@@ -4069,6 +4086,20 @@ async def lex_phrases_done(callback: CallbackQuery, state: FSMContext):
 
     # собираем 1-й раунд и стартуем
     await _lex_prepare_round_session(state, round_idx=0)
+
+    data2 = await state.get_data()
+    session = data2.get("lex_session_vocab_list") or []
+    if not session:
+        # 💬 что делает эта часть: если в фазе нет polls/textquiz = не возвращаемся к списку фраз, а выходим
+        if callback.message:
+            await send_and_auto_delete_text(
+                callback.bot, callback.message.chat.id,
+                "⚠️ В этой фазе пока нет квизов. Проверь, что ALL IN сохранил polls и textquiz.",
+                delay=3
+            )
+            return await lesson_menu_handler(callback.message, state)
+        return
+
 
     data2 = await state.get_data()
     total = data2.get("lex_round_total", 4)
@@ -6024,6 +6055,10 @@ async def send_one_vocab_quiz(message: Message, state: FSMContext):
     correct_id = opts.index(block["correct_answer"])
 # — Отправляем Quiz через bot, чтобы не вызывать методы у ChatFullInfo —
     chat_id = message.chat.id if hasattr(message, "chat") else message.id
+
+    if data.get("lex_mode_active"):
+        await _lex_cleanup_last_bot_message(chat_id, state)  # 💬 чистим прошлое сообщение лексики перед новым poll
+
     # 💬 explanation показываем через встроенный механизм Telegram Quiz
     poll_message = await bot.send_poll(
         chat_id=chat_id,
@@ -6037,6 +6072,8 @@ async def send_one_vocab_quiz(message: Message, state: FSMContext):
     )
 
     # 💬 убрали объяснение «правильного» — оставляем только объяснение ошибки отдельно
+    if data.get("lex_mode_active"):
+        await state.update_data(lex_last_bot_msg_id=poll_message.message_id)  # 💬 запоминаем poll как последнее сообщение лексики
 
     # 💾 сохраняем poll и message_id
     await state.update_data(
