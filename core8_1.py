@@ -5821,6 +5821,81 @@ async def send_failed_vocab(chat_id: int, state: FSMContext):
     return await lesson_menu_handler(fake_msg, state)
 
 
+@dp.message(LessonStates.vocab_phrase_select)
+@track_handler
+async def handle_vocab_phrase_select(message: Message, state: FSMContext):
+    # 💬 что делает эта часть: ученик вводит номер фразы = скрываем её из сессионного списка и обновляем список
+
+    txt = (message.text or "").strip()
+
+    # чистим чат = удаляем любой мусорный ввод
+    if not txt.isdigit():
+        try:
+            await bot.delete_message(message.chat.id, message.message_id)
+        except Exception:
+            pass
+        return
+
+    idx = int(txt)
+    data = await state.get_data()
+    phrases = data.get("lex_active_phrases") or []
+
+    # если фраз нет = просто чистим ввод
+    if not isinstance(phrases, list) or not phrases:
+        try:
+            await bot.delete_message(message.chat.id, message.message_id)
+        except Exception:
+            pass
+        return
+
+    # жёсткая валидация диапазона
+    if idx < 1 or idx > len(phrases):
+        try:
+            await bot.delete_message(message.chat.id, message.message_id)
+        except Exception:
+            pass
+        return
+
+    # нельзя удалить последнюю фразу = оставляем минимум 1
+    if len(phrases) == 1:
+        try:
+            await bot.delete_message(message.chat.id, message.message_id)
+        except Exception:
+            pass
+        return
+
+    # удаляем выбранную фразу (индексы 1..N)
+    phrases.pop(idx - 1)
+
+    # корректируем курсор textquiz, чтобы "по очереди" не ломалось
+    cursor = data.get("lex_textquiz_phrase_cursor", 0)
+    if (idx - 1) < cursor:
+        cursor = max(0, cursor - 1)
+
+    await state.update_data(lex_active_phrases=phrases, lex_textquiz_phrase_cursor=cursor)
+
+    # обновляем сообщение со списком фраз + оставляем кнопку Готово
+    chat_id = data.get("lex_phrases_chat_id", message.chat.id)
+    msg_id = data.get("lex_phrases_msg_id")
+    if msg_id:
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="✅ Готово", callback_data="lex_phrases_done")]]
+        )
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=_lex_render_phrase_list(phrases),
+                reply_markup=kb
+            )
+        except Exception:
+            pass
+
+    # удаляем сообщение пользователя = чат не засоряем
+    try:
+        await bot.delete_message(message.chat.id, message.message_id)
+    except Exception:
+        pass
 
 
 @dp.callback_query(F.data == "lex_phrases_done", StateFilter(LessonStates.vocab_phrase_select))
