@@ -294,8 +294,8 @@ def _kb_menu() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics"),
-                InlineKeyboardButton(text="🏠 В меню", callback_data="gram:menu"),  # 💬 возвращаемся в меню грамматики темы
-            ],
+            ],  # 💬 оставляем одну кнопку
+
 
         ]
     )
@@ -304,9 +304,10 @@ def _kb_menu() -> InlineKeyboardMarkup:
 def _kb_back_to_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ В меню", callback_data="gram:menu")]
+            [InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics")]  # 💬 одна кнопка
         ]
     )
+
 
 
 def _kb_phases(phases: List[Dict[str, Any]], done_flags: List[bool]) -> InlineKeyboardMarkup:
@@ -316,7 +317,7 @@ def _kb_phases(phases: List[Dict[str, Any]], done_flags: List[bool]) -> InlineKe
         if i < len(done_flags) and done_flags[i]:
             label = f"⭐ {label}"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"gram:phase:{i}")])
-    rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="gram:menu")])
+    rows.append([InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics")])  # 💬 одна кнопка
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -328,20 +329,21 @@ def _kb_nav_in_phase() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="➡️", callback_data="gram:nav:next"),
             ],
             [
-                InlineKeyboardButton(text="↩️ К фазам", callback_data="gram:theory"),
-                InlineKeyboardButton(text="🏠 В меню", callback_data="gram:menu"),
-            ],
+                InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics"),
+            ],  # 💬 оставляем одну кнопку
         ]
     )
+
 
 
 def _kb_practice_intro() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="▶️ Начать", callback_data="gram:practice:start")],
-            [InlineKeyboardButton(text="⬅️ В меню", callback_data="gram:menu")],
+            [InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics")],  # 💬 одна кнопка
         ]
     )
+
 
 
 def _kb_video_controls() -> InlineKeyboardMarkup:
@@ -352,8 +354,9 @@ def _kb_video_controls() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="⏭️ Дальше", callback_data="gram:video:next"),
             ],
             [
-                InlineKeyboardButton(text="⬅️ В меню", callback_data="gram:menu")
-            ],
+                InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics"),
+            ],  # 💬 одна кнопка
+
         ]
     )
 
@@ -367,8 +370,9 @@ def _kb_read_controls() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="➡️", callback_data="gram:read:next"),
             ],
             [
-                InlineKeyboardButton(text="⬅️ В меню", callback_data="gram:menu")
-            ],
+                InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics"),
+            ],  # 💬 одна кнопка
+
         ]
     )
 
@@ -429,6 +433,19 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
         return
 
     st = await state.get_data()
+    lvl = (
+        st.get("selected_level")
+        or st.get("level")
+        or st.get("lvl")
+        or st.get("level_key")
+        or st.get("selected_category_level")
+        or st.get("category_level")
+        or st.get("chosen_level")
+    )  # 💬 подхватываем уровень из core, даже если ключ называется иначе
+
+    if lvl and not st.get("selected_level"):
+        await state.update_data(selected_level=lvl)  # 💬 фиксируем ожидаемый ключ для кнопки "Темы"
+
     topic_key = st.get("selected_topic")
     if not topic_key:
         await message.answer("⚠️ Не вижу выбранную тему.")
@@ -522,12 +539,35 @@ async def gram_topics(cb: CallbackQuery, state: FSMContext) -> None:
 
     # 💬 возвращаемся к списку тем грамматики выбранного уровня
     st = await state.get_data()
-    lvl = st.get("selected_level")
+
+    lvl = (
+        st.get("selected_level")
+        or st.get("level")
+        or st.get("lvl")
+        or st.get("level_key")
+        or st.get("selected_category_level")
+        or st.get("category_level")
+        or st.get("chosen_level")
+    )  # 💬 поддерживаем разные ключи уровня из core
+
     if not lvl:
-        await cb.message.answer("⚠️ Не вижу уровень. Нажми /start и выбери заново.")
+        # 💬 если уровень не сохранился, не ругаемся, а возвращаем в /start
+        if _start_handler:
+            try:
+                await state.clear()
+            except Exception:
+                pass
+            await _start_handler(cb.message, state)
+            return
+        await cb.message.answer("Нажми /start")
         return
+
+    # 💬 сохраняем в expected key, чтобы дальше работало стабильно
+    await state.update_data(selected_level=lvl)
+
     if _show_topics_for_category_level:
         await _show_topics_for_category_level(cb, state, category="gram", level=lvl)  # 💬 обратно к темам
+
     else:
         await cb.message.answer("⚠️ Нет show_topics_for_category_level.")
 
