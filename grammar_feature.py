@@ -99,6 +99,59 @@ async def _safe_delete_message(bot, chat_id: int, message_id: int) -> None:
     except Exception:
         return
 
+def _normalize_quiz_options(opts: List[str], correct: int) -> Tuple[List[str], int]:
+    # 💬 приводим к 3 вариантам, убираем дубли и фиксируем correct в 0
+    clean: List[str] = []
+    for x in opts or []:
+        s = str(x).strip()
+        if not s:
+            continue
+        clean.append(s)
+
+    if not clean:
+        return (["...","..."], 0)  # 💬 Telegram требует минимум 2 варианта
+
+    if correct < 0 or correct >= len(clean):
+        correct = 0
+
+    correct_text = clean[correct]
+
+    # 💬 если у тебя 4й вариант дублирует правильный, выкидываем его
+    if len(clean) >= 4 and clean[-1] == correct_text:
+        clean = clean[:-1]
+
+    # 💬 собираем 3 варианта: правильный + 2 уникальных неправильных
+    rest: List[str] = []
+    for o in clean:
+        if o == correct_text:
+            continue
+        if o not in rest:
+            rest.append(o)
+
+    final_opts = [correct_text] + rest[:2]
+    if len(final_opts) < 2:
+        final_opts = [correct_text, "..."]  # 💬 минимально безопасно
+
+    return (final_opts, 0)
+
+
+async def _tg_retry(factory: Callable[[], Any], tries: int = 3, base_delay: float = 0.8) -> Any:
+    # 💬 не даём боту падать на таймаутах Telegram, повторяем запрос
+    for attempt in range(tries):
+        try:
+            return await factory()
+        except Exception as e:
+            name = e.__class__.__name__
+            is_timeout = isinstance(e, (asyncio.TimeoutError, TimeoutError))
+            is_network = name in {"TelegramNetworkError", "TelegramRetryAfter", "RetryAfter"}
+            if not (is_timeout or is_network):
+                return None  # 💬 не роняем хендлер на неожиданных сетевых ошибках
+
+            if attempt == tries - 1:
+                return None
+
+            await asyncio.sleep(base_delay * (attempt + 1))
+
 
 def _bar(pct: float, width: int = 10) -> str:
     # 💬 прогресс бар текстом
@@ -320,15 +373,26 @@ def _kb_read_controls() -> InlineKeyboardMarkup:
     )
 
 
-async def _replace_content(chat_id: int, state: FSMContext, send_coro) -> Message:
-    # 💬 удаляем прошлый контент и ставим новый (одно сообщение вместо спама)
+async def _replace_content(chat_id: int, state: FSMContext, send_factory) -> Optional[Message]:
+    # 💬 сначала шлём новый контент, потом удаляем старый (чтобы не потерять экран при таймауте)
     st = await state.get_data()
     old_id = st.get("gram_content_msg_id")
+
+    async def _call():
+        if callable(send_factory):
+            return await send_factory()
+        return await send_factory
+
+    msg = await _tg_retry(_call)  # 💬 ретраи при таймауте
+    if not msg:
+        return None
+
     if old_id:
-        await _safe_delete_message(_bot, chat_id, int(old_id))
-    msg = await send_coro
+        await _safe_delete_message(_bot, chat_id, int(old_id))  # 💬 удаляем старый экран только после успеха
+
     await state.update_data(gram_content_msg_id=msg.message_id)
     return msg
+
 
 
 
@@ -643,7 +707,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
         if t == "poll":
             q = str(item.get("question") or "Выбери ответ")
             opts = item.get("options") or item.get("answers") or []
-            opts = [str(x) for x in opts][:10]
+            opts = [str(x) for x in opts][:12]
 
             correct = 0  # 💬 по умолчанию первый
             if "correct_option_id" in item:
@@ -656,10 +720,12 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
             elif item.get("correct_answer") in opts:
                 correct = opts.index(item.get("correct_answer"))  # 💬 correct_answer = текст правильного варианта
 
+            opts, correct = _normalize_quiz_options(opts, correct)  # 💬 строго 3 варианта, правильный всегда 0
+
             poll_msg = await _replace_content(
                 chat_id,
                 state,
-                _bot.send_poll(
+                lambda: _bot.send_poll(
                     chat_id=chat_id,
                     question=q,
                     options=opts,
@@ -667,7 +733,10 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                     correct_option_id=correct,
                     is_anonymous=False,
                 ),
-            )  # 💬 Poll заменяет прошлый экран, не добавляется новым сообщением
+            )  # 💬 Poll тоже не копится в чате и не роняет хендлер
+
+            if not poll_msg:
+                return
 
             await state.set_state(GrammarStates.theory_poll)  # 💬 ждём PollAnswer для теории
             await state.update_data(
@@ -678,6 +747,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                 gram_poll_section="theory",  # 💬 отмечаем, что это теория
             )
             return
+
 
 
         if t == "photo":
@@ -844,7 +914,7 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
     if t == "poll":
         q = str(item.get("question") or "Выбери ответ")
         opts = item.get("options") or item.get("answers") or []
-        opts = [str(x) for x in opts][:10]
+        opts = [str(x) for x in opts][:12]
 
         correct = 0  # 💬 по умолчанию первый
         if "correct_option_id" in item:
@@ -857,10 +927,12 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
         elif item.get("correct_answer") in opts:
             correct = opts.index(item.get("correct_answer"))  # 💬 correct_answer = текст правильного варианта
 
+        opts, correct = _normalize_quiz_options(opts, correct)  # 💬 строго 3 варианта, правильный всегда 0
+
         poll_msg = await _replace_content(
             chat_id,
             state,
-            _bot.send_poll(
+            lambda: _bot.send_poll(
                 chat_id=chat_id,
                 question=q,
                 options=opts,
@@ -868,8 +940,10 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
                 correct_option_id=correct,
                 is_anonymous=False,
             ),
-        )  # 💬 Poll заменяет прошлый экран
+        )  # 💬 Poll тоже не копится в чате и не роняет хендлер
 
+        if not poll_msg:
+            return
 
         await state.set_state(GrammarStates.practice_poll)  # 💬 ждём PollAnswer для практики
         await state.update_data(
@@ -880,6 +954,7 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
             gram_poll_section="practice",  # 💬 отмечаем, что это практика
         )
         return
+
 
 
     if t == "photo":
