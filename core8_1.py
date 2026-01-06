@@ -1663,6 +1663,23 @@ async def send_and_auto_delete_text(bot, chat_id, text, delay=AUTO_DELETE_TEXT_D
     except TelegramBadRequest:
         pass
 
+async def _safe_delete_message(chat_id: int, message_id: int | None):
+    # 💬 безопасно удаляем сообщение, чтобы поток не падал
+    if not message_id:
+        return
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
+
+
+async def _lex_cleanup_last_bot_message(chat_id: int, state: FSMContext):
+    # 💬 держим чат чистым: удаляем прошлое сообщение бота в потоке «Учить слова»
+    data = await state.get_data()
+    last_id = data.get("lex_last_bot_msg_id")
+    if last_id:
+        await _safe_delete_message(chat_id, last_id)
+        await state.update_data(lex_last_bot_msg_id=None)
 
 
 # 💬 Набор ТЕКСТОВЫХ подсказок перед link (без эмодзи)
@@ -5330,7 +5347,12 @@ async def send_one_vocab(message: Message, state: FSMContext):
             [InlineKeyboardButton(text="✅ Готово", callback_data="lex_phrases_done")]
         ])
 
-        sent = await message.answer(text, reply_markup=kb)
+        chat_id = message.chat.id if hasattr(message, "chat") else message.id
+        await _lex_cleanup_last_bot_message(chat_id, state)  # 💬 чистим прошлое сообщение перед списком фраз
+        
+        sent = await bot.send_message(chat_id, text, reply_markup=kb, parse_mode="HTML")
+        await state.update_data(lex_last_bot_msg_id=sent.message_id)  # 💬 запоминаем последнее сообщение лексики
+
         await state.update_data(
             phrase_select_msg_id=sent.message_id,
             phrase_select_chat_id=sent.chat.id,
@@ -5769,7 +5791,7 @@ async def send_failed_vocab(chat_id: int, state: FSMContext):
             type="quiz",
             correct_option_id=correct_id,
             is_anonymous=False,
-            explanation=block.get("explanation_wrong", "")
+            explanation=f"✅ {block.get('correct_answer', '')}"[:190]  # 💬 показываем ответ в самом poll, без доп. сообщений
         )
 
         # 💾 сохраняем poll.id и message_id, чтобы потом удалить и отследить ответ
@@ -5778,6 +5800,8 @@ async def send_failed_vocab(chat_id: int, state: FSMContext):
             current_poll_message_id=poll_msg.message_id,
             current_correct_option_id=correct_id
         )
+        await state.update_data(lex_last_bot_msg_id=poll_message.message_id)  # 💬 poll = текущий фрагмент чата
+
         # 🔄 переключаем FSM в разбор ошибок quiz
         await state.set_state(LessonStates.review_failed_vocab)
         return
