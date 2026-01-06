@@ -1458,108 +1458,125 @@ async def import_vocab_textquiz_bulk(message: Message, state: FSMContext):
 
     await send_post_menu(message, state)
 
-
-def _parse_allin_block(raw: str):
-    # 💬 парсим ALL IN блок, считаем статистику и НЕ сохраняем оборванные PHRASE (без [/PHRASE])
-    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-
+def _parse_allin_block(text: str) -> list[dict]:
+    # 💬 парсим ALL IN блок в формате [PHRASE]...[POLL]...[TEXT]...[/PHRASE] + совместимость со старым POLL:/TEXTQUIZ:
     phrases: list[dict] = []
-    errors: list[str] = []
+    current: dict | None = None
+    section: str | None = None  # "POLL" | "TEXT" | None
 
-    total_blocks = 0
-    truncated_at: dict | None = None
-    invalid_blocks = 0
+    def _ensure_current():
+        nonlocal current
+        if current is None:
+            current = {"es": "", "ru": "", "polls": [], "textquizzes": []}  # 💬 базовая структура фразы
 
-    i = 0
-    while i < len(lines):
-        if lines[i] != "[PHRASE]":
-            i += 1
+    def _cleanup_phrase(ph: dict) -> dict:
+        # 💬 убираем пустые списки, чтобы JSON был чище
+        if isinstance(ph.get("polls"), list) and not ph["polls"]:
+            ph.pop("polls", None)
+        if isinstance(ph.get("textquizzes"), list) and not ph["textquizzes"]:
+            ph.pop("textquizzes", None)
+        return ph
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue  # 💬 пустые строки игнорируем
+
+        up = line.upper()
+
+        # --- ТЕГИ БЛОКА ---
+        if up == "[PHRASE]":
+            current = {"es": "", "ru": "", "polls": [], "textquizzes": []}  # 💬 новая фраза
+            section = None
             continue
 
-        total_blocks += 1
-        i += 1
-
-        es = None
-        ru = None
-        polls: list[dict] = []
-        textquiz = None
-
-        # 💬 читаем до закрывающего тега
-        while i < len(lines) and lines[i] != "[/PHRASE]":
-            stripped = lines[i].strip()
-
-            if stripped.startswith("ES:"):
-                es = stripped[3:].strip()
-
-            elif stripped.startswith("RU:"):
-                ru = stripped[3:].strip()
-
-            elif stripped.startswith("POLL:"):
-                # 💬 формат: POLL: question | correct | wrong1 | wrong2 | wrong3
-                content = stripped[5:].strip()
-                parts = [p.strip() for p in content.split("|")]
-                if len(parts) < 5:
-                    errors.append(f"PHRASE #{total_blocks}: POLL мало полей, нужно 5 через |")
-                else:
-                    q = parts[0]
-                    correct = parts[1]
-                    wrong1, wrong2, wrong3 = parts[2], parts[3], parts[4]
-                    polls.append({
-                        "type": "quiz",  # 💬 сразу в формате core8_1
-                        "question": q,
-                        "options": [correct, wrong1, wrong2, wrong3],
-                        "correct_answer": correct
-                    })
-
-            elif stripped.startswith("TEXTQUIZ:"):
-                # 💬 формат: TEXTQUIZ: question | answer
-                content = stripped[8:].strip()
-                parts = [p.strip() for p in content.split("|")]
-                if len(parts) < 2:
-                    errors.append(f"PHRASE #{total_blocks}: TEXTQUIZ мало полей, нужно 2 через |")
-                else:
-                    q = parts[0]
-                    ans = parts[1]
-                    textquiz = {
-                        "type": "textquiz",  # 💬 в формате core8_1
-                        "question": q,
-                        "answer": ans
-                    }
-
-            i += 1
-
-        # 💬 если не нашли [/PHRASE] = считаем, что сообщение оборвалось, этот блок НЕ сохраняем
-        if i >= len(lines) or lines[i] != "[/PHRASE]":
-            truncated_at = {
-                "block": total_blocks,
-                "es_preview": (es or "")[:60]
-            }
-            break
-
-        # 💬 пропускаем [/PHRASE]
-        i += 1
-
-        if not es or not ru:
-            invalid_blocks += 1
-            errors.append(f"PHRASE #{total_blocks}: нет ES или RU")
+        if up == "[/PHRASE]":
+            if current and (current.get("es") or current.get("ru")):
+                phrases.append(_cleanup_phrase(current))
+            current = None
+            section = None
             continue
 
-        phrase_obj = {"es": es, "ru": ru}
-        if polls:
-            phrase_obj["polls"] = polls
-        if textquiz:
-            phrase_obj["textquiz"] = textquiz
+        if up == "[POLL]":
+            section = "POLL"  # 💬 следующие строки = poll-квизы
+            continue
 
-        phrases.append(phrase_obj)
+        if up in ("[TEXT]", "[TEXTQUIZ]"):
+            section = "TEXT"  # 💬 следующие строки = text-quiz
+            continue
 
-    meta = {
-        "found": total_blocks,
-        "saved": len(phrases),
-        "invalid": invalid_blocks,
-        "truncated": 1 if truncated_at else 0,
-        "truncated_at": truncated_at
-    }
-    return phrases, errors, meta
+        # --- ES/RU ---
+        if line.startswith("ES:"):
+            _ensure_current()
+            current["es"] = line[3:].strip()
+            continue
+
+        if line.startswith("RU:"):
+            _ensure_current()
+            current["ru"] = line[3:].strip()
+            continue
+
+        # --- СОВМЕСТИМОСТЬ СО СТАРЫМ ФОРМАТОМ POLL:/TEXTQUIZ: ---
+        if line.startswith("POLL:"):
+            _ensure_current()
+            payload = line[5:].strip().replace("\\n", "\n")
+            parts = [p.strip() for p in payload.split("|") if p.strip()]
+            # старый формат: question | correct | wrong1 | wrong2 | wrong3
+            if len(parts) >= 5:
+                question = parts[0]
+                correct = parts[1]
+                options = parts[1:]  # correct + wrongs
+                current.setdefault("polls", []).append(
+                    {"question": question, "options": options, "correct_answer": correct}  # 💬 структура quiz
+                )
+            continue
+
+        if line.startswith("TEXTQUIZ:") or line.startswith("TEXT:"):
+            _ensure_current()
+            payload = line.split(":", 1)[1].strip().replace("\\n", "\n")
+            parts = [p.strip() for p in payload.split("|") if p.strip()]
+            if len(parts) >= 2:
+                question = parts[0]
+                correct = parts[1]
+                current.setdefault("textquizzes", []).append(
+                    {"question": question, "correct_answer": correct}  # 💬 textquiz хранит correct_answer
+                )
+            continue
+
+        # --- НОВЫЙ ФОРМАТ ВНУТРИ [POLL] / [TEXT] ---
+        if section == "POLL":
+            _ensure_current()
+            payload = line.replace("\\n", "\n")
+            parts = [p.strip() for p in payload.split("|") if p.strip()]
+            # новый формат: question | opt1 | opt2 | opt3 | correct (correct = последний)
+            if len(parts) >= 3:
+                question = parts[0]
+                options = parts[1:]
+                correct = options[-1]
+                current.setdefault("polls", []).append(
+                    {"question": question, "options": options, "correct_answer": correct}  # 💬 структура quiz
+                )
+            continue
+
+        if section == "TEXT":
+            _ensure_current()
+            payload = line.replace("\\n", "\n")
+            parts = [p.strip() for p in payload.split("|") if p.strip()]
+            # формат: question | correct
+            if len(parts) >= 2:
+                current.setdefault("textquizzes", []).append(
+                    {"question": parts[0], "correct_answer": parts[1]}  # 💬 структура textquiz
+                )
+            continue
+
+        # 💬 неизвестные строки вне секций игнорируем
+
+    # 💬 если забыли закрыть [/PHRASE], всё равно сохраним последнюю фразу
+    if current and (current.get("es") or current.get("ru")):
+        phrases.append(_cleanup_phrase(current))
+
+    return phrases
+
 
 
 @router.message(NewTopicStates.waiting_vocab_allin_bulk)
@@ -2798,6 +2815,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
