@@ -1808,6 +1808,10 @@ async def import_vocab_textquiz_bulk(message: Message, state: FSMContext):
 def _parse_allin_block(text: str):
     # 💬 парсим ALL IN блок и возвращаем (phrases, errors, meta) как ожидает import_vocab_allin_bulk
     lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    def _nl(s: str) -> str:
+        # 💬 что делает эта часть: чиним переносы из админского текста (\\n и \\\\n) и убираем лишний слэш
+        return (s or "").replace("\\\\n", "\n").replace("\\n", "\n")
+
 
     phrases: list[dict] = []
     errors: list[str] = []
@@ -1858,39 +1862,59 @@ def _parse_allin_block(text: str):
 
             # 💬 совместимость со старым форматом
             if line.startswith("POLL:"):
-                payload = line[5:].strip().replace("\\n", "\n")
+                payload = _nl(line.split(":", 1)[1].strip())
                 parts = [p.strip() for p in payload.split("|") if p.strip()]
-                # старый формат: вопрос | правильный | неверный1 | неверный2 | неверный3
-                if len(parts) >= 5:
+                # 💬 формат: вопрос | correct | wrong1 | wrong2
+                if len(parts) >= 4:
                     q = parts[0]
-                    correct = parts[1]
-                    options = parts[1:5]
+                    correct, wrong1, wrong2 = parts[1], parts[2], parts[3]
                     polls.append({
-                        "type": "quiz",  # 💬 формат под core8_1
+                        "type": "quiz",
                         "question": q,
-                        "options": options,
+                        "options": [correct, wrong1, wrong2],
                         "correct_answer": correct
                     })
                 else:
-                    errors.append(f"PHRASE #{total_blocks}: POLL мало полей")
+                    errors.append(f"PHRASE #{total_blocks}: строка POLL мало полей")
                 i += 1
                 continue
 
+
             if line.startswith("TEXTQUIZ:") or line.startswith("TEXT:"):
-                payload = line.split(":", 1)[1].strip().replace("\\n", "\n")
+                payload = _nl(line)
                 parts = [p.strip() for p in payload.split("|") if p.strip()]
-                if len(parts) >= 2:
-                    q = "|".join(parts[:-1]).strip()
-                    ans = parts[-1].strip()
-                    textquizzes.append({
-                        "type": "textquiz",
-                        "question": q,
-                        "correct_answer": ans
-                    })
+
+                # 💬 поддержка обоих форматов:
+                # 1) новый: вопрос | correct | wrong1 | wrong2
+                # 2) старый: вопрос | w1 | w2 | w3 | correct(последний)
+                if len(parts) >= 4:
+                    q = parts[0]
+                    answers = parts[1:]
+
+                    if len(answers) == 3:
+                        correct = answers[0]
+                        wrongs = answers[1:]
+                    else:
+                        correct = answers[-1]
+                        wrongs = [a for a in answers[:-1] if a != correct]
+
+                    options = [correct] + wrongs[:2]
+
+                    if len(options) < 3 or not correct:
+                        errors.append(f"PHRASE #{total_blocks}: строка [POLL] не собрала 3 варианта")
+                    else:
+                        polls.append({
+                            "type": "quiz",
+                            "question": q,
+                            "options": options,          # 💬 всегда 3 варианта
+                            "correct_answer": correct    # 💬 правильный до перемешки всегда первый
+                        })
                 else:
-                    errors.append(f"PHRASE #{total_blocks}: TEXT мало полей")
+                    errors.append(f"PHRASE #{total_blocks}: строка [POLL] мало полей")
+
                 i += 1
                 continue
+
 
             # 💬 новый формат внутри [POLL]
             if section == "POLL":
@@ -1914,7 +1938,7 @@ def _parse_allin_block(text: str):
 
             # 💬 новый формат внутри [TEXT]
             if section == "TEXT":
-                payload = line.replace("\\n", "\n")
+                payload = _nl(line)
                 parts = [p.strip() for p in payload.split("|") if p.strip()]
                 # формат: вопрос | ответ
                 if len(parts) >= 2:
@@ -3203,6 +3227,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
