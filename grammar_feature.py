@@ -373,10 +373,19 @@ def _kb_read_controls() -> InlineKeyboardMarkup:
     )
 
 
-async def _replace_content(chat_id: int, state: FSMContext, send_factory) -> Optional[Message]:
-    # 💬 сначала шлём новый контент, потом удаляем старый (чтобы не потерять экран при таймауте)
+async def _replace_content(
+    chat_id: int,
+    state: FSMContext,
+    send_factory=None,
+    *,
+    send_coro=None,
+) -> Optional[Message]:
+    # 💬 backward compatibility: поддерживаем старые вызовы send_coro=...
     st = await state.get_data()
     old_id = st.get("gram_content_msg_id")
+
+    if send_factory is None and send_coro is not None:
+        send_factory = send_coro  # 💬 принимаем старый параметр, чтобы не падало
 
     async def _call():
         if callable(send_factory):
