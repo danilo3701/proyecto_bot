@@ -1572,6 +1572,12 @@ def _normalize_nl(text: str) -> str:
     # 💬 нормализуем переносы строк из текста админки и убираем лишний слэш перед переносом
     if not isinstance(text, str):
         return ""
+        
+    if not text:
+        return text
+    text = text.replace("\\\n", "\n").replace("\\\r\n", "\n")  # 💬 убираем одиночный слэш перед реальным переносом
+    text = text.replace("\\n", "\n")  # 💬 превращаем \\n в настоящий перенос
+    return text
 
     s = text.replace("\r\n", "\n").replace("\r", "\n")
 
@@ -1589,12 +1595,12 @@ def _normalize_nl(text: str) -> str:
 
 # ─── Негативный фидбек при ошибке (квиз) ───────────────────────
 NEGATIVE_STICKERS = [
-      "CAACAgIAAxkBAAIRIGlE3W3MzKs6hfGC6PBO1kNZnIkdAAKhMgACnIfBSFQYZ8fI6S5UNgQ.",  # 💬 вставь сюда ID стикера №1
+      "CAACAgIAAxkBAAIRIGlE3W3MzKs6hfGC6PBO1kNZnIkdAAKhMgACnIfBSFQYZ8fI6S5UNgQ.",  # 💬 
       "CAACAgIAAxkBAAIQtGlExnTmmic3O0KvpIIspVsWb7JzAAKvEAACH1yYSbY5sQMKIUkvNgQ",  # 💬 №2
       "CAACAgIAAxkBAAIQwGlEyGHOeggqkrRWCRSJ8wk16SlYAAKGAAPBnGAM5riI3F3JHAQ2BA",  # 💬 №3
       "CAACAgIAAxkBAAIRJmlE3iEgwjBN2ZJagKtYmbauKs-kAALVCgAC16xhS8dwLdmVKEAtNgQ",  # 💬 №4
       "CAACAgIAAxkBAAIRMGlE3pe_U8eaS2iRnDKdmV1Vb1m-AAIVMAACvxdJSHkF7H2f3kAaNgQ",  # 💬 №5
-      "CAACAgIAAxkBAAIRNGlE3q8aCIWKQZTrDaPe_iTl4l8AA-svAAJLt1FJWR9bn1FKlyY2BA",  # 💬 вставь сюда ID стикера №1
+      "CAACAgIAAxkBAAIRNGlE3q8aCIWKQZTrDaPe_iTl4l8AA-svAAJLt1FJWR9bn1FKlyY2BA",  # 💬
       "CAACAgIAAxkBAAIROmlE3vTINWHAQRbefMkaaQgQ0FjWAAIrEAACIfiYSfeadbBgPmtmNgQ",  # 💬 №2
       "CAACAgIAAxkBAAIRPmlE30Jnig-Oi5-n16Uuyi3FeJ_sAAIzAQACUomRI9GLrMjcGVmbNgQ",  # 💬 №3
       "CAACAgIAAxkBAAIRQmlE31ct037BwKN26N_p-8L765eNAAImAQACUomRI3VoLZaREiseNgQ",  # 💬 №4
@@ -5999,6 +6005,9 @@ async def send_one_vocab_quiz(message: Message, state: FSMContext):
     vocab_list = get_vocab_list(data)
     idx       = data.get("vocab_index", 0)
     
+    chat_id = message.chat.id if hasattr(message, "chat") else data.get("last_chat_id")  # 💬 фикс: chat_id всегда определён
+
+    
     # 💬 что делает эта часть: гарантированно получаем chat_id (даже если пришли из таймаута с ChatFullInfo)
     chat_id = getattr(getattr(message, "chat", None), "id", None)
     if chat_id is None:
@@ -6607,6 +6616,26 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     correct  = data["current_correct_option_id"]
     is_correct = (selected == correct)
 
+    if is_correct:
+        qc = data.get("quiz_correct_total", 0) + 1  # 💬 прогресс: считаем правильные poll-quiz
+        await state.update_data(quiz_correct_total=qc)
+
+    poll_msg_id = data.get("current_poll_message_id")  # 💬 id сообщения с poll
+    try:
+        await bot.set_message_reaction(
+            chat_id=poll_answer.user.id,
+            message_id=poll_msg_id,
+            reaction=[ReactionTypeEmoji(emoji="✅" if is_correct else "❌")]
+        )  # 💬 реакция бота прямо на poll
+    except Exception:
+        pass
+
+
+    await asyncio.sleep(1.5)  # 💬 даём пользователю увидеть результат
+    try:
+        await bot.delete_message(poll_answer.user.id, poll_msg_id)  # 💬 удаляем poll
+    except Exception:
+        pass
 
 
     # 💬 Реакция на правильный ответ к самому квизу (🎉)
@@ -6958,12 +6987,17 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
                 return await send_one_vocab(_fake_msg(), state)
 
             # 💬 textquiz тоже нет — обычный offer_continue
-            oc_scene = random.choice(scenarios["offer_continue"])
-            buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
-            kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-            await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
-            await state.set_state(LessonStates.showing_vocab)
-            return await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+            scene = scenario_vocab["offer_continue_block"]  # 💬 блок Continue
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=btn, callback_data=f"scenario_vocab:offer_continue:{btn}")]
+                for btn in scene["buttons"]
+            ])  # 💬 inline-кнопки вместо reply keyboard
+            
+            oc_msg = await bot.send_message(poll_answer.user.id, scene["text"], reply_markup=kb)
+            await state.update_data(current_scene=scene, last_oc_msg_id=oc_msg.message_id)
+            await state.set_state(LessonStates.showing_vocab)  # 💬 дальше ждём callback
+            return
+
 
 
 
