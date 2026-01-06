@@ -5998,6 +5998,25 @@ async def send_one_vocab_quiz(message: Message, state: FSMContext):
     topic_key = data["selected_topic"]
     vocab_list = get_vocab_list(data)
     idx       = data.get("vocab_index", 0)
+    
+    # 💬 что делает эта часть: гарантированно получаем chat_id (даже если пришли из таймаута с ChatFullInfo)
+    chat_id = getattr(getattr(message, "chat", None), "id", None)
+    if chat_id is None:
+        chat_id = getattr(message, "id", None) or data.get("last_chat_id")
+    await state.update_data(last_chat_id=chat_id)
+
+    # 💬 что делает эта часть: если message не настоящий Message (таймаут) — создаём фейковый Message для функций, где нужен message.chat.id
+    if not hasattr(message, "chat"):
+        fake_chat = Chat(id=chat_id, type="private")
+        fake_user = User(id=chat_id, is_bot=False, first_name="")
+        message = Message(
+            message_id=0,
+            date=datetime.datetime.now(),
+            chat=fake_chat,
+            from_user=fake_user,
+            text=""
+        )
+
 
     # 1) Если вышли за пределы — сначала ревью ошибок, потом меню
     if idx >= len(vocab_list):
