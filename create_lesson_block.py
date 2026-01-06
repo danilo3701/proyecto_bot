@@ -48,6 +48,14 @@ def get_topics_dir() -> Path:
             continue
     return Path("topics")
 
+def _is_railway_topics_file(path: str | Path) -> bool:
+    # 💬 проверяем что файл реально лежит в Railway Volume (/data/topics)
+    try:
+        topics_dir = Path("/data/topics").resolve()
+        p = Path(path).resolve()
+        return str(p).startswith(str(topics_dir) + os.sep) and p.suffix.lower() == ".json"
+    except Exception:
+        return False
 
 
 
@@ -433,7 +441,9 @@ async def get_category_or_ads(message: Message, state: FSMContext):
             tid = _make_tid(name)
             rows.append([(name, f"adm:topic:{tid}")])
 
+        rows.append([("🏠 В меню /addtopic", "adm:home")])  # 💬 быстрый выход без тупиков
         rows.append([("⬅️ Закрыть", "adm:close")])
+
 
         kb = _ikb(rows)
 
@@ -497,6 +507,17 @@ async def admin_close(cb: CallbackQuery, state: FSMContext):
     await state.update_data(**{ADMIN_INLINE_MSG_ID_KEY: None})
     await cb.answer()
 
+@router.callback_query(F.data == "adm:home")
+async def admin_home(cb: CallbackQuery, state: FSMContext):
+    # 💬 выходим из inline меню и возвращаемся в /addtopic
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+    await cb.answer()
+    return await start_adding_topic(cb.message, state)
+
+
 @router.callback_query(F.data.startswith("adm:topic:"))
 async def admin_open_topic(cb: CallbackQuery, state: FSMContext):
     # 💬 открываем тему по callback (без ввода названия)
@@ -541,7 +562,10 @@ async def admin_open_topic(cb: CallbackQuery, state: FSMContext):
     kb = _ikb([
         [("🗑 Удалить тему", f"adm:topic_del:{tid}")],
         [("⬅️ К списку тем", "adm:topics")],
+        [("🏠 В меню /addtopic", "adm:home")],  # 💬 выход из админки
+        [("⬅️ Закрыть", "adm:close")],          # 💬 закрыть inline
     ])
+
 
     await _inline_replace(cb, state, f"✅ Открыта тема: <b>{title}</b>\nЧто сделать?", kb)
     await cb.answer()
@@ -591,6 +615,8 @@ async def admin_delete_topic_ask(cb: CallbackQuery, state: FSMContext):
     kb = _ikb([
         [("✅ Удалить", f"adm:topic_del_ok:{tid}"), ("🚫 Отмена", f"adm:topic:{tid}")],
         [("⬅️ К списку тем", "adm:topics")],
+        [("🏠 В меню /addtopic", "adm:home")],  # 💬 выход без тупика
+        [("⬅️ Закрыть", "adm:close")],
     ])
 
     await _inline_replace(cb, state, f"🗑 Удалить тему: <b>{shown}</b>\nПодтверди действие.", kb)
@@ -614,6 +640,11 @@ async def admin_delete_topic_do(cb: CallbackQuery, state: FSMContext):
     if not path.exists():
         await cb.answer("Файл уже отсутствует", show_alert=True)
         return
+    if not _is_railway_topics_file(path):
+        # 💬 запрещаем удаление вне RailwayData (/data/topics)
+        await cb.answer("Удаление разрешено только для /data/topics", show_alert=True)
+        return
+
 
     try:
         os.remove(path)
@@ -631,7 +662,11 @@ async def admin_delete_topic_do(cb: CallbackQuery, state: FSMContext):
     )
 
     if not files:
-        kb = _ikb([[("⬅️ Закрыть", "adm:close")]])
+        kb = _ikb([
+            [("🏠 В меню /addtopic", "adm:home")],  # 💬 выход из админки
+            [("⬅️ Закрыть", "adm:close")]
+        ])
+
         await _inline_replace(cb, state, "✅ Тема удалена.\nТем больше нет.", kb)
         await cb.answer()
         return
@@ -640,7 +675,8 @@ async def admin_delete_topic_do(cb: CallbackQuery, state: FSMContext):
     for nm in files[:30]:
         t = _make_tid(nm)
         rows.append([(nm, f"adm:topic:{t}")])
-
+        
+    rows.append([("🏠 В меню /addtopic", "adm:home")])
     rows.append([("⬅️ Закрыть", "adm:close")])
 
     kb = _ikb(rows)
@@ -1142,9 +1178,14 @@ async def confirm_delete_topic(message: Message, state: FSMContext):
     if not topic_path or not os.path.exists(topic_path):
         await message.answer("⚠️ Файл темы не найден. Возможно, тема не из /data/topics.")
         return await start_adding_topic(message, state)
+    if not _is_railway_topics_file(topic_path):
+        # 💬 запрещаем удаление вне RailwayData (/data/topics)
+        await message.answer("⚠️ Удаление разрешено только для тем из RailwayData: /data/topics.")
+        return await start_adding_topic(message, state)
 
     try:
         os.remove(topic_path)
+        
     except Exception:
         logging.exception("confirm_delete_topic: cannot remove %s", topic_path)
         await message.answer("❌ Не смог удалить файл темы. Проверь права Railway Volume.")
@@ -2972,9 +3013,10 @@ async def handle_edit_action(message: Message, state: FSMContext):
         await message.answer("📝 Введите произвольный текст:", reply_markup=ReplyKeyboardRemove())
         return await state.set_state(EditTopicStates.waiting_text_block)
     if text.startswith("↩️"):
-        # Возврат в основное меню создания/просмотра
-        await send_post_menu(message.chat.id, message.bot)
+        # 💬 возврат без падения: send_post_menu принимает (message, state)
+        await send_post_menu(message, state)
         return
+
     await message.answer("❗ Пожалуйста, выберите один из пунктов меню.")
 
 
@@ -3161,6 +3203,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
