@@ -27,6 +27,8 @@ def get_topics_dir() -> Path:
     return Path("topics")
 
 
+
+
 from aiogram import Router, Bot
 from aiogram import F
 from aiogram.filters import StateFilter
@@ -1579,9 +1581,12 @@ async def import_vocab_allin_bulk(message: Message, state: FSMContext):
     phase.setdefault("phrases", []).extend(phrases_objs)
     added_cnt = len(phase.get("phrases", []) or []) - before_cnt
 
-    # 💬 сохраняем строго в topic_path, чтобы не ломать Railway DATA
-    with open(topic_path, "w", encoding="utf-8") as f:
-        json.dump(topic_data, f, ensure_ascii=False, indent=2)
+    # 💬 сохраняем сразу в /data/topics (Railway Volume) атомарно, без риска частичной записи
+    ok = atomic_save_json(topic_path, topic_data)
+    if not ok:
+        await message.answer("❌ Не смог сохранить в topics. Проверь Railway Volume и права записи.")
+        return
+
 
     await state.update_data(topic=topic_data)
 
@@ -2131,57 +2136,39 @@ async def handle_vocab_text(message: Message, state: FSMContext):
 
 from pathlib import Path
 import time
-
-@router.message(NewTopicStates.waiting_vocab_photo, F.content_type.in_(["photo","video","animation","sticker","text"]))
+@router.message(NewTopicStates.waiting_vocab_photo, F.content_type.in_(["photo", "video", "animation", "sticker", "text"]))
 async def receive_vocab_media(message: Message, state: FSMContext):
-    """
-    Сохраняем в тему либо:
-      • JPG/PNG → media_type="photo"
-      • MP4/GIF → media_type="animation"
-      • Стикер → media_type="sticker"
-      • URL (текст) — по расширению решаем, что это за медиа
-    """
-    data       = await state.get_data()
-    topic      = data["topic"]
-    topic_path = data["topic_path"]
+    # 💬 сохраняем фото/медиа как Telegram file_id (или URL) прямо в JSON, без скачивания на диск
+    data = await state.get_data()
+    topic = data.get("topic") or {}
+    topic_path = data.get("topic_path")
 
-    # создаём папку темы внутри vocab_images:
-    theme_dir = Path("vocab_images") / topic["title"]
-    theme_dir.mkdir(parents=True, exist_ok=True)
+    if not topic_path:
+        await message.answer("⚠️ Ошибка: не найден topic_path. Попробуй заново открыть создание темы.")
+        return
 
-    entry = {"type": "photo"}  # общий «photo»-блок, но с уточнением media_type
+    entry = {"type": "photo"}  # 💬 единый формат блока фото/медиа
 
-    # 1) Если это стикер — просто сохраняем file_id
+    # 1) Стикер
     if message.sticker:
         entry["media_type"] = "sticker"
-        entry["photo"]      = message.sticker.file_id
+        entry["photo"] = message.sticker.file_id
 
-    # 2) Если видео/GIF (Telegram animation или video)
+    # 2) GIF/Видео (animation или video)
     elif message.animation or message.video:
         media = message.animation or message.video
         entry["media_type"] = "animation"
-        stamp = int(time.time())
-        fname = f"vocab_{stamp}_{media.file_id[-5:]}.mp4"
-        dest  = theme_dir / fname
-        file  = await message.bot.get_file(media.file_id)
-        await message.bot.download_file(file.file_path, dest)
-        entry["photo"] = str(dest).replace("\\", "/")
+        entry["photo"] = media.file_id
 
-    # 3) Если фото — сохраняем JPG
+    # 3) Фото
     elif message.photo:
-        ph    = message.photo[-1]
+        ph = message.photo[-1]
         entry["media_type"] = "photo"
-        stamp = int(time.time())
-        fname = f"vocab_{stamp}_{ph.file_id[-5:]}.jpg"
-        dest  = theme_dir / fname
-        file  = await message.bot.get_file(ph.file_id)
-        await message.bot.download_file(file.file_path, dest)
-        entry["photo"] = str(dest).replace("\\", "/")
+        entry["photo"] = ph.file_id
 
-    # 4) Если пользователь прислал текст — считаем URL или sticker_id
+    # 4) Текст (URL)
     else:
-        url = message.text.strip()
-        # очень простой детектор: mp4 → animation, .jpg/.png → photo, иначе sticker
+        url = (message.text or "").strip()
         lower = url.lower()
         if lower.endswith((".mp4", ".gif")):
             entry["media_type"] = "animation"
@@ -2191,25 +2178,35 @@ async def receive_vocab_media(message: Message, state: FSMContext):
             entry["media_type"] = "sticker"
         entry["photo"] = url
 
-    # если была подпись, сохраняем её
-    if data.get("vocab_caption"):
-        entry["text"] = data["vocab_caption"]
-        # очистим её, чтобы не дублировать
+    # 💬 подпись к фото (если была введена)
+    caption = data.get("vocab_caption")
+    if caption:
+        entry["text"] = caption
         await state.update_data(vocab_caption=None)
 
-    # добавляем в JSON-тему и сохраняем
     # 💬 сохраняем медиа-блок в выбранной фазе
-    data       = await state.get_data()
-    cp         = data["current_phase_id"]
-    topic      = data["topic"]
-    topic["vocab"][cp-1]["vocab"].append(entry)
+    try:
+        cp = int(data.get("current_phase_id") or 1)
+    except Exception:
+        cp = 1
 
+    topic.setdefault("vocab", [])
+    if not (1 <= cp <= len(topic["vocab"])):
+        await message.answer("⚠️ Ошибка: фаза не найдена. Выбери фазу заново.")
+        await send_post_menu(message, state)
+        return
 
+    topic["vocab"][cp - 1].setdefault("vocab", [])
+    topic["vocab"][cp - 1]["vocab"].append(entry)
+
+    import json
     with open(topic_path, "w", encoding="utf-8") as f:
         json.dump(topic, f, ensure_ascii=False, indent=2)
 
-    # 💬 Подтверждаем и сразу возвращаемся в пост-меню — без квиза к фото
-    await message.answer("Фото/медиа сохранено.", reply_markup=ReplyKeyboardRemove())
+    await state.update_data(topic=topic)
+
+    # 💬 подтверждаем и возвращаемся в меню поста
+    await message.answer("✅ Фото/медиа сохранено.", reply_markup=ReplyKeyboardRemove())
     await send_post_menu(message, state)
 
 
@@ -2778,6 +2775,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
