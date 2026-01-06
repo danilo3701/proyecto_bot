@@ -196,6 +196,7 @@ class NewTopicStates(StatesGroup):
     waiting_first_choice    = State()
     waiting_admin_choice    = State()
     waiting_edit_topic_choice = State()  # 💬 что делает эта часть: выбор существующей темы для редактирования
+    waiting_delete_topic_confirm = State()  # 💬 подтверждение удаления темы (файл из /data/topics)
     waiting_post_action     = State()  # 💬 после сохранения словаря/упражнения/видео: создать еще или вернуться
 
     # ----------- БЛОК “СЛОВАРЬ” -------------
@@ -451,6 +452,10 @@ async def handle_edit_topic_choice(message: Message, state: FSMContext):
 
     category = topic_data.get("category")
     keyboard = get_main_menu(category)  # 💬 что делает эта часть: для gram покажем Теория/Практика/Видео/Читать
+    # 💬 добавляем кнопку удаления темы в меню редактирования
+    if keyboard and hasattr(keyboard, "keyboard"):
+        keyboard.keyboard.append([KeyboardButton(text="🗑 Удалить тему")])
+
     title = topic_data.get("name") or name
 
     await message.answer(f"✏️ Редактируем тему: <b>{title}</b>", reply_markup=keyboard)
@@ -647,6 +652,19 @@ async def handle_main_menu(message: Message, state: FSMContext):
     data = await state.get_data()
     tp = data.get("topic")
     path = data.get("topic_path")
+
+    if text == "🗑 Удалить тему":
+        # 💬 просим подтверждение, чтобы случайно не удалить
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="✅ Удалить"), KeyboardButton(text="🚫 Отмена")],
+            ],
+            resize_keyboard=True
+        )
+        title = (tp or {}).get("visible_title") or (tp or {}).get("title") or "тема"
+        await message.answer(f"Подтверди удаление темы: {title}", reply_markup=kb)
+        await state.set_state(NewTopicStates.waiting_delete_topic_confirm)
+        return
 
     category = (tp or {}).get("category")
 
@@ -870,6 +888,43 @@ async def handle_main_menu(message: Message, state: FSMContext):
     # Если сообщение не соответствует ни одной кнопке, просим выбрать ещё раз
     await message.answer("❗ Выберите, пожалуйста, одну из кнопок Главного меню.")
 
+@router.message(NewTopicStates.waiting_delete_topic_confirm)
+async def confirm_delete_topic(message: Message, state: FSMContext):
+    # 💬 удаляем файл темы из Railway Volume (/data/topics) после подтверждения
+    txt = (message.text or "").strip()
+
+    if txt == "🚫 Отмена":
+        data = await state.get_data()
+        topic = data.get("topic") or {}
+        category = (topic.get("category") or "").strip()
+        kb = get_main_menu(category)
+        if kb and hasattr(kb, "keyboard"):
+            kb.keyboard.append([KeyboardButton(text="🗑 Удалить тему")])  # 💬 возвращаем кнопку
+        await message.answer("Ок, не удаляю.", reply_markup=kb)
+        await state.set_state(NewTopicStates.waiting_first_choice)
+        return
+
+    if txt != "✅ Удалить":
+        await message.answer("Нажми кнопку ✅ Удалить или 🚫 Отмена.")
+        return
+
+    data = await state.get_data()
+    topic_path = data.get("topic_path")
+
+    if not topic_path or not os.path.exists(topic_path):
+        await message.answer("⚠️ Файл темы не найден. Возможно, тема не из /data/topics.")
+        return await start_adding_topic(message, state)
+
+    try:
+        os.remove(topic_path)
+    except Exception:
+        logging.exception("confirm_delete_topic: cannot remove %s", topic_path)
+        await message.answer("❌ Не смог удалить файл темы. Проверь права Railway Volume.")
+        return await start_adding_topic(message, state)
+
+    await state.clear()
+    await message.answer("✅ Тема удалена из /data/topics.")
+    return await start_adding_topic(message, state)
 
 
 
@@ -2864,6 +2919,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
