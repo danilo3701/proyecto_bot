@@ -277,12 +277,16 @@ dp         = Dispatcher(storage=MemoryStorage())
 
 
 # ——— Подключаем админские роутеры ————————————————————————————————
-dp.include_router(edit_topic_router)
-dp.include_router(battle_router)  # 💬 подключаем хендлеры "Битвы"
-dp.include_router(bonuses_router)  # 💬 подключаем хендлеры «Бонусы»
-dp.include_router(podcasts_router)  # 💬 подключаем модуль "Подкасты"
+# 💬 Подключаем админские роутеры и модули
 dp.include_router(create_topic_router)
-dp.include_router(grammar_router)  # 💬 подключаем грамматику
+dp.include_router(edit_topic_router)
+
+dp.include_router(create_lesson_block_router)  # 💬 админка: ALL IN
+
+dp.include_router(battle_router)    # 💬 модуль "Битва"
+dp.include_router(bonuses_router)   # 💬 модуль "🎁 Бонусы"
+dp.include_router(podcasts_router)  # 💬 модуль "Подкасты"
+dp.include_router(grammar_router)   # 💬 модуль "Грамматика"
 
 
 # 💬 что делает эта часть: копируем темы из Railway Volume (/data/topics) в локальную ./topics,
@@ -5546,6 +5550,19 @@ async def lex_hide_phrase_by_number(message: Message, state: FSMContext):
 @track_handler
 async def send_failed_vocab(chat_id: int, state: FSMContext):
     data       = await state.get_data()
+            # 💬 если мы прыгаем к textquiz в конце = запоминаем куда вернуться после offer_continue
+            phrase_mode = bool(vocab_list) and vocab_list[0].get("type") == "phrase_select"
+            if phrase_mode:
+                next_set_start = (set_number + 1) * BLOCK
+                if next_set_start < len(q_positions):
+                    next_quiz_idx = q_positions[next_set_start]
+                    resume_idx = next_quiz_idx
+                    if next_quiz_idx > 0 and vocab_list[next_quiz_idx - 1].get("type") == "round_header":
+                        resume_idx = next_quiz_idx - 1
+                    await state.update_data(offer_continue_resume_index=resume_idx)
+                else:
+                    await state.update_data(offer_continue_resume_index=None)
+
     # 💬 защитный сброс: при входе в ревью ошибок никаких запланированных textquiz быть не должно
     await state.update_data(pending_textquiz=[])
 
@@ -5881,7 +5898,10 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
     # 💬 Таймаут считаем ОШИБКОЙ и повторяем её внутри текущего сета (6)
     data = await state.get_data()
     vocab_list = get_vocab_list(data)
-    BLOCK = 6  # фиксированный размер сета
+        
+    BLOCK = int(data.get("quiz_set_size") or 6)  # 💬 размер сета равен числу активных фраз после скрытия
+    BLOCK = max(BLOCK, 1)  # 💬 защита от 0 чтобы не словить деление на ноль
+
 
     # позиции только для обычных quiz
     q_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "quiz"]
@@ -6020,6 +6040,20 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
 
 
 
+def _select_pending_textquiz_for_set_phrase_mode(textquiz_positions: list, set_number: int) -> list:
+    # 💬 1 textquiz после раунда 1..3, после раунда 4 = остаток
+    if not textquiz_positions:
+        return []
+
+    if set_number < 3:
+        if set_number < len(textquiz_positions):
+            return [textquiz_positions[set_number]]
+        return []
+
+    # set_number == 3 (раунд 4)
+    if set_number < len(textquiz_positions):
+        return textquiz_positions[set_number:]
+    return []
 
 
 # 💬 Выбираем textquiz: по умолчанию 2 (мини-сессия), но можно запросить больше (финал)
