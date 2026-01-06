@@ -170,6 +170,7 @@ class NewTopicStates(StatesGroup):
     waiting_topic_description = State() # 💬 ввод описания темы
     waiting_first_choice    = State()
     waiting_admin_choice    = State()
+    waiting_edit_topic_choice = State()  # 💬 что делает эта часть: выбор существующей темы для редактирования
     waiting_post_action     = State()  # 💬 после сохранения словаря/упражнения/видео: создать еще или вернуться
 
     # ----------- БЛОК “СЛОВАРЬ” -------------
@@ -339,23 +340,20 @@ async def get_category_or_ads(message: Message, state: FSMContext):
         # очищаем текущий FSM-поток конструктора
         await state.clear()
 
-        from edit_topic_flow import EditTopicStates  # 💬 импортируем только STATES, без router
         topics_dir = get_topics_dir()  # 💬 что делает эта часть: читаем темы из Volume (/data/topics)
         files = [p.stem for p in topics_dir.glob("*.json")]
-
 
         if not files:
             await message.answer("⚠️ Нет доступных тем для редактирования.")
             return
 
-        buttons = [[KeyboardButton(text="🚫 Отмена")]] + [
-            [KeyboardButton(text=name)] for name in files
-        ]
+        buttons = [[KeyboardButton(text="🚫 Отмена")]] + [[KeyboardButton(text=name)] for name in files]
         keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
         await message.answer("✏️ Выберите тему для редактирования:", reply_markup=keyboard)
-        await state.set_state(EditTopicStates.choose_topic)
+        await state.set_state(NewTopicStates.waiting_edit_topic_choice)  # 💬 что делает эта часть: остаёмся в редакторе CreateLessonBlock
         return
+
 
     if text == "ADD":
         keyboard = ReplyKeyboardMarkup(
@@ -396,6 +394,41 @@ async def get_category_or_ads(message: Message, state: FSMContext):
     await state.set_state(NewTopicStates.adding_category)
 
 
+@router.message(NewTopicStates.waiting_edit_topic_choice)
+async def handle_edit_topic_choice(message: Message, state: FSMContext):
+    # 💬 что делает эта часть: открываем существующую тему из /data/topics и переходим в главное меню редактирования
+    name = (message.text or "").strip()
+
+    if name == "🚫 Отмена":
+        return await start_adding_topic(message, state)
+
+    topics_dir = get_topics_dir()  # 💬 что делает эта часть: читаем темы из Volume (/data/topics)
+    path = topics_dir / f"{name}.json"
+
+    if not path.exists():
+        await message.answer("⚠️ Тема не найдена. Выберите из списка или нажмите «🚫 Отмена».")
+        return
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            topic_data = json.load(f) or {}
+    except Exception:
+        await message.answer("⚠️ Не смог прочитать файл темы. Проверь JSON.")
+        return
+
+    await state.clear()  # 💬 что делает эта часть: начинаем редактирование как чистый flow
+    await state.update_data(
+        topic=topic_data,
+        topic_path=str(path),  # 💬 что делает эта часть: дальше все сохранения будут идти в этот же файл
+        topic_level=topic_data.get("level"),
+    )
+
+    category = topic_data.get("category")
+    keyboard = get_main_menu(category)  # 💬 что делает эта часть: для gram покажем Теория/Практика/Видео/Читать
+    title = topic_data.get("name") or name
+
+    await message.answer(f"✏️ Редактируем тему: <b>{title}</b>", reply_markup=keyboard)
+    await state.set_state(NewTopicStates.waiting_first_choice)
 
 
 
@@ -2527,6 +2560,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
