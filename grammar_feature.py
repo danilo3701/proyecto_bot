@@ -238,8 +238,9 @@ def _kb_menu() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics"),
-                InlineKeyboardButton(text="🏠 Домой", callback_data="gram:home"),
+                InlineKeyboardButton(text="🏠 В меню", callback_data="gram:menu"),  # 💬 возвращаемся в меню грамматики темы
             ],
+
         ]
     )
 
