@@ -2967,6 +2967,9 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
         if topic_key not in unlocked:
             unlocked.append(topic_key)
             save_user_data(data)
+        if topics.get(topic_key, {}).get("category") == "gram":
+            return await open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню
+
         return await lesson_menu_handler(query.message, state)
 
     # 💬 Если юзер уже подписан на обязательный канал — не показываем окно подписки
@@ -2994,6 +2997,9 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
         u.pop("ad_subscription", None)
 
         save_user_data(data)
+        if topics.get(topic_key, {}).get("category") == "gram":
+            return await open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню
+
         return await lesson_menu_handler(query.message, state)
 
 
