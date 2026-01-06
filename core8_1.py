@@ -7041,6 +7041,18 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     norm_variants = [normalize_textquiz(v) for v in variants]
     is_correct = user_norm in norm_variants
 
+    # 👍 Реакция на правильный ответ пользователя (как в quiz)  # 💬 ставим реакцию, чтобы не засорять чат
+    if is_correct:
+        try:
+            await bot.set_message_reaction(
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                reaction=[ReactionTypeEmoji(emoji="👍")],
+                is_big=True
+            )
+        except Exception:
+            pass
+
 
     # 🎉 1) Начисляем XP в сессии
     delta = random.randint(25, 35) if is_correct else -10
