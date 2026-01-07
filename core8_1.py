@@ -6762,10 +6762,10 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     chat_id = poll_answer.user.id
     poll_msg_id = data.get("current_poll_message_id")  # 💬 id сообщения с poll
 
-    # 💬 мгновенно закрываем poll, чтобы не «висел» таймер
+    # 💬 что делает эта часть: сразу закрываем poll и ставим реакцию, но НЕ удаляем poll тут
     if poll_msg_id:
         try:
-            await bot.stop_poll(chat_id=chat_id, message_id=poll_msg_id)
+            await bot.stop_poll(chat_id=chat_id, message_id=poll_msg_id)  # 💬 убираем "зависание" после ответа
         except Exception:
             pass
 
@@ -6775,7 +6775,7 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
                 message_id=poll_msg_id,
                 reaction=[ReactionTypeEmoji(emoji="🎉" if is_correct else "❌")],
                 is_big=True
-            )  # 💬 показываем результат сразу
+            )  # 💬 реакция видна сразу
         except Exception:
             pass
 
@@ -6905,8 +6905,9 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
 
     # 6) Ждём и удаляем опрос + feedback
-    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 пауза, затем удаляем poll/фидбек
+    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 даём увидеть реакцию и при необходимости fb
     chat_id = poll_answer.user.id
+
     def _fake_msg():
         # 💬 что делает эта часть: создаём Message-заглушку, чтобы переиспользовать smart_reply/send_one_vocab
         fc = Chat(id=chat_id, type="private")
@@ -6919,11 +6920,14 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
             text=""
         )
 
-    try: await bot.delete_message(chat_id, data.get("current_poll_message_id"))
-    # 💬 что делает эта часть: удаляем прогресс вместе с poll, чтобы не оставались хвосты
-    await _delete_vocab_quiz_progress_message(chat_id, state)
+    try:
+        pmid = data.get("current_poll_message_id")
+        if pmid:
+            await bot.delete_message(chat_id, pmid)  # 💬 удаляем poll
+        await _delete_vocab_quiz_progress_message(chat_id, state)  # 💬 удаляем прогресс вместе с poll
+    except Exception:
+        pass
 
-    except: pass
     if fb:
         try:
             await bot.delete_message(chat_id, fb.message_id)
