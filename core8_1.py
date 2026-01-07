@@ -229,11 +229,13 @@ from scenarios_estiloso8_1 import (                     # Вся диалого�
     start_stickers,
     menu_study_phrases,
     difficulty_intro_phrases,
-    vocab_start_phrases,       # Вступительные фразы для потока «Учить слова»
-    vocab_return_phrases,      # Фразы возвращения в поток  «Учить слова»
-    vocab_quiz_intro_phrases,  #  Фразы для введения в квиз после словаря
+    vocab_start_phrases,         # Вступительные фразы для потока «Учить слова»
+    vocab_return_phrases,        # Фразы возвращения в поток  «Учить слова»
+    vocab_quiz_intro_phrases,    # Фразы для введения в квиз после словаря
+    vocab_quiz_progress_phrases, # 💬 фразы для закреплённого прогресса poll-квизов
     go_next_phrases
 )
+
 from scenario.quiz_reactions import vocab_quiz_success_phrases  # 💬 централизованные позитивные реакции квиза
 
 from scenario.confirm_done_block import confirm_done
@@ -6000,6 +6002,66 @@ async def handle_lex_phrases_done(cb: CallbackQuery, state: FSMContext):
 # ------------------------------  
 #   ПОТОК по показу type: quiz по VOCAB 📘📘📘
 # ------------------------------
+
+# 💬 что делает эта часть: рисуем и поддерживаем закреплённый прогресс-бар для poll-квизов в текущей фазе
+def _render_vocab_quiz_progress(correct: int, total: int) -> str:
+    total = max(int(total or 0), 0)
+    correct = max(int(correct or 0), 0)
+
+    perc = int((min(correct, total) / total) * 100) if total else 0
+    filled = min(10, max(0, perc // 10))
+    bar = ("█" * filled) + ("░" * (10 - filled))
+
+    phrase = random.choice(vocab_quiz_progress_phrases) if vocab_quiz_progress_phrases else ""
+    return f"{bar} {perc}%\n{phrase}".strip()
+
+
+@track_handler
+async def _upsert_vocab_quiz_progress(chat_id: int, state: FSMContext):
+    # 💬 что делает эта часть: создаёт прогресс-сообщение один раз и дальше редактирует его на каждом квизе
+    data = await state.get_data()
+    vocab_list = get_vocab_list(data)
+
+    total = data.get("poll_total_phase")
+    if total is None:
+        total = sum(1 for b in vocab_list if (b or {}).get("type") == "quiz")
+        await state.update_data(poll_total_phase=total)
+
+    correct = data.get("quiz_correct_phase", 0)
+    text = _render_vocab_quiz_progress(correct, total)
+
+    msg_id = data.get("vocab_quiz_progress_msg_id")
+    try:
+        if msg_id:
+            await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=text)
+            return
+    except Exception:
+        pass
+
+    try:
+        m = await bot.send_message(chat_id, text)
+        await state.update_data(vocab_quiz_progress_msg_id=m.message_id)
+    except Exception:
+        pass
+
+
+@track_handler
+async def _clear_vocab_quiz_progress(chat_id: int, state: FSMContext):
+    # 💬 что делает эта часть: удаляет закреплённый прогресс при выходе из квизов
+    data = await state.get_data()
+    msg_id = data.get("vocab_quiz_progress_msg_id")
+
+    if msg_id:
+        try:
+            await bot.delete_message(chat_id, msg_id)
+        except Exception:
+            pass
+
+    await state.update_data(vocab_quiz_progress_msg_id=None, poll_total_phase=None)
+
+
+
+
 @track_handler
 async def send_one_vocab_quiz(message: Message, state: FSMContext):
     data      = await state.get_data()
@@ -6007,7 +6069,6 @@ async def send_one_vocab_quiz(message: Message, state: FSMContext):
     vocab_list = get_vocab_list(data)
     idx       = data.get("vocab_index", 0)
     
-    chat_id = message.chat.id if hasattr(message, "chat") else data.get("last_chat_id")  # 💬 фикс: chat_id всегда определён
 
     
     # 💬 что делает эта часть: гарантированно получаем chat_id (даже если пришли из таймаута с ChatFullInfo)
@@ -6031,6 +6092,7 @@ async def send_one_vocab_quiz(message: Message, state: FSMContext):
 
     # 1) Если вышли за пределы — сначала ревью ошибок, потом меню
     if idx >= len(vocab_list):
+
         failed = data.get("failed_vocab", [])
         if failed:
             await state.set_state(LessonStates.review_failed_vocab)
@@ -6039,44 +6101,41 @@ async def send_one_vocab_quiz(message: Message, state: FSMContext):
         return await lesson_menu_handler(message, state)
 
 
-    # 2) Берём текущий блок – гарантированно в диапазоне
+    # 2) Берём текущий блок, гарантированно в диапазоне
     block = vocab_list[idx]
 
-        # Если это не Quiz-блок — перенаправляем в общий отправщик
+    # 💬 что делает эта часть: если квизы закончились, удаляем закреплённый прогресс и выходим в общий отправщик
     if block.get("type") != "quiz":
+        await _clear_vocab_quiz_progress(chat_id, state)  # 💬 убираем прогресс-бар, так как квизы закончились
         return await send_one_vocab(message, state)
 
 
 
 
 
-    # 💬 что делает эта часть: всегда берём правильный как первый, выбираем ещё 2 неверных, перемешиваем
-    chat_id = message.chat.id  # 💬 фикс: гарантируем chat_id в этом хендлере
-    
+
+    # 💬 что делает эта часть: берём правильный как первый, выбираем ещё 2 неверных, перемешиваем и считаем correct_id
     raw_opts = list(block.get("options") or [])
-    correct_answer = (raw_opts[0].strip() if raw_opts and isinstance(raw_opts[0], str) else (block.get("correct_answer") or "").strip())
-    
+    correct_answer = (str(raw_opts[0]).strip() if raw_opts else (block.get("correct_answer") or "")).strip()
+
     wrong_pool: list[str] = []
     for o in raw_opts[1:]:
-        if not o:
-            continue
         oo = str(o).strip()
         if oo and oo != correct_answer and oo not in wrong_pool:
             wrong_pool.append(oo)
-    
+
     opts = [correct_answer] + wrong_pool[:2]  # 💬 Telegram quiz = ровно 3 варианта
-    
     if len(opts) < 3 or not correct_answer:
-        # 💬 если блок битый = не падаем, просто идём дальше
+        # 💬 что делает эта часть: если блок битый, не падаем, просто идём дальше
         await state.update_data(current_poll_id=None, current_correct_option_id=None, current_poll_message_id=None)
         await state.update_data(vocab_index=idx + 1)
         return await send_one_vocab(message, state)
-    
-    correct = block["correct_answer"]  # 💬 правильный ответ
-    wrongs = [o for o in block.get("options", []) if o != correct]
-    opts = [correct] + wrongs[:2]  # 💬 всегда 3 варианта
+
     random.shuffle(opts)
-    correct_id = opts.index(correct)
+    correct_id = opts.index(correct_answer)
+
+    await _upsert_vocab_quiz_progress(chat_id, state)  # 💬 сообщение 1: создаём или обновляем прогресс перед квизом
+
 
     
     poll_message = await bot.send_poll(
@@ -6263,25 +6322,26 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
 
     data = await state.get_data()
     if data.get("current_poll_id") != poll_id:
-        poll_msg_id = data.get("current_poll_message_id")
-    
-        # 💬 что делает эта часть: закрываем poll, ставим реакцию таймаута прямо на poll
-        if poll_msg_id:
-            try:
-                await bot.stop_poll(chat_id=chat_id, message_id=poll_msg_id)
-            except Exception:
-                pass
-            try:
-                await bot.set_message_reaction(
-                    chat_id=chat_id,
-                    message_id=poll_msg_id,
-                    reaction=[ReactionTypeEmoji(emoji="⏱")],
-                    is_big=True
-                )
-            except Exception:
-                pass
+        return  # 💬 квиз уже обработан или это не текущий poll
 
-        return
+    poll_msg_id = data.get("current_poll_message_id")
+
+    # 💬 что делает эта часть: закрываем poll и ставим реакцию таймаута прямо на poll
+    if poll_msg_id:
+        try:
+            await bot.stop_poll(chat_id=chat_id, message_id=poll_msg_id)
+        except Exception:
+            pass
+        try:
+            await bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=poll_msg_id,
+                reaction=[ReactionTypeEmoji(emoji="⏱")],
+                is_big=True
+            )
+        except Exception:
+            pass
+
 
     # 💬 сброс poll_id, чтобы не словить двойную обработку
     await state.update_data(current_poll_id=None)
@@ -6313,6 +6373,9 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
         await bot.delete_message(chat_id, fb.message_id)
     except Exception:
         pass
+        
+    await _upsert_vocab_quiz_progress(chat_id, state)  # 💬 сообщение 1: обновляем прогресс после таймаута
+
 
     # ─────────────────────────────────────────────
     # 💬 дальше = логика пересдачи внутри текущего сета
@@ -6838,38 +6901,12 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
             await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
             await state.set_state(LessonStates.showing_vocab)
 
+            await _clear_vocab_quiz_progress(chat_id, state)  # 💬 квизы закончились = убираем закреплённый прогресс-бар
+
             # 💬 1) Сначала задаём вопрос/кнопки offer_continue
             oc_msg = await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
-
-            # 💬 2) Затем считаем прогресс и показываем его на 5 сек
-            data2 = await state.get_data()
-            total_q = data2.get("total_quizzes_phase", data2.get("total_quizzes", 0))  # 💬 total по фазе
-            correct_q = (
-                data2.get("quiz_correct_phase", data2.get("quiz_correct_total", 0)) +
-                data2.get("textquiz_correct_phase", data2.get("textquiz_correct", 0))
-            )  # 💬 correct по фазе
-
-
-            correct_q = min(correct_q, total_q)
-            perc = int((correct_q / total_q) * 100) if total_q else 0
-
-            filled = perc // 10
-            empty  = 10 - filled
-            bar = "🟩" * filled + "⬜️" * empty
-
-            progress_text = f"📝 Прогресс по квизам:\n{bar} {perc}%\n{correct_q}/{total_q}"
-
-            # 💬 используем тот же chat_id, что и для _fake_msg()
-            asyncio.create_task(
-                send_and_auto_delete_text(
-                    bot,
-                    chat_id,
-                    progress_text,
-                    delay=5.0,  # ⏳ держим прогресс 5 секунд
-                )
-            )
-
             return oc_msg
+
 
         else:
             await state.update_data(vocab_index=nxt_q, current_poll_id=None)
