@@ -5997,6 +5997,21 @@ async def handle_lex_phrases_done(cb: CallbackQuery, state: FSMContext):
             await bot.delete_message(chat_id, msg_id)
         except Exception:
             pass
+    # 💬 что делает эта часть: старт фазы ALL IN = фиксируем total и сбрасываем уникальный прогресс poll-квизов
+    phrases = data.get("lex_active_phrases") or []
+    if not isinstance(phrases, list):
+        phrases = []
+    total_rounds = data.get("lex_round_total") or _lex_detect_total_rounds(phrases, default_total=4)
+
+    await state.update_data(
+        poll_total_phase=len(phrases) * int(total_rounds or 0),
+        poll_done_ids=[],
+        quiz_correct_phase=0,
+        quiz_correct_total=0,
+        vocab_quiz_progress_msg_id=None,
+        vocab_quiz_progress_last_phrase=None,
+    )
+
 
     # собираем 1-й раунд (round_idx=0)
     await _lex_prepare_round_session(state, round_idx=0)
@@ -6040,6 +6055,27 @@ def _render_vocab_quiz_progress(correct: int, total: int, phrase: str = "") -> s
     phrase = (phrase or "").strip()
     return f"{bar} {perc}%\n{phrase}".strip()
 
+# 💬 что делает эта часть: стабильный uid для poll-квиза, чтобы redo не увеличивал прогресс повторно
+def _poll_quiz_uid(block: dict, extra: str = "") -> str:
+    import hashlib
+
+    if not isinstance(block, dict):
+        return ""
+
+    q = str(block.get("question", "") or "").strip()
+    ca = str(block.get("correct_answer", "") or "").strip()
+    opts = block.get("options") or []
+
+    if isinstance(opts, list):
+        opts_s = "|".join(str(o or "").strip() for o in opts)
+    else:
+        opts_s = str(opts)
+
+    base = f"{q}|{ca}|{opts_s}"
+    if extra:
+        base = f"{extra}|{base}"
+
+    return hashlib.sha1(base.encode("utf-8")).hexdigest()[:12]
 
 
 @track_handler
@@ -6050,8 +6086,23 @@ async def _upsert_vocab_quiz_progress(chat_id: int, state: FSMContext):
 
     total = data.get("poll_total_phase")
     if total is None:
-        total = sum(1 for b in vocab_list if (b or {}).get("type") == "quiz")
+        # 💬 что делает эта часть: total считаем без redo-дублей
+        if data.get("lex_mode_active"):
+            phrases = data.get("lex_active_phrases") or []
+            if not isinstance(phrases, list):
+                phrases = []
+            total_rounds = data.get("lex_round_total") or _lex_detect_total_rounds(phrases, default_total=4)
+            total = len(phrases) * int(total_rounds or 0)
+        else:
+            uids = {
+                _poll_quiz_uid(b, extra=str(data.get("selected_phase_id", "")))
+                for b in vocab_list
+                if (b or {}).get("type") == "quiz"
+            }
+            total = len(uids)
+
         await state.update_data(poll_total_phase=total)
+
 
     correct = data.get("quiz_correct_phase", 0)
     # 💬 выбираем фразу без повтора подряд
@@ -6803,15 +6854,23 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     delta = random.randint(28, 37) if is_correct else -10
     await award_xp(delta, state)
 
-    # 💬 Счётчики правильных квизов: общий (для меню) + по фазе (для OfferContinue)
+    # 💬 Уникальный прогресс poll-квизов: redo не накручивает прогресс повторно
     if is_correct:
-        quiz_correct_total = data.get("quiz_correct_total", 0) + 1
-        quiz_correct_phase = data.get("quiz_correct_phase", 0) + 1  # 💬 прогресс именно внутри фазы
-        await state.update_data(
-            quiz_correct_total=quiz_correct_total,
-            quiz_correct_phase=quiz_correct_phase
-        )
-        # 💬 прогресс обновится перед следующим квизом, здесь уже удалили его вместе с poll
+        done_ids = data.get("poll_done_ids")
+        if not isinstance(done_ids, list):
+            done_ids = []
+
+        quiz_uid = _poll_quiz_uid(block, extra=str(data.get("selected_phase_id", "")))
+
+        if quiz_uid and quiz_uid not in done_ids:
+            done_ids.append(quiz_uid)
+            await state.update_data(
+                poll_done_ids=done_ids,
+                quiz_correct_phase=len(done_ids),
+                quiz_correct_total=data.get("quiz_correct_total", 0) + 1
+            )
+        else:
+            await state.update_data(poll_done_ids=done_ids)  # 💬 redo = уже было зачтено
 
 
 
@@ -7391,24 +7450,28 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
             await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 чтобы удалить после клика
 
 
-            # 💬 2) Считаем прогресс по квизам и показываем его на 5 сек, затем авто-удаляем
             data2 = await state.get_data()
-            total_q = data2.get("total_quizzes_phase", data2.get("total_quizzes", 0))  # 💬 total по фазе
-            correct_q = (
-                data2.get("quiz_correct_phase", data2.get("quiz_correct_total", 0)) +
-                data2.get("textquiz_correct_phase", data2.get("textquiz_correct", 0))
-            )  # 💬 correct по фазе
 
+            # 💬 что делает эта часть: OfferContinue показывает тот же poll progress-bar, что и основной поток poll-квизов
+            done_ids = data2.get("poll_done_ids")
+            if not isinstance(done_ids, list):
+                done_ids = []
 
-            # 💬 режем сверху, чтобы не было >100% из-за пересдач
-            correct_q = min(correct_q, total_q)
-            perc = int((correct_q / total_q) * 100) if total_q else 0
+            poll_done = len(done_ids)
 
-            filled = perc // 10
-            empty  = 10 - filled
-            bar = "🟩" * filled + "⬜️" * empty
+            poll_total = data2.get("poll_total_phase")
+            if poll_total is None:
+                vocab_list2 = get_vocab_list(data2)
+                uids2 = {
+                    _poll_quiz_uid(b, extra=str(data2.get("selected_phase_id", "")))
+                    for b in vocab_list2
+                    if (b or {}).get("type") == "quiz"
+                }
+                poll_total = len(uids2)
+                await state.update_data(poll_total_phase=poll_total)
 
-            progress_text = f"📝 Прогресс по квизам:\n{bar} {perc}%\n{correct_q}/{total_q}"
+            progress_text = _render_vocab_quiz_progress(poll_done, poll_total, phrase="")  # 💬 единый стиль █░ + %
+
 
             # 💬 не блокируем поток: показываем прогресс и удаляем его через 5 секунд
             asyncio.create_task(
