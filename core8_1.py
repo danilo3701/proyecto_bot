@@ -7970,13 +7970,18 @@ async def handle_confirm_done_vocab(message: Message, state: FSMContext):
             pass
 
 
-        # 🚫 Если отказались — показываем отказную ветку из сценария
         ref_scene = random.choice(scenarios["refusal"])
-        buttons = [[KeyboardButton(text=btn)] for btn in ref_scene["buttons"]]
-        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+        # 💬 что делает эта часть: показываем отказ только через Inline, ReplyKeyboard больше не используем
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=btn, callback_data=f"refusal:{btn}")]
+                for btn in ref_scene["buttons"]
+            ]
+        )
+
         await state.update_data(current_stage="refusal", current_scene=ref_scene)
         return await smart_reply(message, ref_scene["text"], reply_markup=kb, parse_mode="HTML")
-
 
 
 
@@ -8022,12 +8027,13 @@ async def handle_feedback_difficulty_vocab(message: Message, state: FSMContext):
         await state.update_data(vocab_index=next_idx)
         return await send_one_vocab(message, state)
 
-# 💬 иначе — стандартный offer_continue (код ниже без изменений)
+    # 💬 что делает эта часть: возвращаем правильный отступ, чтобы не ломался блок after else
 
     data = await state.get_data()
     topic_key = data["selected_topic"]
-    vocab_list= get_vocab_list(data)
+    vocab_list = get_vocab_list(data)
     next_idx = data.get("vocab_index", 0) + 1
+
 
     # ➕ Пропускаем textquiz, пока есть обычные quiz впереди
     if next_idx < len(vocab_list):
