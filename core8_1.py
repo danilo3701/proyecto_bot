@@ -6968,38 +6968,38 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     try:
         q_idx = q_positions.index(idx)
     except ValueError:
-        # на всякий случай: если попали сюда не с quiz — ищем ближайший следующий quiz
+        # на всякий случай: если попали сюда не с quiz = ищем ближайший следующий quiz
         nxt_q = next((i for i in range(idx + 1, len(vocab_list)) if vocab_list[i].get("type") == "quiz"), None)
+
         if nxt_q is None:
-                    # нет quiz → сразу в offer_continue
-        oc_scene = random.choice(scenarios["offer_continue"])
-        
-        # 💬 убираем старую ReplyKeyboard, чтобы она не висела
-        try:
-            rm = await bot.send_message(chat_id, "\u00AD", reply_markup=ReplyKeyboardRemove())
-            await _safe_delete_message(chat_id, rm.message_id)
-        except Exception:
-            pass
-        
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
-            for btn in oc_scene["buttons"]
-        ]])
-        
-        await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
-        await state.set_state(LessonStates.showing_vocab)
-        
-        await _clear_vocab_quiz_progress(chat_id, state)  # 💬 квизы закончились = чистим прогресс
-        
-        oc_msg = await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
-        await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 чтобы удалить после клика
-        return oc_msg
+            # 💬 нет quiz = сразу в offer_continue
+            oc_scene = random.choice(scenarios["offer_continue"])
 
+            # 💬 убираем старую ReplyKeyboard, чтобы она не висела
+            try:
+                rm = await bot.send_message(chat_id, "\u00AD", reply_markup=ReplyKeyboardRemove())
+                await _safe_delete_message(chat_id, rm.message_id)
+            except Exception:
+                pass
 
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
+                for btn in oc_scene["buttons"]
+            ]])
 
+            await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
+            await state.set_state(LessonStates.showing_vocab)
+
+            await _clear_vocab_quiz_progress(chat_id, state)  # 💬 квизы закончились = чистим прогресс
+
+            oc_msg = await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+            await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 чтобы удалить после клика
+            return oc_msg
         else:
+            # 💬 нашли следующий quiz = прыгаем на него
             await state.update_data(vocab_index=nxt_q, current_poll_id=None)
             return await send_one_vocab(_fake_msg(), state)
+
 
     block_start_q = (q_idx // BLOCK) * BLOCK
     block_end_q   = min(block_start_q + BLOCK, len(q_positions))
