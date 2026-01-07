@@ -6094,6 +6094,7 @@ async def send_one_vocab_quiz(message: Message, state: FSMContext):
 
     # 1) Если вышли за пределы — сначала ревью ошибок, потом меню
     if idx >= len(vocab_list):
+        await _clear_vocab_quiz_progress(message.chat.id, state)  # 💬 выходим из квизов = убираем закреплённый прогресс
 
         failed = data.get("failed_vocab", [])
         if failed:
@@ -6746,6 +6747,7 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
             quiz_correct_phase=quiz_correct_phase
         )
 
+    await _upsert_vocab_quiz_progress(poll_answer.user.id, state)  # 💬 сообщение 1: обновляем прогресс после ответа
 
 
     # 🔥 Level-Up: сохраняем прошлый глобальный XP
