@@ -1646,21 +1646,11 @@ async def send_post_menu(message: Message, state: FSMContext):
 
     # Составляем кнопки под тип последнего блока
     if last == "vocab":
-        category = (data.get("topic") or {}).get("category")
-
-        if category == "gram":
-            # 💬 что делает эта часть: меню Теории = только текст/фото/пулквизы/назад
-            rows = [
-                [KeyboardButton(text="📝 Текст"), KeyboardButton(text="🖼 Фото")],
-                [KeyboardButton(text="📥 Пулквизы")],
-            ]
-        else:
-            # 💬 лексика: быстрое меню, без bulk-кнопок TXT_QUIZ/QUIZ
-            rows = [
-                [KeyboardButton(text="📘VOC")],
-                [KeyboardButton(text="🔗 LINK"), KeyboardButton(text="🧩 ALL IN")],
-                [KeyboardButton(text="📝ТЕКСТ"), KeyboardButton(text="🖼FOTO")],
-            ]
+        # 💬 оставляем единый формат добавления контента = только ALL IN (phrases)
+        rows = [
+            [KeyboardButton(text="📘VOC")],
+            [KeyboardButton(text="🧩 ALL IN")],
+        ]
 
 
 
@@ -1709,8 +1699,10 @@ async def create_phase(message: Message, state: FSMContext):
     new_phase = {
         "phase_id": len(phases) + 1,
         "phase_name": phase_name,
-        "vocab": []
+        "vocab": [],
+        "phrases": []  # 💬 единый контейнер ALL IN для показа в боте
     }
+
     phases.append(new_phase)
     await state.update_data(topic=data["topic"], current_phase_id=new_phase["phase_id"])
     await message.answer(f"Фаза «{phase_name}» создана.")
@@ -1761,48 +1753,16 @@ async def choose_phase(message: Message, state: FSMContext):
 
 
 
-
-
 @router.message(NewTopicStates.waiting_vocab_textquiz_bulk)
 async def import_vocab_textquiz_bulk(message: Message, state: FSMContext):
-    # 💬 парсим многострочный список TEXT_QUIZ: "вопрос | ответ"
-    raw = message.text or ""
-    lines_in = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    added, skipped, skipped_idx = 0, 0, []
-    data = await state.get_data()
-    cp = data["current_phase_id"]
-    topic = data["topic"]
-    phase = topic["vocab"][cp-1]
-    # 💬 гарантируем наличие пула для распределения
-    if "textquiz_pool" not in phase:
-        phase["textquiz_pool"] = []
-
-    for i, ln in enumerate(lines_in, start=1):
-        parts = [p.strip() for p in ln.split("|")]
-        if len(parts) < 2 or not parts[0] or not parts[1]:
-            skipped += 1
-            skipped_idx.append(i)
-            continue
-        q, a = parts[0], parts[1]
-        block = {
-            "type": "textquiz",             # 💬 тип квиза
-            "question": q,
-            "correct_answer": a
-        }
-        phase["textquiz_pool"].append(block)
-        added += 1
-
-    # 💾 сохраняем файл
-    with open(data["topic_path"], "w", encoding="utf-8") as f:
-        json.dump(topic, f, ensure_ascii=False, indent=2)
-
-    # 🧾 отчёт
-    if skipped:
-        await message.answer(f"✅ Импорт TEXT_QUIZ: добавлено {added}.\n⚠️ Пропущено: {skipped} (строки: {', '.join(map(str, skipped_idx))}).", reply_markup=ReplyKeyboardRemove())
-    else:
-        await message.answer(f"✅ Импорт TEXT_QUIZ: добавлено {added}.", reply_markup=ReplyKeyboardRemove())
-
+    # 💬 bulk TEXT_QUIZ отключён = всё добавляем через ALL IN (phrases)
+    await message.answer(
+        "❌ Импорт TEXT_QUIZ отключён.\n"
+        "Используй 🧩 ALL IN и секции [TEXT]/[POLL] внутри [PHRASE].",
+        reply_markup=ReplyKeyboardRemove()
+    )
     await send_post_menu(message, state)
+
 
 
 def _parse_allin_block(text: str):
@@ -2083,55 +2043,13 @@ async def import_vocab_allin_bulk(message: Message, state: FSMContext):
 
 @router.message(NewTopicStates.waiting_vocab_quiz_bulk)
 async def import_vocab_quiz_bulk(message: Message, state: FSMContext):
-    # 💬 парсим многострочный список QUIZ: "вопрос | правильный | неверный1 | неверный2 | объяснение(опц.)"
-    raw = message.text or ""
-    lines_in = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    added, skipped, skipped_idx = 0, 0, []
-    data = await state.get_data()
-    cp = data["current_phase_id"]
-    topic = data["topic"]
-    phase = topic["vocab"][cp-1]
-    # 💬 гарантируем наличие пула для распределения
-    if "quiz_pool" not in phase:
-        phase["quiz_pool"] = []
-
-    for i, ln in enumerate(lines_in, start=1):
-        parts = [p.strip() for p in ln.split("|")]
-        # нужно минимум 4 поля: вопрос, правильный, неверный1, неверный2
-        if len(parts) < 4 or not parts[0] or not parts[1] or not parts[2] or not parts[3]:
-            skipped += 1
-            skipped_idx.append(i)
-            continue
-
-        q, correct, wrong1, wrong2 = parts[0], parts[1], parts[2], parts[3]
-        # объяснение неправильного (опционально)
-        expl_wrong = parts[4] if len(parts) >= 5 else ""
-        # 💬 дефолтное объяснение, если пусто или '-'
-        if not expl_wrong or expl_wrong == "-":
-            expl_wrong = f"Неверно. Правильно: {correct}."
-
-        block = {
-            "type": "quiz",                  # 💬 обычный quiz
-            "question": q,
-            "options": [correct, wrong1, wrong2],
-            "correct_answer": correct,
-            "explanation_wrong": expl_wrong
-        }
-        phase["quiz_pool"].append(block)
-        added += 1
-
-    # 💾 сохраняем файл
-    with open(data["topic_path"], "w", encoding="utf-8") as f:
-        json.dump(topic, f, ensure_ascii=False, indent=2)
-
-    # 🧾 отчёт
-    if skipped:
-        await message.answer(f"✅ Импорт QUIZ: добавлено {added}.\n⚠️ Пропущено: {skipped} (строки: {', '.join(map(str, skipped_idx))}).", reply_markup=ReplyKeyboardRemove())
-    else:
-        await message.answer(f"✅ Импорт QUIZ: добавлено {added}.", reply_markup=ReplyKeyboardRemove())
-
+    # 💬 bulk QUIZ отключён = всё добавляем через ALL IN (phrases)
+    await message.answer(
+        "❌ Импорт QUIZ отключён.\n"
+        "Используй 🧩 ALL IN и секции [TEXT]/[POLL] внутри [PHRASE].",
+        reply_markup=ReplyKeyboardRemove()
+    )
     await send_post_menu(message, state)
-
 
 
 # ——— FINISH TextQuiz ———
@@ -2213,19 +2131,24 @@ async def handle_post_action(message: Message, state: FSMContext):
     # ─── БЛОК «СЛОВАРЬ» ───
     if last_block == "vocab":
         # 💬 что делает эта часть: алиасы кнопок Теории (gram) на существующие ветки
-        if text == "📝 Текст":
-            text = "📝ТЕКСТ"
-        elif text == "🖼 Фото":
-            text = "🖼FOTO"
-        elif text == "📥 Пулквизы":
-            text = "📥QUIZ"
-        if text == "🔗 LINK":
-            cp = data.get("current_phase_id")
-            if not cp:
-                await message.answer("⚠️ Сначала выбери фазу через 📘VOC.")  # 💬 защита от сохранения без выбранной фазы
-                return
-            await message.answer("Введите ЗАГОЛОВОК словаря:")  # 💬 старый режим LINK
-            await state.set_state(NewTopicStates.waiting_vocab_title)
+        # 💬 отключаем старые ветки vocab = оставляем только ALL IN (phrases)
+        disabled = {
+            "🔗 LINK",
+            "📥QUIZ",
+            "📥TXT_QUIZ",
+            "📝ТЕКСТ",
+            "🖼FOTO",
+            "📝 Текст",
+            "🖼 Фото",
+            "📥 Пулквизы",
+        }
+        if text in disabled:
+            await message.answer(
+                "❌ Эта ветка отключена.\n"
+                "Используй 🧩 ALL IN (phrases).",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            await send_post_menu(message, state)
             return
 
         if text == "🧩 ALL IN":
@@ -2253,11 +2176,11 @@ async def handle_post_action(message: Message, state: FSMContext):
             return
 
         if text == "📘VOC":
-            data   = await state.get_data()
-            topic  = data["topic"]
+            data = await state.get_data()
+            topic = data["topic"]
             phases = topic.get("vocab", [])
 
-            # 1) Фаз вообще нет → сначала создаём первую фазу
+            # 💬 всегда даём выбор фазы, чтобы можно было перейти на 2-ю, 3-ю и т.д.
             if not phases:
                 await message.answer(
                     "Введите НАЗВАНИЕ новой ФАЗЫ:",
@@ -2266,8 +2189,6 @@ async def handle_post_action(message: Message, state: FSMContext):
                 await state.set_state(NewTopicStates.waiting_phase_name)
                 return
 
-            # 2) Фазы уже есть → ВСЕГДА даём выбор фазы (как в редактировании)
-            # 💬 всегда спрашиваем фазу, чтобы можно было перейти на 2-ю, 3-ю и т.д.
             buttons = [
                 [KeyboardButton(text=f"{p['phase_id']}. {p['phase_name']}")]
                 for p in phases
@@ -3235,6 +3156,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
