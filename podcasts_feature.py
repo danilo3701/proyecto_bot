@@ -1189,6 +1189,16 @@ def _kb_admin_episode_categories() -> InlineKeyboardMarkup:
         ]
     )
     
+def _kb_admin_episode_levels() -> InlineKeyboardMarkup:
+    # 💬 выбор уровня эпизода (сохраняем как level_key = B/X1/X2)
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="«B» Basico (базовый)", callback_data="podadm:eplvl:B")],
+            [InlineKeyboardButton(text="«X1» A2–B1 (средний)", callback_data="podadm:eplvl:X1")],
+            [InlineKeyboardButton(text="«X2» B2–C1 (продвинутый)", callback_data="podadm:eplvl:X2")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")],
+        ]
+    )
 
 
 def _kb_admin_authors_pick(data: Dict[str, Any], cb_prefix: str) -> InlineKeyboardMarkup:
@@ -1391,10 +1401,25 @@ async def admin_pick_author(cb: CallbackQuery, state: FSMContext) -> None:
 async def admin_pick_episode_category(cb: CallbackQuery, state: FSMContext) -> None:
     # 💬 сохраняем категорию эпизода и идём к вводу названия
     cat = cb.data.split(":")[-1]
-    await state.update_data(adm_episode_category=cat)  # 💬 пишем в FSM, потом положим в JSON
-    await state.set_state(PodcastAdminStates.waiting_episode_title)
+    await state.update_data(adm_episode_category=cat)  # 💬 сохраняем категорию
+    await state.set_state(PodcastAdminStates.choosing_episode_level)  # 💬 дальше выбираем уровень
+    await cb.message.answer("Выбери уровень эпизода:", reply_markup=_kb_admin_episode_levels())
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("podadm:eplvl:"), PodcastAdminStates.choosing_episode_level)
+async def admin_pick_episode_level(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 выбираем уровень и идём к вводу названия
+    level = cb.data.split(":")[-1].strip().upper()
+    if level not in {"B", "X1", "X2"}:
+        await cb.answer("❗ Используй кнопки уровня (B, X1, X2).", show_alert=True)
+        return
+
+    await state.update_data(adm_episode_level=level)  # 💬 сохраняем level_key в FSM
+    await state.set_state(PodcastAdminStates.waiting_episode_title)  # 💬 дальше как было
     await cb.message.answer("Теперь пришли название эпизода (одной строкой).")
     await cb.answer()
+
 
 @router.callback_query(F.data.startswith("podadm:pick_author_rename:"))
 async def admin_pick_author_rename(cb: CallbackQuery, state: FSMContext) -> None:
@@ -1500,6 +1525,10 @@ async def admin_episode_audio(message: Message, state: FSMContext) -> None:
     desc = st.get("adm_episode_desc")
     category = (st.get("adm_episode_category") or "").strip()  # 💬 категория эпизода из выбора кнопкой
 
+    level_key = (st.get("adm_episode_level") or "B").strip().upper()  # 💬 уровень эпизода для фильтра (fallback = B)
+    if level_key not in {"B", "X1", "X2"}:
+        level_key = "X1"  # 💬 защита от мусора
+
 
     if not author_id or not title:
         await message.answer("Ошибка состояния. Зайди заново: /podcasts_admin")
@@ -1516,6 +1545,7 @@ async def admin_episode_audio(message: Message, state: FSMContext) -> None:
         "title": title,
         "description": desc,
         "category": category,
+        "level_key": level_key,  # 💬 уровень эпизода для фильтрации (B / X1 / X2)
         "audio_file_id": audio_file_id,
         "audio_type": audio_type,
         "order": order,
