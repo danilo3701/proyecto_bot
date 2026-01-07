@@ -645,7 +645,7 @@ def _lex_get_selected_phase(data: dict) -> dict | None:
 
 def _lex_render_phrase_list(phrases: list) -> str:
     # 💬 что делает эта часть: рисуем разминку перед квизами = жирный заголовок + жирный italic список + italic подсказки
-    lines = ["🧠<b>Разминка перед квизами</b>"]
+    lines = ["🧠<b>Разминка перед квизами</b>", ""]  # 💬 пустая строка после заголовка
 
     if not phrases:
         lines.append("<i>Фраз не осталось</i>")
@@ -658,9 +658,11 @@ def _lex_render_phrase_list(phrases: list) -> str:
             continue
         lines.append(f"<b><i>{i}. {es} = {ru}</i></b>")
 
+    lines.append("")  # 💬 пустая строка перед инструкцией
     lines.append("<i>✍🏽 Пришли в чат номер тех фраз, которые тебе скучны</i>")
-    lines.append("<i>🗑  Они удалятся автоматически</i>")
+    lines.append("<i>🗑 Они удалятся автоматически</i>")
     return "\n".join(lines)
+
 
 
 def _lex_pick_round_item(seq, round_idx: int):
