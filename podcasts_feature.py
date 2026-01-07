@@ -26,6 +26,7 @@ from aiogram.types import (
     ReplyKeyboardRemove,
 )
 from aiogram.exceptions import TelegramBadRequest  # 💬 чтобы не падать, если сообщение уже удалено
+from aiogram.dispatcher.event.bases import SkipHandler  # 💬 пропускаем обработку, чтобы не блокировать админку
 
 
 router = Router()
@@ -859,12 +860,13 @@ async def pod_filter_input(message: Message, state: FSMContext) -> None:
     # 💬 пользователь пишет ключи фильтра в чат, мы удаляем сообщение и обновляем инлайн-список
     st = await state.get_data()
     if not st.get("pod_ctx") or st.get("pod_screen") != "episodes":
-        return
+        raise SkipHandler  # 💬 не наш экран = отдаём сообщение другим хендлерам (админке и т.д.)
 
     author_id = st.get("pod_author_id")
     nav_msg_id = st.get("pod_nav_msg_id")
     if not author_id or not nav_msg_id:
-        return
+        raise SkipHandler  # 💬 нет контекста = не блокируем другие сценарии
+
 
     raw = (message.text or "").strip()
     upper = raw.upper()
