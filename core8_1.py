@@ -1589,9 +1589,12 @@ def _normalize_nl(text: str) -> str:
     # 💬 кейс со скрина: "слэш + реальный перенос" = превращаем в чистый перенос
     s = s.replace("\\\n", "\n")
 
+
     # 💬 кейс из ALL IN: приходит как \\n или \\\\n
     s = s.replace("\\\\n", "\n")  # 💬 двойной слэш + n
     s = s.replace("\\n", "\n")    # 💬 одиночный слэш + n
+    s = re.sub(r"\\\s*\n", "\n", s)  # 💬 убираем одиночный "\" перед реальным переносом строки
+
 
     return s
 
@@ -6006,7 +6009,8 @@ async def handle_lex_phrases_done(cb: CallbackQuery, state: FSMContext):
 # ------------------------------
 
 # 💬 что делает эта часть: рисуем и поддерживаем закреплённый прогресс-бар для poll-квизов в текущей фазе
-def _render_vocab_quiz_progress(correct: int, total: int) -> str:
+def _render_vocab_quiz_progress(correct: int, total: int, phrase: str = "") -> str:
+    # 💬 рисуем прогресс-бар + % + фразу (фразу выбираем снаружи, чтобы не повторялась)
     total = max(int(total or 0), 0)
     correct = max(int(correct or 0), 0)
 
@@ -6014,8 +6018,9 @@ def _render_vocab_quiz_progress(correct: int, total: int) -> str:
     filled = min(10, max(0, perc // 10))
     bar = ("█" * filled) + ("░" * (10 - filled))
 
-    phrase = random.choice(vocab_quiz_progress_phrases) if vocab_quiz_progress_phrases else ""
+    phrase = (phrase or "").strip()
     return f"{bar} {perc}%\n{phrase}".strip()
+
 
 
 @track_handler
@@ -6030,21 +6035,49 @@ async def _upsert_vocab_quiz_progress(chat_id: int, state: FSMContext):
         await state.update_data(poll_total_phase=total)
 
     correct = data.get("quiz_correct_phase", 0)
-    text = _render_vocab_quiz_progress(correct, total)
+    # 💬 выбираем фразу без повтора подряд
+    last_phrase = data.get("vocab_quiz_progress_last_phrase")
+    phrase = ""
+    if vocab_quiz_progress_phrases:
+        pool = [p for p in vocab_quiz_progress_phrases if p != last_phrase] or vocab_quiz_progress_phrases
+        phrase = random.choice(pool)
+
+    text = _render_vocab_quiz_progress(correct, total, phrase=phrase)
+    await state.update_data(vocab_quiz_progress_last_phrase=phrase)  # 💬 запоминаем, чтобы не повторять подряд
 
     msg_id = data.get("vocab_quiz_progress_msg_id")
     try:
         if msg_id:
-            await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=text)
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=text,
+                parse_mode="HTML"
+            )
+            return
+    except TelegramBadRequest as e:
+        # 💬 если текст тот же = не шлём новый (иначе будет дубль)
+        if "message is not modified" in str(e).lower():
             return
     except Exception:
         pass
 
-    try:
-        m = await bot.send_message(chat_id, text)
-        await state.update_data(vocab_quiz_progress_msg_id=m.message_id)
-    except Exception:
-        pass
+    msg = await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+    await state.update_data(vocab_quiz_progress_msg_id=msg.message_id)
+
+
+
+@track_handler
+async def _delete_vocab_quiz_progress_message(chat_id: int, state: FSMContext):
+    # 💬 удаляем прогресс-строку вместе с poll-квизом (не сбрасываем счётчики фазы)
+    data = await state.get_data()
+    msg_id = data.get("vocab_quiz_progress_msg_id")
+    if msg_id:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except TelegramBadRequest:
+            pass
+    await state.update_data(vocab_quiz_progress_msg_id=None)
 
 
 @track_handler
@@ -6370,6 +6403,8 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
         pmid = data.get("current_poll_message_id")
         if pmid:
             await bot.delete_message(chat_id, pmid)
+            await _delete_vocab_quiz_progress_message(chat_id, state)  # 💬 удаляем прогресс вместе с poll по таймауту
+
     except Exception:
         pass
     try:
@@ -6377,7 +6412,8 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
     except Exception:
         pass
         
-    await _upsert_vocab_quiz_progress(chat_id, state)  # 💬 сообщение 1: обновляем прогресс после таймаута
+    # 💬 прогресс обновится перед следующим квизом, здесь уже удалили его вместе с poll
+
 
 
     # ─────────────────────────────────────────────
@@ -6459,17 +6495,34 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
             return await send_one_vocab(_fake_msg(), state)
 
         oc_scene = random.choice(scenarios["offer_continue"])
-        buttons = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
-        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+        
+        # 💬 убираем старую ReplyKeyboard, чтобы она не висела
+        try:
+            rm = await bot.send_message(chat_id, "\u00AD", reply_markup=ReplyKeyboardRemove())
+            await _safe_delete_message(chat_id, rm.message_id)
+        except Exception:
+            pass
+        
+        # 💬 Inline-кнопки offer_continue
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
+            for btn in oc_scene["buttons"]
+        ]])
+        
         await state.update_data(
             current_stage="offer_continue",
             current_scene=oc_scene,
+            last_oc_msg_id=None,  # 💬 обновим после отправки
             redo_stack=[],
             redo_active=False,
             pending_textquiz=[],
         )
         await state.set_state(LessonStates.showing_vocab)
-        return await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+        
+        oc_msg = await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+        await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 чтобы удалить после клика
+        return oc_msg
+
 
     # 💬 обычный режим = сначала добиваем линейку сета
     if next_linear is not None:
@@ -6504,17 +6557,35 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
         return await send_one_vocab(_fake_msg(), state)
 
     oc_scene = random.choice(scenarios["offer_continue"])
-    buttons = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
-    kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+    
+    # 💬 убираем старую ReplyKeyboard, чтобы она не висела
+    try:
+        rm = await bot.send_message(chat_id, "\u00AD", reply_markup=ReplyKeyboardRemove())
+        await _safe_delete_message(chat_id, rm.message_id)
+    except Exception:
+        pass
+    
+    # 💬 Inline-кнопки offer_continue
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
+        for btn in oc_scene["buttons"]
+    ]])
+    
     await state.update_data(
         current_stage="offer_continue",
         current_scene=oc_scene,
+        last_oc_msg_id=None,  # 💬 обновим после отправки
         redo_stack=[],
         redo_active=False,
         pending_textquiz=[],
     )
     await state.set_state(LessonStates.showing_vocab)
-    return await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+    
+    oc_msg = await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+    await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 чтобы удалить после клика
+    return oc_msg
+
+
 
 @track_handler
 async def _review_failed_vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMContext, delay: int = 20):
@@ -6702,6 +6773,8 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     await asyncio.sleep(1.5)  # 💬 даём пользователю увидеть результат
     try:
         await bot.delete_message(poll_answer.user.id, poll_msg_id)  # 💬 удаляем poll
+        await _delete_vocab_quiz_progress_message(poll_answer.user.id, state)  # 💬 удаляем прогресс вместе с poll
+
     except Exception:
         pass
 
@@ -6746,8 +6819,8 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
             quiz_correct_total=quiz_correct_total,
             quiz_correct_phase=quiz_correct_phase
         )
+        # 💬 прогресс обновится перед следующим квизом, здесь уже удалили его вместе с poll
 
-    await _upsert_vocab_quiz_progress(poll_answer.user.id, state)  # 💬 сообщение 1: обновляем прогресс после ответа
 
 
     # 🔥 Level-Up: сохраняем прошлый глобальный XP
@@ -6898,18 +6971,30 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
         # на всякий случай: если попали сюда не с quiz — ищем ближайший следующий quiz
         nxt_q = next((i for i in range(idx + 1, len(vocab_list)) if vocab_list[i].get("type") == "quiz"), None)
         if nxt_q is None:
-            # нет quiz → сразу в offer_continue
-            oc_scene = random.choice(scenarios["offer_continue"])
-            buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
-            kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-            await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
-            await state.set_state(LessonStates.showing_vocab)
+                    # нет quiz → сразу в offer_continue
+        oc_scene = random.choice(scenarios["offer_continue"])
+        
+        # 💬 убираем старую ReplyKeyboard, чтобы она не висела
+        try:
+            rm = await bot.send_message(chat_id, "\u00AD", reply_markup=ReplyKeyboardRemove())
+            await _safe_delete_message(chat_id, rm.message_id)
+        except Exception:
+            pass
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
+            for btn in oc_scene["buttons"]
+        ]])
+        
+        await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
+        await state.set_state(LessonStates.showing_vocab)
+        
+        await _clear_vocab_quiz_progress(chat_id, state)  # 💬 квизы закончились = чистим прогресс
+        
+        oc_msg = await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+        await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 чтобы удалить после клика
+        return oc_msg
 
-            await _clear_vocab_quiz_progress(chat_id, state)  # 💬 квизы закончились = убираем закреплённый прогресс-бар
-
-            # 💬 1) Сначала задаём вопрос/кнопки offer_continue
-            oc_msg = await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
-            return oc_msg
 
 
         else:
@@ -7222,8 +7307,11 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         extra_fb = None
 
 
-     # 💬 Ждём перед удалением всех сообщений
-    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)
+    # 💬 Ждём перед удалением всех сообщений (чтобы реакция 👍 успела быть видимой)
+    await asyncio.sleep(
+        max(SLEEP_AFTER_FEEDBACK_S, REPLY_REACTION_READ_DELAY_S) if is_correct else SLEEP_AFTER_FEEDBACK_S
+    )
+
     # 💬 5) Удаляем всё: вопрос, ответ пользователя, XP-фидбэк и (если есть) extra-фидбэк
     chat_id   = message.chat.id
     prompt_id = (await state.get_data()).get("last_prompt_id")
@@ -7282,16 +7370,25 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         else:
             # 💬 мини-сессия textquiz закончилась → обычный offer_continue
             oc_scene = random.choice(scenarios["offer_continue"])
-            buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
-            kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-            await state.update_data(
-                current_stage="offer_continue",
-                current_scene=oc_scene,
-            )
+            
+            # 💬 убираем старую ReplyKeyboard, чтобы она не висела
+            try:
+                rm = await bot.send_message(message.chat.id, "\u00AD", reply_markup=ReplyKeyboardRemove())
+                await _safe_delete_message(message.chat.id, rm.message_id)
+            except Exception:
+                pass
+            
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
+                for btn in oc_scene["buttons"]
+            ]])
+            
+            await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
             await state.set_state(LessonStates.showing_vocab)
-
-            # 💬 1) Сначала задаём вопрос «Ну что, продолжим?» с кнопками
+            
             oc_msg = await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+            await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 чтобы удалить после клика
+
 
             # 💬 2) Считаем прогресс по квизам и показываем его на 5 сек, затем авто-удаляем
             data2 = await state.get_data()
