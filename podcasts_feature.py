@@ -299,6 +299,24 @@ def _kb_subscribe_check() -> InlineKeyboardMarkup:
     )
 
 
+def _episodes_menu_html(author_name: str) -> str:
+    # 💬 текст экрана эпизодов (HTML) = весь блок жирный, курсив сохраняем
+    return (
+        f"<b>🎙 {author_name} 🇪🇸\n\n"
+        "Ключи уровня\n"
+        "B = Basico <i>(базовый)</i>\n"
+        "X1 = A2–B1 <i>(средний)</i>\n"
+        "X2 = B2–C1 <i>(продвинутый)</i>\n\n"
+        "Ключи темы\n"
+        "C = Conversación <i>(болтовня 2 людей)</i>\n"
+        "D = Diario <i>(дневной | новости)</i>\n"
+        "G = GramaLexico <i>(грамматика | лексика)</i>\n\n"
+        "Можно = уровень + тема\n"
+        "<i>Пример:</i> X1 G\n\n"
+        "RESET = Сброс фильтров\n\n"
+        "Выбери эпизод:</b>"
+    )
+
 # -----------------------------
 # 🎛️ UI builders
 # -----------------------------
