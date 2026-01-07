@@ -6781,6 +6781,26 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
     # 💬 Реакция на правильный ответ к самому квизу (🎉)
     if is_correct:
+        
+    chat_id = poll_answer.user.id
+    poll_msg_id = data.get("current_poll_message_id")
+
+    if poll_msg_id:
+        try:
+            await bot.stop_poll(chat_id=chat_id, message_id=poll_msg_id)  # 💬 закрываем poll сразу, чтобы квиз не «висел»
+        except Exception:
+            pass
+
+        try:
+            await bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=poll_msg_id,
+                reaction=[ReactionTypeEmoji(emoji="🎉" if is_correct else "❌")],
+                is_big=True
+            )  # 💬 мгновенная реакция на правильный или неправильный ответ
+        except Exception:
+            pass
+
         try:
             msg_id = data.get("current_poll_message_id")  # id квиза-полла, который мы показывали
             if msg_id:
@@ -6828,8 +6848,9 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     topic   = data.get("selected_topic", "unknown")
     xp_before = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
 
-    # 4) Запись XP в общее накопление (один раз)
-    await add_xp(user_id, topic, delta)
+    # 💬 что делает эта часть: не блокируем хендлер тяжёлой записью в файл, чтобы квиз не "вис"
+    asyncio.create_task(add_xp(user_id, topic, delta))
+
 
     # 🔥 Проверяем, перешли ли на новый уровень
     xp_after = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
@@ -6936,6 +6957,9 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
         )
 
     try: await bot.delete_message(chat_id, data.get("current_poll_message_id"))
+    # 💬 что делает эта часть: удаляем прогресс вместе с poll, чтобы не оставались хвосты
+    await _delete_vocab_quiz_progress_message(chat_id, state)
+
     except: pass
     if fb:
         try:
