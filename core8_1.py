@@ -642,18 +642,22 @@ def _lex_get_selected_phase(data: dict) -> dict | None:
 
 
 def _lex_render_phrase_list(phrases: list) -> str:
-    # 💬 что делает эта часть: рендерим список фраз с индексами 1..N без лишнего форматирования
+    # 💬 что делает эта часть: рисуем разминку перед квизами = жирный заголовок + жирный italic список + italic подсказки
+    lines = ["🧠<b>Разминка перед квизами</b>"]
+
     if not phrases:
-        return "Ничего не осталось\n\nНажми ✅ Готово"
-    lines = ["Отметь известные фразы = отправь номер в чат", ""]
+        lines.append("<i>Фраз не осталось</i>")
+        return "\n".join(lines)
+
     for i, ph in enumerate(phrases, start=1):
         es = (ph.get("es") or "").strip()
         ru = (ph.get("ru") or "").strip()
         if not es and not ru:
             continue
-        lines.append(f"{i}) {es} = {ru}")
-    lines.append("")
-    lines.append("Нажми ✅ Готово = начнём квизы")
+        lines.append(f"<b><i>{i}. {es} = {ru}</i></b>")
+
+    lines.append("<i>✍🏽 Пришли в чат номер тех фраз, которые тебе скучны</i>")
+    lines.append("<i>🗑  Они удалятся автоматически</i>")
     return "\n".join(lines)
 
 
