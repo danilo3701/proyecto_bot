@@ -912,7 +912,7 @@ async def pod_filter_input(message: Message, state: FSMContext) -> None:
             ok = False
 
         if not ok:
-            warn = await message.answer("❗ Используй ключи на экране. Можно = уровень + тема. Пример = X1 G. RESET = сброс")  # 💬 коротко и без мусор
+            warn = await message.answer("🙂 Используй ключи которые в меню")  # 💬 короткое предупреждение на 1 секунду без засора чата
             await asyncio.sleep(1)
             await _safe_delete_message(message.bot, message.chat.id, warn.message_id)
             return
