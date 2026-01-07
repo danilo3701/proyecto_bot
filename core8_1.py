@@ -1668,12 +1668,24 @@ async def smart_reply(
         chat_id = target.chat.id
     else:
         chat_id = getattr(target, "id", None)
+
     # Показываем «typing…»
     await bot.send_chat_action(chat_id, action=ChatAction.TYPING)
+
     # Задержка: 10 мс на символ, но не больше 3 сек
-    await asyncio.sleep(min(len(text) * 0.01, 3.0))
+    safe_text = "" if text is None else str(text)
+    await asyncio.sleep(min(len(safe_text) * 0.01, 3.0))
+
+    # 💬 если HTML (или не задан) — оборачиваем в жирный
+    pm = kwargs.get("parse_mode")
+    if pm is None or pm == "HTML":
+        kwargs["parse_mode"] = "HTML"
+        send_text = _boldify_html(safe_text)
+    else:
+        send_text = safe_text
+
     # Отправляем сообщение
-    return await bot.send_message(chat_id, text, **kwargs)
+    return await bot.send_message(chat_id, send_text, **kwargs)
 
 
 
