@@ -6923,6 +6923,18 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     # 6) Ждём и удаляем опрос + feedback
     await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 пауза, затем удаляем poll/фидбек
     chat_id = poll_answer.user.id
+    def _fake_msg():
+        # 💬 что делает эта часть: создаём Message-заглушку, чтобы переиспользовать smart_reply/send_one_vocab
+        fc = Chat(id=chat_id, type="private")
+        fu = User(id=poll_answer.user.id, is_bot=False, first_name="")
+        return Message(
+            message_id=0,
+            date=datetime.datetime.now(),
+            chat=fc,
+            from_user=fu,
+            text=""
+        )
+
     try: await bot.delete_message(chat_id, data.get("current_poll_message_id"))
     except: pass
     if fb:
@@ -6970,9 +6982,8 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     except ValueError:
         # на всякий случай: если попали сюда не с quiz = ищем ближайший следующий quiz
         nxt_q = next((i for i in range(idx + 1, len(vocab_list)) if vocab_list[i].get("type") == "quiz"), None)
-
         if nxt_q is None:
-            # 💬 нет quiz = сразу в offer_continue
+            # нет quiz = сразу в offer_continue
             oc_scene = random.choice(scenarios["offer_continue"])
 
             # 💬 убираем старую ReplyKeyboard, чтобы она не висела
@@ -6995,10 +7006,12 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
             oc_msg = await smart_reply(_fake_msg(), oc_scene["text"], reply_markup=kb, parse_mode="HTML")
             await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 чтобы удалить после клика
             return oc_msg
-        else:
-            # 💬 нашли следующий quiz = прыгаем на него
-            await state.update_data(vocab_index=nxt_q, current_poll_id=None)
-            return await send_one_vocab(_fake_msg(), state)
+
+        # 💬 есть следующий quiz = продолжаем с него
+        idx = nxt_q
+        q_idx = q_positions.index(idx)
+        await state.update_data(vocab_index=idx, current_poll_id=None)
+
 
 
     block_start_q = (q_idx // BLOCK) * BLOCK
@@ -7015,17 +7028,6 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
     # следующий quiz по прямой внутри текущего сета
     next_linear = q_positions[q_idx + 1] if (q_idx + 1) < block_end_q else None
-
-    def _fake_msg():
-        fc = Chat(id=chat_id, type="private")
-        fu = User(id=poll_answer.user.id, is_bot=False, first_name="")
-        return Message(
-            message_id=0,
-            date=datetime.datetime.now(),
-            chat=fc,
-            from_user=fu,
-            text=""
-        )
 
     # 💬 если уже в режиме пересдач — игнорируем линейку и крутим ТОЛЬКО redo
     if data.get("redo_active"):
@@ -8047,10 +8049,16 @@ async def handle_feedback_difficulty_vocab(message: Message, state: FSMContext):
 
     # 4️⃣ Иначе — стандартное “offer_continue”
     oc_scene = random.choice(scenarios["offer_continue"])
-    buttons = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
-    kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+    oc_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
+        for btn in oc_scene["buttons"]
+    ]])  # 💬 показываем offer_continue через inline
+
     await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
-    return await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+    oc_msg = await smart_reply(message, oc_scene["text"], reply_markup=oc_kb, parse_mode="HTML")
+    await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 чтобы удалить после клика
+    return oc_msg
 
 
 
