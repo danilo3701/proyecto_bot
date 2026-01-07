@@ -300,7 +300,7 @@ def _kb_subscribe_check() -> InlineKeyboardMarkup:
 
 
 def _episodes_menu_html(author_name: str, level_key: Optional[str] = None, topic_key: Optional[str] = None) -> str:
-    # 💬 текст экрана эпизодов (HTML) = весь блок жирный, курсив сохраняем, показываем активный фильтр
+    # 💬 текст экрана эпизодов (HTML) = весь блок жирный, курсив сохраняем, показываем активный фильтр + инструкция
 
     level_map = {
         "B": "Basico",
@@ -321,24 +321,27 @@ def _episodes_menu_html(author_name: str, level_key: Optional[str] = None, topic
 
     flt_line = ""
     if parts:
-        flt_line = f"\nОТФИЛЬТРОВАНО ПО = {' + '.join(parts)}\n"
+        flt_line = f"\nОТФИЛЬТРОВАНО ПО = {' + '.join(parts)}\n"  # 💬 строка активного фильтра
 
     return (
         f"<b>🎙 {author_name} 🇪🇸"
         f"{flt_line}\n"
-        "Ключи уровня\n"
+        "💫 Фильтруй эпизоды по ключам\n"
+        "✍🏽 Напиши в чат букву\n\n"
+        "🔑 Ключи уровня\n"
         "B = Basico <i>(базовый)</i>\n"
         "X1 = A2–B1 <i>(средний)</i>\n"
         "X2 = B2–C1 <i>(продвинутый)</i>\n\n"
-        "Ключи темы\n"
+        "🔑 Ключи темы\n"
         "C = Conversación <i>(болтовня 2 людей)</i>\n"
         "D = Diario <i>(дневной | новости)</i>\n"
         "G = GramaLexico <i>(грамматика | лексика)</i>\n\n"
-        "Можно = уровень + тема\n"
+        "<b>Можно = уровень + тема</b>\n"
         "<i>Пример:</i> <b>X1 G</b>\n\n"
-        "RESET = Сброс фильтров\n\n"
+        "<b>RESET</b> = Сброс фильтров\n\n"
         "Выбери эпизод:</b>"
     )
+
 
 
 # -----------------------------
@@ -568,7 +571,7 @@ async def podcasts_open(message: Message, state: FSMContext) -> None:
         pod_hint_msg_id=None,
         pod_audio_msg_id=None,  # 💬 id аудио текущего эпизода
         pod_filter_level=None,  # 💬 фильтр уровня (B/X1/X2)
-        pod_filter_topic=None,  # 💬 фильтр темы (C/D/N/G)
+        pod_filter_topic=None,  # 💬 фильтр темы (C/D/G)
         pod_ep_page=0,  # 💬 пагинация списка эпизодов
         pod_screen="authors",  # 💬 текущий экран подкастов (authors/episodes/player/notes)
 
@@ -598,6 +601,11 @@ async def pod_checksub(cb: CallbackQuery, state: FSMContext) -> None:
         pod_notes_idx=0,  # 💬 индекс для режима "Мои заметки"
         pod_frag_msg_id=None,
         pod_nav_msg_id=cb.message.message_id,
+        pod_filter_level=None,  # 💬 фильтр уровня
+        pod_filter_topic=None,  # 💬 фильтр темы
+        pod_ep_page=0,  # 💬 пагинация эпизодов
+        pod_screen="authors",  # 💬 после проверки подписки мы на авторах
+
     )
 
     try:
@@ -915,31 +923,7 @@ async def pod_filter_input(message: Message, state: FSMContext) -> None:
     author = data.get("authors", {}).get(author_id, {})
     author_name = author.get("name", "Автор")
 
-    legend = (
-        "Ключи:\n"
-        "B = Basico\n"
-        "X1 = A2–B1\n"
-        "X2 = B2–C1\n"
-        "\n"
-        "C = Conversación\n"
-        "D = Дневной\n"
-        "N = Новости\n"
-        "G = GramaLexico\n"
-        "\n"
-        "Можно = уровень + тема\n"
-        "RESET = сброс"
-    )  # 💬 легенда фильтров
-
-    flt = []
-    if level_key:
-        flt.append(level_key)
-    if topic_key:
-        flt.append(topic_key)
-
-    if flt:
-        text = f"🎙 {author_name}\n\nОТФИЛЬТРОВАНО ПО = {' + '.join(flt)}\n\n{legend}\n\nВыбери эпизод:"
-    else:
-        text = f"🎙 {author_name}\n\n{legend}\n\nВыбери эпизод:"
+    text = _episodes_menu_html(author_name, level_key, topic_key)  # 💬 HTML меню + строка фильтра
 
     try:
         await message.bot.edit_message_text(
@@ -947,6 +931,7 @@ async def pod_filter_input(message: Message, state: FSMContext) -> None:
             message_id=int(nav_msg_id),
             text=text,
             reply_markup=_kb_episodes(data, author_id, level_key, topic_key, 0),
+            parse_mode="HTML",
         )
     except Exception:
         pass
@@ -1048,37 +1033,15 @@ async def pod_back_inline(cb: CallbackQuery, state: FSMContext) -> None:
         topic_key = st.get("pod_filter_topic")
         page = int(st.get("pod_ep_page") or 0)
 
-        legend = (
-            "Ключи:\n"
-            "B = Basico\n"
-            "X1 = A2–B1\n"
-            "X2 = B2–C1\n"
-            "\n"
-            "C = Conversación\n"
-            "D = Дневной\n"
-            "N = Новости\n"
-            "G = GramaLexico\n"
-            "\n"
-            "Можно = уровень + тема\n"
-            "RESET = сброс"
-        )  # 💬 легенда фильтров
-
-        flt = []
-        if level_key:
-            flt.append(level_key)
-        if topic_key:
-            flt.append(topic_key)
-
-        if flt:
-            text = f"🎙 {author_name}\n\nОТФИЛЬТРОВАНО ПО = {' + '.join(flt)}\n\n{legend}\n\nВыбери эпизод:"
-        else:
-            text = f"🎙 {author_name}\n\n{legend}\n\nВыбери эпизод:"
+        text = _episodes_menu_html(author_name, level_key, topic_key)  # 💬 HTML меню + строка фильтра
 
         msg = await cb.bot.send_message(
             chat_id=cb.message.chat.id,
             text=text,
             reply_markup=_kb_episodes(data, author_id, level_key, topic_key, page),
-        )  # 💬 возвращаем список эпизодов без reply-кнопок
+            parse_mode="HTML",
+        )  # 💬 возвращаем список эпизодов без мусора
+
 
         await state.update_data(pod_nav_msg_id=msg.message_id, pod_screen="episodes")  # 💬 держим актуальный экран
     else:
