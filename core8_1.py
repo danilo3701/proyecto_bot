@@ -6759,35 +6759,13 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     is_correct = (selected == correct)
 
 
-    poll_msg_id = data.get("current_poll_message_id")  # 💬 id сообщения с poll
-    try:
-        await bot.set_message_reaction(
-            chat_id=poll_answer.user.id,
-            message_id=poll_msg_id,
-            reaction=[ReactionTypeEmoji(emoji="✅" if is_correct else "❌")]
-        )  # 💬 реакция бота прямо на poll
-    except Exception:
-        pass
-
-
-    await asyncio.sleep(1.5)  # 💬 даём пользователю увидеть результат
-    try:
-        await bot.delete_message(poll_answer.user.id, poll_msg_id)  # 💬 удаляем poll
-        await _delete_vocab_quiz_progress_message(poll_answer.user.id, state)  # 💬 удаляем прогресс вместе с poll
-
-    except Exception:
-        pass
-
-
-    # 💬 Реакция на правильный ответ к самому квизу (🎉)
-    if is_correct:
-        
     chat_id = poll_answer.user.id
-    poll_msg_id = data.get("current_poll_message_id")
+    poll_msg_id = data.get("current_poll_message_id")  # 💬 id сообщения с poll
 
+    # 💬 мгновенно закрываем poll, чтобы не «висел» таймер
     if poll_msg_id:
         try:
-            await bot.stop_poll(chat_id=chat_id, message_id=poll_msg_id)  # 💬 закрываем poll сразу, чтобы квиз не «висел»
+            await bot.stop_poll(chat_id=chat_id, message_id=poll_msg_id)
         except Exception:
             pass
 
@@ -6797,36 +6775,21 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
                 message_id=poll_msg_id,
                 reaction=[ReactionTypeEmoji(emoji="🎉" if is_correct else "❌")],
                 is_big=True
-            )  # 💬 мгновенная реакция на правильный или неправильный ответ
+            )  # 💬 показываем результат сразу
         except Exception:
             pass
 
-        try:
-            msg_id = data.get("current_poll_message_id")  # id квиза-полла, который мы показывали
-            if msg_id:
-                await bot.set_message_reaction(
-                    chat_id=poll_answer.user.id,
-                    message_id=msg_id,
-                    reaction=[ReactionTypeEmoji(emoji="🎉")],  # боты могут ставить 1 обычный эмоджи
-                    is_big=True  # большая анимация
-                )
-        except Exception:
-            # без паники — если реакции запрещены/нет прав/временной лаг, просто пропускаем
-            pass
+    await asyncio.sleep(1.2)  # 💬 даём увидеть реакцию
 
-    else:
-        # 💬 что делает эта часть: реакция на неправильный ответ прямо на poll
-        try:
-            msg_id = data.get("current_poll_message_id")
-            if msg_id:
-                await bot.set_message_reaction(
-                    chat_id=poll_answer.user.id,
-                    message_id=msg_id,
-                    reaction=[ReactionTypeEmoji(emoji="❌")],
-                    is_big=True
-                )
-        except Exception:
-            pass
+    # 💬 удаляем poll и прогресс вместе
+    try:
+        if poll_msg_id:
+            await bot.delete_message(chat_id, poll_msg_id)
+        await _delete_vocab_quiz_progress_message(chat_id, state)
+    except Exception:
+        pass
+
+
 
     delta = random.randint(28, 37) if is_correct else -10
     await award_xp(delta, state)
