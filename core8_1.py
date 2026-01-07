@@ -6860,7 +6860,10 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
         if not isinstance(done_ids, list):
             done_ids = []
 
-        quiz_uid = _poll_quiz_uid(block, extra=str(data.get("selected_phase_id", "")))
+        vocab_list = get_vocab_list(data)  # 💬 берём текущий список блоков (lex или обычный)
+        block = vocab_list[idx] if (isinstance(vocab_list, list) and 0 <= idx < len(vocab_list)) else {}  # 💬 текущий poll-квиз
+        quiz_uid = _poll_quiz_uid(block, extra=str(data.get("selected_phase_id", "")))  # 💬 uid для уникального прогресса без redo
+
 
         if quiz_uid and quiz_uid not in done_ids:
             done_ids.append(quiz_uid)
