@@ -6779,16 +6779,6 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
         except Exception:
             pass
 
-    await asyncio.sleep(1.2)  # 💬 даём увидеть реакцию
-
-    # 💬 удаляем poll и прогресс вместе
-    try:
-        if poll_msg_id:
-            await bot.delete_message(chat_id, poll_msg_id)
-        await _delete_vocab_quiz_progress_message(chat_id, state)
-    except Exception:
-        pass
-
 
 
     delta = random.randint(28, 37) if is_correct else -10
