@@ -1655,6 +1655,36 @@ async def _maybe_send_negative_sticker(bot, chat_id: int):  # 💬 1 из NEGATI
     )
 
 
+
+# 💬 Делает текст жирным, безопасно для HTML (не ломает уже размеченный текст)
+def _boldify_html(text: str) -> str:
+    import html  # 💬 экранируем спецсимволы только для “обычного” текста
+    if text is None:
+        return ""
+
+    t = str(text)
+    s = t.strip()
+
+    # 💬 если уже обёрнуто — не трогаем
+    if s.startswith("<b>") and s.endswith("</b>"):
+        return t
+
+    low = s.lower()
+
+    # 💬 code/pre лучше НЕ оборачивать в <b>, чтобы не ломать форматирование
+    if "<pre>" in low or "</pre>" in low or "<code>" in low or "</code>" in low:
+        return t
+
+    # 💬 если в тексте нет HTML-тегов — экранируем
+    has_html = any(tag in low for tag in (
+        "<b>", "</b>", "<i>", "</i>", "<u>", "</u>", "<s>", "</s>",
+        "<a ", "</a>", "<tg-spoiler>", "</tg-spoiler>"
+    ))
+    if not has_html:
+        t = html.escape(t)
+
+    return f"<b>{t}</b>"
+
 # ===============================================================================  
 # 🔄 Обычный smart_reply с typing + динамической задержкой  
 # ===============================================================================  
