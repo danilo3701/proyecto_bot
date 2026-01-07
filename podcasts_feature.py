@@ -108,6 +108,8 @@ class PodcastAdminStates(StatesGroup):
 
     choosing_author_for_episode = State()
     choosing_episode_category = State()  # 💬 выбор категории перед названием эпизода
+    choosing_episode_level = State()  # 💬 выбор уровня эпизода (B / X1 / X2)
+    
     waiting_episode_title = State()
     waiting_episode_desc = State()
     waiting_episode_audio = State()
@@ -1186,6 +1188,7 @@ def _kb_admin_episode_categories() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")],
         ]
     )
+    
 
 
 def _kb_admin_authors_pick(data: Dict[str, Any], cb_prefix: str) -> InlineKeyboardMarkup:
