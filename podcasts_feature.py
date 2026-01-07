@@ -320,23 +320,102 @@ def _kb_authors(data: Dict[str, Any]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _kb_episodes(data: Dict[str, Any], author_id: str) -> InlineKeyboardMarkup:
-    PAD = "\u2800"  # 💬 невидимый символ (Braille blank) для выравнивания текста в кнопках
+def _kb_episodes(
+    data: Dict[str, Any],
+    author_id: str,
+    level_key: Optional[str] = None,
+    topic_key: Optional[str] = None,
+    page: int = 0,
+) -> InlineKeyboardMarkup:
+    # 💬 клавиатура эпизодов с фильтрами (уровень + тема), reset и пагинацией
 
-    def _pad_btn(text: str, target_len: int) -> str:
-        # 💬 добавляем невидимые символы справа, чтобы все кнопки были одинаковой длины
-        t = (text or "").strip()
-        if len(t) >= target_len:
+    def _episode_topic_key(ep: Dict[str, Any]) -> Optional[str]:
+        # 💬 topic берём из ep["topic_key"] или маппим из старого ep["category"]
+        t = (ep.get("topic_key") or "").strip().upper()
+        if t in {"C", "D", "G", "N"}:
             return t
-        return t + (PAD * (target_len - len(t)))
 
-    eps = data.get("episodes", {})
-    items = [(eid, e) for eid, e in eps.items() if e.get("author_id") == author_id]
-    items.sort(key=lambda x: x[1].get("order", 9999))
+        cat = (ep.get("category") or "").strip().lower()
+        if cat in {"grammar", "lexica"}:
+            return "G"
+        if cat == "daily":
+            return "D"
+        if cat == "talks":
+            return "C"
+        if cat == "news":
+            return "N"
+        return None
 
-    rows = []
-    for eid, e in items:
+    def _episode_level_key(ep: Dict[str, Any]) -> Optional[str]:
+        # 💬 level берём из ep["level_key"], иначе пытаемся угадать по заголовку (A1/A2/B1/B2/C1)
+        lk = (ep.get("level_key") or "").strip().upper()
+        if lk in {"B", "X1", "X2"}:
+            return lk
+
+        title = (ep.get("title") or "").upper()
+        found = re.findall(r"\b(A0|A1|A2|B1|B2|C1|C2)\b", title)
+        found = set(found)
+
+        if found & {"B2", "C1", "C2"}:
+            return "X2"
+        if found & {"A2", "B1"}:
+            return "X1"
+        if found & {"A0", "A1"}:
+            return "B"
+        return None
+
+    def _filtered_items() -> List[Tuple[str, Dict[str, Any]]]:
+        eps = data.get("episodes", {})
+        items = [(eid, e) for eid, e in eps.items() if e.get("author_id") == author_id]
+        items.sort(key=lambda x: x[1].get("order", 9999))
+
+        if not level_key and not topic_key:
+            return items
+
+        out: List[Tuple[str, Dict[str, Any]]] = []
+        for eid, e in items:
+            if level_key and _episode_level_key(e) != level_key:
+                continue
+            if topic_key and _episode_topic_key(e) != topic_key:
+                continue
+            out.append((eid, e))
+        return out
+
+    items = _filtered_items()
+
+    rows: List[List[InlineKeyboardButton]] = []
+
+    is_filtered = bool(level_key or topic_key)
+    if is_filtered:
+        rows.append([InlineKeyboardButton(text="🧹 СБРОСИТЬ ФИЛЬТР", callback_data="pod:filter_reset")])  # 💬 кнопка появляется только при фильтре
+
+    if not items:
+        rows.append([InlineKeyboardButton(text="(ничего не найдено)", callback_data="pod:noop")])  # 💬 безопасный пустой результат
+        rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    PER_PAGE = 8
+    total = len(items)
+    pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
+    page = max(0, min(page, pages - 1))
+
+    start = page * PER_PAGE
+    end = start + PER_PAGE
+    chunk = items[start:end]
+
+    for eid, e in chunk:
         rows.append([InlineKeyboardButton(text=e.get("title", "🎧 Эпизод"), callback_data=f"pod:ep:{eid}")])
+
+    if pages > 1:
+        prev_cb = "pod:ep_page_prev" if page > 0 else "pod:noop"
+        next_cb = "pod:ep_page_next" if page < (pages - 1) else "pod:noop"
+        rows.append(
+            [
+                InlineKeyboardButton(text="◀️", callback_data=prev_cb),
+                InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="pod:noop"),
+                InlineKeyboardButton(text="▶️", callback_data=next_cb),
+            ]
+        )  # 💬 пагинация по 8 кнопок
 
     rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -446,6 +525,11 @@ async def podcasts_open(message: Message, state: FSMContext) -> None:
         pod_nav_msg_id=None,
         pod_hint_msg_id=None,
         pod_audio_msg_id=None,  # 💬 id аудио текущего эпизода
+        pod_filter_level=None,  # 💬 фильтр уровня (B/X1/X2)
+        pod_filter_topic=None,  # 💬 фильтр темы (C/D/N/G)
+        pod_ep_page=0,  # 💬 пагинация списка эпизодов
+        pod_screen="authors",  # 💬 текущий экран подкастов (authors/episodes/player/notes)
+
     )
 
     try:
@@ -491,7 +575,12 @@ async def pod_back_authors(cb: CallbackQuery, state: FSMContext) -> None:
         pod_notes_idx=0,  # 💬 индекс для режима "Мои заметки"
         pod_frag_msg_id=None,
         pod_nav_msg_id=cb.message.message_id,  # 💬 остаёмся в том же “нав-сообщении”
+        pod_filter_level=None,  # 💬 сбрасываем фильтр при смене автора
+        pod_filter_topic=None,  # 💬 сбрасываем фильтр при смене автора
+        pod_ep_page=0,  # 💬 сбрасываем пагинацию
+        pod_screen="authors",  # 💬 возвращаемся на экран авторов
     )
+
 
     try:
         await cb.message.edit_text("🎧 Выбери автора:", reply_markup=_kb_authors(data))
@@ -611,16 +700,250 @@ async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
         pod_notes_idx=0,  # 💬 индекс для режима "Мои заметки"
         pod_frag_msg_id=None,
         pod_nav_msg_id=cb.message.message_id,  # 💬 меню “живёт” в одном сообщении
+        pod_filter_level=None,  # 💬 фильтр сбрасывается при смене автора
+        pod_filter_topic=None,  # 💬 фильтр сбрасывается при смене автора
+        pod_ep_page=0,  # 💬 пагинация с нуля
+        pod_screen="episodes",  # 💬 теперь мы на экране эпизодов
     )
 
-    text = f"🎙 {author.get('name','Автор')}\n\nВыбери эпизод:"
+    author_name = author.get("name", "Автор")
+
+    legend = (
+        "Ключи:\n"
+        "B = Basico\n"
+        "X1 = A2–B1\n"
+        "X2 = B2–C1\n"
+        "\n"
+        "C = Conversación\n"
+        "D = Дневной\n"
+        "N = Новости\n"
+        "G = GramaLexico\n"
+        "\n"
+        "Можно = уровень + тема\n"
+        "RESET = сброс"
+    )  # 💬 легенда фильтров без лишнего текста
+
+    text = f"🎙 {author_name}\n\n{legend}\n\nВыбери эпизод:"
     try:
-        await cb.message.edit_text(text, reply_markup=_kb_episodes(data, author_id))
+        await cb.message.edit_text(text, reply_markup=_kb_episodes(data, author_id, None, None, 0))
     except Exception:
-        msg = await cb.message.answer(text, reply_markup=_kb_episodes(data, author_id))
+        msg = await cb.message.answer(text, reply_markup=_kb_episodes(data, author_id, None, None, 0))
         await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 fallback
 
     await cb.answer()
+
+
+
+@router.callback_query(F.data == "pod:filter_reset")
+async def pod_filter_reset(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 reset фильтра кнопкой без мусора в чате
+    st = await state.get_data()
+    if not st.get("pod_ctx") or st.get("pod_screen") != "episodes":
+        await cb.answer()
+        return
+
+    author_id = st.get("pod_author_id")
+    if not author_id:
+        await cb.answer()
+        return
+
+    await state.update_data(pod_filter_level=None, pod_filter_topic=None, pod_ep_page=0)  # 💬 сброс фильтров
+
+    data = _read_podcasts()
+    author = data.get("authors", {}).get(author_id, {})
+    author_name = author.get("name", "Автор")
+
+    legend = (
+        "Ключи:\n"
+        "B = Basico\n"
+        "X1 = A2–B1\n"
+        "X2 = B2–C1\n"
+        "\n"
+        "C = Conversación\n"
+        "D = Дневной\n"
+        "N = Новости\n"
+        "G = GramaLexico\n"
+        "\n"
+        "Можно = уровень + тема\n"
+        "RESET = сброс"
+    )  # 💬 легенда фильтров
+
+    text = f"🎙 {author_name}\n\n{legend}\n\nВыбери эпизод:"
+    try:
+        await cb.message.edit_text(text, reply_markup=_kb_episodes(data, author_id, None, None, 0))
+    except Exception:
+        pass
+
+    await cb.answer()
+
+
+@router.callback_query(F.data.in_(["pod:ep_page_prev", "pod:ep_page_next"]))
+async def pod_ep_page_nav(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 листаем страницы эпизодов (по 8) и не ломаем фильтры
+    st = await state.get_data()
+    if not st.get("pod_ctx") or st.get("pod_screen") != "episodes":
+        await cb.answer()
+        return
+
+    author_id = st.get("pod_author_id")
+    if not author_id:
+        await cb.answer()
+        return
+
+    level_key = st.get("pod_filter_level")
+    topic_key = st.get("pod_filter_topic")
+    page = int(st.get("pod_ep_page") or 0)
+
+    if cb.data == "pod:ep_page_prev":
+        page = max(0, page - 1)
+    else:
+        page = page + 1
+
+    data = _read_podcasts()
+    author = data.get("authors", {}).get(author_id, {})
+    author_name = author.get("name", "Автор")
+
+    # 💬 аккуратно ограничиваем page по факту (внутри _kb_episodes тоже есть clamp)
+    await state.update_data(pod_ep_page=page)
+
+    legend = (
+        "Ключи:\n"
+        "B = Basico\n"
+        "X1 = A2–B1\n"
+        "X2 = B2–C1\n"
+        "\n"
+        "C = Conversación\n"
+        "D = Дневной\n"
+        "N = Новости\n"
+        "G = GramaLexico\n"
+        "\n"
+        "Можно = уровень + тема\n"
+        "RESET = сброс"
+    )  # 💬 легенда фильтров
+
+    flt = []
+    if level_key:
+        flt.append(level_key)
+    if topic_key:
+        flt.append(topic_key)
+
+    if flt:
+        text = f"🎙 {author_name}\n\nОТФИЛЬТРОВАНО ПО = {' + '.join(flt)}\n\n{legend}\n\nВыбери эпизод:"
+    else:
+        text = f"🎙 {author_name}\n\n{legend}\n\nВыбери эпизод:"
+
+    try:
+        await cb.message.edit_text(text, reply_markup=_kb_episodes(data, author_id, level_key, topic_key, page))
+    except Exception:
+        pass
+
+    await cb.answer()
+
+
+@router.message(F.text)
+async def pod_filter_input(message: Message, state: FSMContext) -> None:
+    # 💬 пользователь пишет ключи фильтра в чат, мы удаляем сообщение и обновляем инлайн-список
+    st = await state.get_data()
+    if not st.get("pod_ctx") or st.get("pod_screen") != "episodes":
+        return
+
+    author_id = st.get("pod_author_id")
+    nav_msg_id = st.get("pod_nav_msg_id")
+    if not author_id or not nav_msg_id:
+        return
+
+    raw = (message.text or "").strip()
+    upper = raw.upper()
+
+    # 💬 удаляем ввод пользователя сразу, чтобы не засорять чат
+    await _safe_delete_message(message.bot, message.chat.id, message.message_id)
+
+    # 💬 парсим токены
+    if upper == "RESET":
+        level_key = None
+        topic_key = None
+    else:
+        tokens = re.findall(r"[A-Z0-9]+", upper)
+        tokens = [t for t in tokens if t]
+
+        level_set = {"B", "X1", "X2"}
+        topic_set = {"C", "D", "N", "G"}
+
+        level_key = None
+        topic_key = None
+
+        ok = True
+        if len(tokens) == 1:
+            t = tokens[0]
+            if t in level_set:
+                level_key = t
+            elif t in topic_set:
+                topic_key = t
+            else:
+                ok = False
+        elif len(tokens) == 2:
+            a, b = tokens[0], tokens[1]
+            if a in level_set and b in topic_set:
+                level_key, topic_key = a, b
+            elif a in topic_set and b in level_set:
+                level_key, topic_key = b, a
+            else:
+                ok = False
+        else:
+            ok = False
+
+        if not ok:
+            warn = await message.answer("❗ Используй ключи на экране. Можно = уровень + тема. Пример = X1 G. RESET = сброс")  # 💬 коротко и без мусора
+            await asyncio.sleep(1)
+            await _safe_delete_message(message.bot, message.chat.id, warn.message_id)
+            return
+
+    await state.update_data(
+        pod_filter_level=level_key,
+        pod_filter_topic=topic_key,
+        pod_ep_page=0,  # 💬 при новом фильтре всегда с первой страницы
+    )
+
+    data = _read_podcasts()
+    author = data.get("authors", {}).get(author_id, {})
+    author_name = author.get("name", "Автор")
+
+    legend = (
+        "Ключи:\n"
+        "B = Basico\n"
+        "X1 = A2–B1\n"
+        "X2 = B2–C1\n"
+        "\n"
+        "C = Conversación\n"
+        "D = Дневной\n"
+        "N = Новости\n"
+        "G = GramaLexico\n"
+        "\n"
+        "Можно = уровень + тема\n"
+        "RESET = сброс"
+    )  # 💬 легенда фильтров
+
+    flt = []
+    if level_key:
+        flt.append(level_key)
+    if topic_key:
+        flt.append(topic_key)
+
+    if flt:
+        text = f"🎙 {author_name}\n\nОТФИЛЬТРОВАНО ПО = {' + '.join(flt)}\n\n{legend}\n\nВыбери эпизод:"
+    else:
+        text = f"🎙 {author_name}\n\n{legend}\n\nВыбери эпизод:"
+
+    try:
+        await message.bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=int(nav_msg_id),
+            text=text,
+            reply_markup=_kb_episodes(data, author_id, level_key, topic_key, 0),
+        )
+    except Exception:
+        pass
+
 
 
 @router.callback_query(F.data.startswith("pod:ep:"))
@@ -674,7 +997,8 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
 
 
     frags = ep.get("fragments", []) or []
-    await state.update_data(pod_ep_id=ep_id, pod_idx=0, pod_frag_msg_id=None)  # 💬 фиксируем текущий эпизод
+    await state.update_data(pod_ep_id=ep_id, pod_idx=0, pod_frag_msg_id=None, pod_screen="player")  # 💬 фиксируем эпизод и выключаем фильтр-ввод
+
 
     if not frags:
         await cb.message.answer("Пока нет фрагментов для этого эпизода.")  # 💬 без reply-кнопок и без “Навигации…”
@@ -710,17 +1034,54 @@ async def pod_back_inline(cb: CallbackQuery, state: FSMContext) -> None:
 
     data = _read_podcasts()
     if author_id:
-        await cb.bot.send_message(
+        author = data.get("authors", {}).get(author_id, {})
+        author_name = author.get("name", "Автор")
+
+        level_key = st.get("pod_filter_level")
+        topic_key = st.get("pod_filter_topic")
+        page = int(st.get("pod_ep_page") or 0)
+
+        legend = (
+            "Ключи:\n"
+            "B = Basico\n"
+            "X1 = A2–B1\n"
+            "X2 = B2–C1\n"
+            "\n"
+            "C = Conversación\n"
+            "D = Дневной\n"
+            "N = Новости\n"
+            "G = GramaLexico\n"
+            "\n"
+            "Можно = уровень + тема\n"
+            "RESET = сброс"
+        )  # 💬 легенда фильтров
+
+        flt = []
+        if level_key:
+            flt.append(level_key)
+        if topic_key:
+            flt.append(topic_key)
+
+        if flt:
+            text = f"🎙 {author_name}\n\nОТФИЛЬТРОВАНО ПО = {' + '.join(flt)}\n\n{legend}\n\nВыбери эпизод:"
+        else:
+            text = f"🎙 {author_name}\n\n{legend}\n\nВыбери эпизод:"
+
+        msg = await cb.bot.send_message(
             chat_id=cb.message.chat.id,
-            text="Выбери эпизод:",
-            reply_markup=_kb_episodes(data, author_id),
-        )  # 💬 возвращаем список эпизодов
+            text=text,
+            reply_markup=_kb_episodes(data, author_id, level_key, topic_key, page),
+        )  # 💬 возвращаем список эпизодов без reply-кнопок
+
+        await state.update_data(pod_nav_msg_id=msg.message_id, pod_screen="episodes")  # 💬 держим актуальный экран
     else:
-        await cb.bot.send_message(
+        msg = await cb.bot.send_message(
             chat_id=cb.message.chat.id,
             text="🎧 Выбери автора:",
             reply_markup=_kb_authors(data),
         )  # 💬 fallback, если author_id потерялся
+        await state.update_data(pod_nav_msg_id=msg.message_id, pod_screen="authors")  # 💬 возвращаемся в авторы
+
 
     await cb.answer()
 
