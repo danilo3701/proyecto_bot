@@ -299,10 +299,33 @@ def _kb_subscribe_check() -> InlineKeyboardMarkup:
     )
 
 
-def _episodes_menu_html(author_name: str) -> str:
-    # 💬 текст экрана эпизодов (HTML) = весь блок жирный, курсив сохраняем
+def _episodes_menu_html(author_name: str, level_key: Optional[str] = None, topic_key: Optional[str] = None) -> str:
+    # 💬 текст экрана эпизодов (HTML) = весь блок жирный, курсив сохраняем, показываем активный фильтр
+
+    level_map = {
+        "B": "Basico",
+        "X1": "A2–B1",
+        "X2": "B2–C1",
+    }
+    topic_map = {
+        "C": "Conversación",
+        "D": "Diario",
+        "G": "GramaLexico",
+    }
+
+    parts = []
+    if level_key in level_map:
+        parts.append(level_map[level_key])
+    if topic_key in topic_map:
+        parts.append(topic_map[topic_key])
+
+    flt_line = ""
+    if parts:
+        flt_line = f"\nОТФИЛЬТРОВАНО ПО = {' + '.join(parts)}\n"
+
     return (
-        f"<b>🎙 {author_name} 🇪🇸\n\n"
+        f"<b>🎙 {author_name} 🇪🇸"
+        f"{flt_line}\n"
         "Ключи уровня\n"
         "B = Basico <i>(базовый)</i>\n"
         "X1 = A2–B1 <i>(средний)</i>\n"
@@ -312,10 +335,11 @@ def _episodes_menu_html(author_name: str) -> str:
         "D = Diario <i>(дневной | новости)</i>\n"
         "G = GramaLexico <i>(грамматика | лексика)</i>\n\n"
         "Можно = уровень + тема\n"
-        "<i>Пример:</i> X1 G\n\n"
+        "<i>Пример:</i> <b>X1 G</b>\n\n"
         "RESET = Сброс фильтров\n\n"
         "Выбери эпизод:</b>"
     )
+
 
 # -----------------------------
 # 🎛️ UI builders
@@ -350,7 +374,7 @@ def _kb_episodes(
     def _episode_topic_key(ep: Dict[str, Any]) -> Optional[str]:
         # 💬 topic берём из ep["topic_key"] или маппим из старого ep["category"]
         t = (ep.get("topic_key") or "").strip().upper()
-        if t in {"C", "D", "G", "N"}:
+        if t in {"C", "D", "G"}:
             return t
 
         cat = (ep.get("category") or "").strip().lower()
@@ -361,7 +385,7 @@ def _kb_episodes(
         if cat == "talks":
             return "C"
         if cat == "news":
-            return "N"
+            return "D"  # 💬 новости считаем частью D
         return None
 
     def _episode_level_key(ep: Dict[str, Any]) -> Optional[str]:
@@ -724,31 +748,25 @@ async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
         pod_screen="episodes",  # 💬 теперь мы на экране эпизодов
     )
 
-    author_name = author.get("name", "Автор")
+    author_name = author.get("name", "Автор")  # 💬 имя автора для заголовка
+    text = _episodes_menu_html(author_name, None, None)  # 💬 HTML меню без фильтра
 
-    legend = (
-        "Ключи:\n"
-        "B = Basico\n"
-        "X1 = A2–B1\n"
-        "X2 = B2–C1\n"
-        "\n"
-        "C = Conversación\n"
-        "D = Дневной\n"
-        "N = Новости\n"
-        "G = GramaLexico\n"
-        "\n"
-        "Можно = уровень + тема\n"
-        "RESET = сброс"
-    )  # 💬 легенда фильтров без лишнего текста
-
-    text = f"🎙 {author_name}\n\n{legend}\n\nВыбери эпизод:"
     try:
-        await cb.message.edit_text(text, reply_markup=_kb_episodes(data, author_id, None, None, 0))
+        await cb.message.edit_text(
+            text,
+            reply_markup=_kb_episodes(data, author_id, None, None, 0),
+            parse_mode="HTML",
+        )
     except Exception:
-        msg = await cb.message.answer(text, reply_markup=_kb_episodes(data, author_id, None, None, 0))
+        msg = await cb.message.answer(
+            text,
+            reply_markup=_kb_episodes(data, author_id, None, None, 0),
+            parse_mode="HTML",
+        )
         await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 fallback
 
     await cb.answer()
+
 
 
 
@@ -771,28 +789,18 @@ async def pod_filter_reset(cb: CallbackQuery, state: FSMContext) -> None:
     author = data.get("authors", {}).get(author_id, {})
     author_name = author.get("name", "Автор")
 
-    legend = (
-        "Ключи:\n"
-        "B = Basico\n"
-        "X1 = A2–B1\n"
-        "X2 = B2–C1\n"
-        "\n"
-        "C = Conversación\n"
-        "D = Дневной\n"
-        "N = Новости\n"
-        "G = GramaLexico\n"
-        "\n"
-        "Можно = уровень + тема\n"
-        "RESET = сброс"
-    )  # 💬 легенда фильтров
-
-    text = f"🎙 {author_name}\n\n{legend}\n\nВыбери эпизод:"
+    text = _episodes_menu_html(author_name, None, None)  # 💬 HTML меню без фильтра
     try:
-        await cb.message.edit_text(text, reply_markup=_kb_episodes(data, author_id, None, None, 0))
+        await cb.message.edit_text(
+            text,
+            reply_markup=_kb_episodes(data, author_id, None, None, 0),
+            parse_mode="HTML",
+        )
     except Exception:
         pass
 
     await cb.answer()
+
 
 
 @router.callback_query(F.data.in_(["pod:ep_page_prev", "pod:ep_page_next"]))
@@ -824,38 +832,18 @@ async def pod_ep_page_nav(cb: CallbackQuery, state: FSMContext) -> None:
     # 💬 аккуратно ограничиваем page по факту (внутри _kb_episodes тоже есть clamp)
     await state.update_data(pod_ep_page=page)
 
-    legend = (
-        "Ключи:\n"
-        "B = Basico\n"
-        "X1 = A2–B1\n"
-        "X2 = B2–C1\n"
-        "\n"
-        "C = Conversación\n"
-        "D = Дневной\n"
-        "N = Новости\n"
-        "G = GramaLexico\n"
-        "\n"
-        "Можно = уровень + тема\n"
-        "RESET = сброс"
-    )  # 💬 легенда фильтров
-
-    flt = []
-    if level_key:
-        flt.append(level_key)
-    if topic_key:
-        flt.append(topic_key)
-
-    if flt:
-        text = f"🎙 {author_name}\n\nОТФИЛЬТРОВАНО ПО = {' + '.join(flt)}\n\n{legend}\n\nВыбери эпизод:"
-    else:
-        text = f"🎙 {author_name}\n\n{legend}\n\nВыбери эпизод:"
-
+    text = _episodes_menu_html(author_name, level_key, topic_key)  # 💬 HTML меню + фильтр строкой
     try:
-        await cb.message.edit_text(text, reply_markup=_kb_episodes(data, author_id, level_key, topic_key, page))
+        await cb.message.edit_text(
+            text,
+            reply_markup=_kb_episodes(data, author_id, level_key, topic_key, page),
+            parse_mode="HTML",
+        )
     except Exception:
         pass
 
     await cb.answer()
+
 
 
 @router.message(F.text)
@@ -885,7 +873,8 @@ async def pod_filter_input(message: Message, state: FSMContext) -> None:
         tokens = [t for t in tokens if t]
 
         level_set = {"B", "X1", "X2"}
-        topic_set = {"C", "D", "N", "G"}
+        topic_set = {"C", "D", "G"}  # 💬 N убрали, новости входят в D
+
 
         level_key = None
         topic_key = None
@@ -911,7 +900,7 @@ async def pod_filter_input(message: Message, state: FSMContext) -> None:
             ok = False
 
         if not ok:
-            warn = await message.answer("❗ Используй ключи на экране. Можно = уровень + тема. Пример = X1 G. RESET = сброс")  # 💬 коротко и без мусора
+            warn = await message.answer("❗ Используй ключи на экране. Можно = уровень + тема. Пример = X1 G. RESET = сброс")  # 💬 коротко и без мусор
             await asyncio.sleep(1)
             await _safe_delete_message(message.bot, message.chat.id, warn.message_id)
             return
