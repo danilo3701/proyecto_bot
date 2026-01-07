@@ -605,32 +605,9 @@ def get_vocab_list(data: dict) -> list:
         base.append({"type": "phrase_selector"})  # 💬 спец-блок: выбор известных фраз
         return base
 
-    # 2) Старый режим (пакеты по 6)
-    base          = list(phase.get("vocab", []))            # текст/линки/прочее
-    quiz_pool     = list(phase.get("quiz_pool", []))        # обычные квизы
-    textquiz_pool = list(phase.get("textquiz_pool", []))    # текст-квизы
-
-    PACK = 6
-    compiled = []
-
-    def take_pack(pool, start, pack=PACK):
-        return pool[start:start + pack], start + min(pack, max(0, len(pool) - start))
-
-    qi = 0
-    for block in base:
-        compiled.append(block)
-        if ("link" in block) or ("url" in block) or (block.get("type") == "link"):
-            if qi < len(quiz_pool):
-                chunk, qi = take_pack(quiz_pool, qi)
-                compiled.extend(chunk)
-
-    while qi < len(quiz_pool):
-        chunk, qi = take_pack(quiz_pool, qi)
-        compiled.extend(chunk)
-
-    compiled.extend(textquiz_pool)
-    return compiled
-# 💬 что делает эта часть: добавили режим "phrases → phrase_selector → раунды", старое поведение сохранено
+    # 2) Старый режим quiz_pool/textquiz_pool отключён для VOCAB
+    # 💬 что делает эта часть: возвращаем только базовые блоки фазы без автосборки пакетов
+    return list(phase.get("vocab", []))
 
 
 def _lex_get_selected_phase(data: dict) -> dict | None:
@@ -7290,10 +7267,9 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         extra_fb = None
 
 
-    # 💬 Ждём перед удалением всех сообщений (чтобы реакция 👍 успела быть видимой)
-    await asyncio.sleep(
-        max(SLEEP_AFTER_FEEDBACK_S, REPLY_REACTION_READ_DELAY_S) if is_correct else SLEEP_AFTER_FEEDBACK_S
-    )
+    # 💬 что делает эта часть: даём увидеть реакцию и на ✅ и на ❌ (иначе ❌ исчезает слишком быстро)
+    await asyncio.sleep(max(SLEEP_AFTER_FEEDBACK_S, REPLY_REACTION_READ_DELAY_S))
+
 
     # 💬 5) Удаляем всё: вопрос, ответ пользователя, XP-фидбэк и (если есть) extra-фидбэк
     chat_id   = message.chat.id
@@ -7426,16 +7402,33 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         if nxt_t is None:
             # нет textquiz → сразу offer_continue
             oc_scene = random.choice(scenarios["offer_continue"])
-            buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
-            kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+            # 💬 что делает эта часть: гарантированно убираем старую ReplyKeyboard (если где-то осталась)
+            try:
+                rm = await bot.send_message(message.chat.id, "\u00AD", reply_markup=ReplyKeyboardRemove())
+                await _safe_delete_message(message.chat.id, rm.message_id)
+            except Exception:
+                pass
+
+            # 💬 что делает эта часть: показываем offer_continue только через inline-кнопки
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
+                for btn in oc_scene["buttons"]
+            ]])
+
             await state.update_data(
                 current_stage="offer_continue",
                 current_scene=oc_scene,
+                last_oc_msg_id=None,  # 💬 запишем после отправки, чтобы cb удалял всё корректно
                 redo_stack_text=[],
-                redo_active_text=False,  # 💬 выходим из redo-режима
+                redo_active_text=False,
             )
             await state.set_state(LessonStates.showing_vocab)
-            return await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+
+            oc_msg = await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+            await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 cb_scenario_vocab удалит это сообщение
+            return
+
         else:
             await state.update_data(vocab_index=nxt_t)
             return await send_one_vocab(message, state)
@@ -7471,17 +7464,34 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
                 return await send_one_vocab(message, state)
             else:
                 # очередь пересдач пуста — выходим в offer_continue
-                oc_scene = random.choice(scenarios["offer_continue"])
-                buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
-                kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-                await state.update_data(
-                    current_stage="offer_continue",
-                    current_scene=oc_scene,
-                    redo_stack_text=[],
-                    redo_active_text=False,
-                )
-                await state.set_state(LessonStates.showing_vocab)
-                return await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+            oc_scene = random.choice(scenarios["offer_continue"])
+
+            # 💬 что делает эта часть: гарантированно убираем старую ReplyKeyboard (если где-то осталась)
+            try:
+                rm = await bot.send_message(message.chat.id, "\u00AD", reply_markup=ReplyKeyboardRemove())
+                await _safe_delete_message(message.chat.id, rm.message_id)
+            except Exception:
+                pass
+
+            # 💬 что делает эта часть: показываем offer_continue только через inline-кнопки
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
+                for btn in oc_scene["buttons"]
+            ]])
+
+            await state.update_data(
+                current_stage="offer_continue",
+                current_scene=oc_scene,
+                last_oc_msg_id=None,  # 💬 запишем после отправки, чтобы cb удалял всё корректно
+                redo_stack_text=[],
+                redo_active_text=False,
+            )
+            await state.set_state(LessonStates.showing_vocab)
+
+            oc_msg = await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+            await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 cb_scenario_vocab удалит это сообщение
+            return
+
         else:
             # неверный ответ в redo — повторяем ТОТ ЖЕ textquiz, ставим его в голову очереди
             redo_t = [i for i in redo_t if i != idx]
@@ -7516,16 +7526,33 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         else:
             # сет textquiz завершён — теперь offer_continue
             oc_scene = random.choice(scenarios["offer_continue"])
-            buttons  = [[KeyboardButton(text=btn)] for btn in oc_scene["buttons"]]
-            kb       = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+            # 💬 что делает эта часть: гарантированно убираем старую ReplyKeyboard (если где-то осталась)
+            try:
+                rm = await bot.send_message(message.chat.id, "\u00AD", reply_markup=ReplyKeyboardRemove())
+                await _safe_delete_message(message.chat.id, rm.message_id)
+            except Exception:
+                pass
+
+            # 💬 что делает эта часть: показываем offer_continue только через inline-кнопки
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
+                for btn in oc_scene["buttons"]
+            ]])
+
             await state.update_data(
                 current_stage="offer_continue",
                 current_scene=oc_scene,
+                last_oc_msg_id=None,  # 💬 запишем после отправки, чтобы cb удалял всё корректно
                 redo_stack_text=[],
                 redo_active_text=False,
             )
             await state.set_state(LessonStates.showing_vocab)
-            return await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+
+            oc_msg = await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+            await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 cb_scenario_vocab удалит это сообщение
+            return
+
 
 
 
