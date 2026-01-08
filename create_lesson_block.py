@@ -1840,11 +1840,21 @@ async def send_post_menu(message: Message, state: FSMContext):
 
 
 @router.message(NewTopicStates.waiting_phase_name)
+@router.message(NewTopicStates.waiting_phase_name)
 async def create_phase(message: Message, state: FSMContext):
     # 💬 сохраняем новую фазу
     data = await state.get_data()
-    phases = data["topic"]["vocab"]
-    phase_name = message.text.strip()
+
+    topic = data.get("topic") or {}  # 💬 берём тему из FSM, чтобы topic был определён
+    phases = topic.setdefault("vocab", [])  # 💬 список фаз внутри темы
+
+    phase_name = (message.text or "").strip()
+    if not phase_name:
+        await message.answer("⚠️ Введите название фазы.")
+        return  # 💬 защита от пустого ввода
+
+    phase_id = len(phases) + 1  # 💬 автонумерация фаз как в choose_phase (1,2,3...)
+
     category_now = ((topic.get("category") or "").strip().lower())
     if category_now.startswith("gram"):
         category_now = "gram"
@@ -1860,16 +1870,15 @@ async def create_phase(message: Message, state: FSMContext):
     if category_now == "lex":
         new_phase["phrases"] = []  # 💬 phrases нужны только для лексики, в грамматике не используем
 
-
     phases.append(new_phase)
+
     topic_path = data.get("topic_path")
     if topic_path:
-        atomic_save_json(topic_path, data["topic"])  # 💬 сохраняем фазу сразу в JSON, чтобы не было рассинхрона
+        atomic_save_json(topic_path, topic)  # 💬 сохраняем фазу сразу в JSON, чтобы не было рассинхрона
 
-    await state.update_data(topic=data["topic"], current_phase_id=new_phase["phase_id"])
+    await state.update_data(topic=topic, current_phase_id=new_phase["phase_id"])
     await message.answer(f"Фаза «{phase_name}» создана.")
-    # Далее просим заголовок словаря в этой фазе
-    # 💬 После создания фазы — показываем меню действий
+    # 💬 После создания фазы = показываем меню действий
     await send_post_menu(message, state)
 
 
@@ -3417,6 +3426,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
