@@ -1306,30 +1306,38 @@ async def _show_practice_link(chat_id, state: FSMContext):
 
     item = items[idx]
     title = item.get("title") or item.get("name") or "Упражнение"
-    url = item.get("url")
-    cta = random.choice(link_cta_phrases) if link_cta_phrases else "Перейти"
+    url = str(item.get("url") or item.get("link") or "").strip()  # 💬 поддержка url/link из JSON
+    phrases = globals().get("link_cta_phrases") or []  # 💬 защита от NameError, если список не подключён
+    cta = random.choice(phrases) if phrases else "Перейти"
     bar = f"[{done}/{total}]"
 
-    # 💬 кнопки: ссылка + Сделано + Теория + Меню
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=cta, url=url)],
-            [InlineKeyboardButton(text="✅ Сделано", callback_data="gram:practice:done")],
-            [InlineKeyboardButton(text="📚 Теория", callback_data="gram:practice:theory")],
-            [InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")],
-        ]
-    )
+    rows = []
+    if url and (url.startswith("http://") or url.startswith("https://")):
+        rows.append([InlineKeyboardButton(text=cta, url=url)])  # 💬 кнопка-ссылка, только если URL валиден
+        extra_line = ""
+    else:
+        rows.append([InlineKeyboardButton(text="⚠️ Ссылка не задана", callback_data="gram:practice:done")])  # 💬 не зависаем, даём перейти дальше
+        extra_line = "\n\n⚠️ Ссылка не задана в упражнении."
+
+    rows += [
+        [InlineKeyboardButton(text="✅ Сделано", callback_data="gram:practice:done")],
+        [InlineKeyboardButton(text="📚 Теория", callback_data="gram:practice:theory")],
+        [InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")],
+    ]
+
+    kb = InlineKeyboardMarkup(inline_keyboard=rows)
 
     await _replace_content(
         chat_id,
         state,
         _bot.send_message(
             chat_id=chat_id,
-            text=f"{bar}\n<b>{html.escape(title)}</b>",
+            text=f"{bar}\n<b>{html.escape(title)}</b>{extra_line}",
             reply_markup=kb,
             parse_mode="HTML"
         )
     )
+
 
 
 @router.poll_answer(GrammarStates.practice_poll)
