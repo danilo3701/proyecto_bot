@@ -6,7 +6,21 @@ from __future__ import annotations
 import asyncio  # 💬 таймер для авто удаления
 import html
 import random  # 💬 для выбора CTA фраз и случайных кнопок Feedback
-from feedback_difficulty_block import feedback_questions  # 💬 вопросы и кнопки Feedback
+# 💬 FeedbackDifficulty: берём из отдельного файла, но не падаем если файла нет / структура изменилась
+try:
+    from feedback_difficulty_block import feedback_difficulty as feedback_questions  # 💬 список сценариев
+except Exception:
+    feedback_questions = [
+        {
+            "text": "Было легко? 😌",
+            "buttons": ["Легко! 😃", "Сложно… 😓"],
+            "replies": {
+                "Легко! 😃": {"reaction": "Вижу, звёзды тебе по плечу! ⭐️", "next": "offer_continue"},
+                "Сложно… 😓": {"reaction": "Скоро будет проще! 💪", "next": "offer_continue"},
+            },
+        }
+    ]
+
 from scenarios_estiloso8_1 import link_cta_phrases  # 💬 CTA фразы для ссылок
 
 import random  # 💬 CTA фразы для link-блоков
@@ -651,19 +665,28 @@ async def gram_theory(cb: CallbackQuery, state: FSMContext) -> None:
     )  # 💬 список фаз в одном сообщении
 
 
-
-@dp.callback_query(lambda c: c.data == "gram:practice:done")
+@router.callback_query(F.data == "gram:practice:done")
 async def gram_practice_done(cb: CallbackQuery, state: FSMContext):
-    # 💬 кнопка "Сделано" → показываем Feedback Difficulty
-    question = random.choice(feedback_questions)
-    opts = question.get("options", ["Легко", "Сложно"])
-    text = question.get("text", "Как тебе было это упражнение?")
+    # 💬 кнопка "Сделано" -> показываем FeedbackDifficulty
+    await cb.answer()
+    q = random.choice(feedback_questions) if feedback_questions else {}
+
+    buttons = q.get("buttons") or ["Легко", "Сложно"]
+    btn1 = str(buttons[0]) if len(buttons) > 0 else "Легко"
+    btn2 = str(buttons[1]) if len(buttons) > 1 else "Сложно"
+    text = str(q.get("text") or "Как тебе было это упражнение?")
+
+    await state.update_data(gram_last_feedback_question=q)  # 💬 сохраняем вопрос для реакции
+
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=opts[0], callback_data="gram:practice:fd:0"),
-             InlineKeyboardButton(text=opts[1], callback_data="gram:practice:fd:1")]
+            [
+                InlineKeyboardButton(text=btn1, callback_data="gram:practice:fd:0"),
+                InlineKeyboardButton(text=btn2, callback_data="gram:practice:fd:1"),
+            ]
         ]
     )
+
     await _replace_content(
         cb.message.chat.id,
         state,
@@ -673,36 +696,69 @@ async def gram_practice_done(cb: CallbackQuery, state: FSMContext):
             reply_markup=kb
         )
     )
-    await cb.answer()
 
 
-@dp.callback_query(lambda c: c.data.startswith("gram:practice:fd:"))
+@router.callback_query(F.data.startswith("gram:practice:fd:"))
 async def gram_practice_feedback(cb: CallbackQuery, state: FSMContext):
-    # 💬 пользователь выбрал сложность → увеличиваем прогресс, показываем "Продолжить/Меню"
+    # 💬 выбор сложности -> реакция + инкремент прогресса + экран продолжить/меню
+    await cb.answer()
     data = await state.get_data()
+
+    q = data.get("gram_last_feedback_question") or {}
+    try:
+        choice = int(str(cb.data).split(":")[-1])
+    except Exception:
+        choice = 0
+
+    buttons = q.get("buttons") or []
+    chosen_btn = str(buttons[choice]) if isinstance(buttons, list) and choice < len(buttons) else None
+
+    reaction_text = None
+    replies = q.get("replies") or {}
+    if chosen_btn and isinstance(replies, dict):
+        reaction_text = (replies.get(chosen_btn) or {}).get("reaction")
+
     done = int(data.get("gram_links_done", 0)) + 1
-    total = data.get("gram_links_total", 1)
-    await state.update_data(gram_links_done=done)
-    bar = f"[{done}/{total}]"
+    total = int(data.get("gram_links_total", 1))
+    await state.update_data(gram_links_done=done)  # 💬 прогресс считаем здесь
+
+    bar = _bar((done / total) if total else 1.0)
+    txt = (str(reaction_text).strip() + "\n\n") if reaction_text else ""
+    txt += f"{bar}  {done}/{total}"
+
+    if done >= total:
+        await _replace_content(
+            cb.message.chat.id,
+            state,
+            _bot.send_message(
+                chat_id=cb.message.chat.id,
+                text=txt,
+                reply_markup=_kb_back_to_menu(),
+                parse_mode="HTML"
+            )
+        )
+        return
 
     await _replace_content(
         cb.message.chat.id,
         state,
         _bot.send_message(
             chat_id=cb.message.chat.id,
-            text=f"👍 Отлично! {bar}",
-            reply_markup=_kb_practice_continue_menu(done, total)
+            text=txt,
+            reply_markup=_kb_practice_continue_menu(done, total),
+            parse_mode="HTML"
         )
     )
-    await cb.answer()
 
 
-@dp.callback_query(lambda c: c.data == "gram:practice:next")
+@router.callback_query(F.data == "gram:practice:next")
 async def gram_practice_next(cb: CallbackQuery, state: FSMContext):
-    # 💬 переход к следующей ссылке
+    # 💬 "Продолжить" -> грузим следующую ссылку и показываем
+    await cb.answer()
     data = await state.get_data()
-    idx = data.get("gram_link_idx", 0) + 1
+    idx = int(data.get("gram_link_idx", 0)) + 1
     await state.update_data(gram_link_idx=idx)
+
     await _replace_content(
         cb.message.chat.id,
         state,
@@ -716,16 +772,32 @@ async def gram_practice_next(cb: CallbackQuery, state: FSMContext):
     return await _show_practice_link(cb.message.chat.id, state)
 
 
-@dp.callback_query(lambda c: c.data == "gram:practice:theory")
+@router.callback_query(F.data == "gram:practice:theory")
 async def gram_practice_theory(cb: CallbackQuery, state: FSMContext):
     # 💬 переход в теорию с возможностью вернуться к практике
+    await cb.answer()
     data = await state.get_data()
     await state.update_data(
         gram_return_to_practice=True,
-        gram_return_practice_idx=data.get("gram_link_idx", 0)
+        gram_return_practice_idx=int(data.get("gram_link_idx", 0))
     )
+    return await gram_theory(cb, state)  # 💬 открываем выбор фаз теории
+
+
+@router.callback_query(F.data == "gram:practice:return")
+async def gram_return_to_practice(cb: CallbackQuery, state: FSMContext):
+    # 💬 вернуться из теории обратно к той же ссылке практики
     await cb.answer()
-    return await gram_phases(cb, state)
+    data = await state.get_data()
+    idx = int(data.get("gram_return_practice_idx", 0))
+
+    await state.update_data(
+        gram_return_to_practice=False,
+        gram_link_idx=idx
+    )
+    await state.set_state(GrammarStates.practice_view)  # 💬 возвращаем state в практику
+    return await _show_practice_link(cb.message.chat.id, state)
+
 
 
 @router.callback_query(F.data.startswith("gram:phase:"))
