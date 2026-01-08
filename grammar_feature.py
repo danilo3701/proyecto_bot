@@ -1198,6 +1198,7 @@ async def gram_practice_intro(cb: CallbackQuery, state: FSMContext) -> None:
 async def gram_practice_start(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
     chat_id = cb.message.chat.id  # 💬 единый chat_id для replace/delete
+    await _safe_delete_message(_bot, chat_id, cb.message.message_id)  # 💬 удаляем экран "Практика + прогресс + Нажми Начать" вместе с кнопками
 
     st = await state.get_data()
     topic = _get_topic(str(st.get("selected_topic")))
