@@ -41,6 +41,7 @@ import random  # 💬 CTA фразы для link-блоков
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aiogram import Router, F
+from aiogram.filters import StateFilter  # 💬 фильтр FSM для poll_answer (иначе хендлер может не срабатывать)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -1226,37 +1227,46 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
 
 
 
-@router.poll_answer(GrammarStates.theory_poll)
+@router.poll_answer(StateFilter(GrammarStates.theory_poll))
 async def gram_poll_answer_theory(ans: PollAnswer, state: FSMContext) -> None:
-    # 💬 обработка PollQuiz в теории
+    # 💬 обработка PollQuiz в теории: фидбек 1 сек -> удаляем poll+фидбек -> автопереход
     st = await state.get_data()
     poll_id = st.get("gram_poll_id")
     if not poll_id or poll_id != ans.poll_id:
-        return
+        return  # 💬 чужой poll_answer или уже сброшен
 
     chat_id = ans.user.id
     correct = int(st.get("gram_poll_correct") or 0)
     opts = st.get("gram_poll_options") or []
     chosen = ans.option_ids[0] if ans.option_ids else -1
+    poll_msg_id = st.get("gram_poll_msg_id")
 
-    # 💬 реакция + правильный ответ
-    if chosen == correct:
-        txt = "✅ Правильно"
+    is_correct = (chosen == correct)
+
+    # 💬 закрываем poll (без таймаута), чтобы не висел
+    if poll_msg_id:
+        try:
+            await _bot.stop_poll(chat_id=chat_id, message_id=int(poll_msg_id))
+        except Exception:
+            pass
+
+    # 💬 реакция как в лексике: короткая похвала или короткий фейл + правильный ответ
+    if is_correct:
+        txt = random.choice(grammar_quiz_success_phrases)
     else:
         right = opts[correct] if 0 <= correct < len(opts) else "не найден"
-        txt = f"❌ Неправильно\n✅ Правильно: {html.escape(str(right))}"
+        txt = f"{random.choice(grammar_quiz_fail_phrases)}\n✅ {html.escape(str(right))}"
 
-    msg = await _bot.send_message(chat_id=chat_id, text=txt, parse_mode="HTML")
+    fb = await _bot.send_message(chat_id=chat_id, text=txt, parse_mode="HTML")
 
-    await asyncio.sleep(1.5)
-    await _safe_delete_message(_bot, chat_id, msg.message_id)
+    await asyncio.sleep(1.0)  # 💬 даём увидеть фидбек
 
-    # 💬 удаляем Poll сообщение
-    poll_msg_id = st.get("gram_poll_msg_id")
+    # 💬 удаляем фидбек и poll-сообщение
+    await _safe_delete_message(_bot, chat_id, fb.message_id)
     if poll_msg_id:
         await _safe_delete_message(_bot, chat_id, int(poll_msg_id))
 
-    # 💬 идём дальше по индексу
+    # 💬 идём дальше по индексу (авто)
     idx = int(st.get("gram_item_idx") or 0) + 1
     await state.update_data(
         gram_item_idx=idx,
@@ -1512,33 +1522,42 @@ async def _show_practice_link(chat_id, state: FSMContext):
         )
     )
 
-
-
-@router.poll_answer(GrammarStates.practice_poll)
+@router.poll_answer(StateFilter(GrammarStates.practice_poll))
 async def gram_poll_answer_practice(ans: PollAnswer, state: FSMContext) -> None:
-    # 💬 обработка PollQuiz в практике
+    # 💬 обработка PollQuiz в практике: фидбек 1 сек -> удаляем poll+фидбек -> автопереход
     st = await state.get_data()
     poll_id = st.get("gram_poll_id")
     if not poll_id or poll_id != ans.poll_id:
-        return
+        return  # 💬 чужой poll_answer или уже сброшен
 
     chat_id = ans.user.id
     correct = int(st.get("gram_poll_correct") or 0)
     opts = st.get("gram_poll_options") or []
     chosen = ans.option_ids[0] if ans.option_ids else -1
+    poll_msg_id = st.get("gram_poll_msg_id")
 
-    if chosen == correct:
-        txt = "✅ Правильно"
+    is_correct = (chosen == correct)
+
+    # 💬 закрываем poll (без таймаута), чтобы не висел
+    if poll_msg_id:
+        try:
+            await _bot.stop_poll(chat_id=chat_id, message_id=int(poll_msg_id))
+        except Exception:
+            pass
+
+    # 💬 реакция как в лексике
+    if is_correct:
+        txt = random.choice(grammar_quiz_success_phrases)
     else:
         right = opts[correct] if 0 <= correct < len(opts) else "не найден"
-        txt = f"❌ Неправильно\n✅ Правильно: {html.escape(str(right))}"
+        txt = f"{random.choice(grammar_quiz_fail_phrases)}\n✅ {html.escape(str(right))}"
 
-    msg = await _bot.send_message(chat_id=chat_id, text=txt, parse_mode="HTML")
+    fb = await _bot.send_message(chat_id=chat_id, text=txt, parse_mode="HTML")
 
-    await asyncio.sleep(1.5)
-    await _safe_delete_message(_bot, chat_id, msg.message_id)
+    await asyncio.sleep(1.0)  # 💬 даём увидеть фидбек
 
-    poll_msg_id = st.get("gram_poll_msg_id")
+    # 💬 удаляем фидбек и poll-сообщение
+    await _safe_delete_message(_bot, chat_id, fb.message_id)
     if poll_msg_id:
         await _safe_delete_message(_bot, chat_id, int(poll_msg_id))
 
@@ -1554,6 +1573,7 @@ async def gram_poll_answer_practice(ans: PollAnswer, state: FSMContext) -> None:
 
     topic = _get_topic(str(st.get("selected_topic")))
     await _show_practice_item(chat_id=chat_id, state=state, topic=topic)
+
 
 
 # -----------------------------
