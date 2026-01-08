@@ -1463,6 +1463,8 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
         )  # 💬 Poll тоже не копится в чате и не роняет хендлер
 
         if not poll_msg:
+            return  # 💬 защита: poll не отправился, не продолжаем цепочку
+
         _GRAM_POLL_CTX[str(poll_msg.poll.id)] = {
             "chat_id": chat_id,
             "section": "practice",
@@ -1472,8 +1474,6 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
             "correct": correct,
             "opts": opts,
         }  # 💬 сохраняем контекст poll, чтобы PollAnswer не зависел от FSM-ключа
-
-            return
 
         await state.set_state(GrammarStates.practice_poll)  # 💬 ждём PollAnswer для практики
         await state.update_data(
