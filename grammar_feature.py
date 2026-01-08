@@ -250,8 +250,13 @@ def _read_fragments(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
-def _item_type(item: Dict[str, Any]) -> str:
-    # 💬 нормализуем тип элемента
+def _item_type(item: Any) -> str:
+    # 💬 нормализуем тип элемента, включая совместимость со строками в reading.fragments
+    if isinstance(item, str):
+        return "text"  # 💬 если фрагмент = строка, считаем обычным текстом
+    if not isinstance(item, dict):
+        return "text"  # 💬 защита от неожиданных типов
+
     t = (item.get("type") or "").strip().lower()
     if t:
         return t
@@ -260,6 +265,7 @@ def _item_type(item: Dict[str, Any]) -> str:
     if "photo" in item or "file_id" in item or "image" in item:
         return "photo"
     return "text"
+
 
 
 def _user_progress_get(uid: str) -> Dict[str, Any]:
@@ -1188,7 +1194,15 @@ async def gram_read_intro(cb: CallbackQuery, state: FSMContext) -> None:
     await _show_read(chat_id=cb.from_user.id, state=state, topic=topic)
 
 
-def _format_read_fragment(f: Dict[str, Any]) -> str:
+def _format_read_fragment(f: Any) -> str:
+    # 💬 совместимость: если фрагмент = строка, показываем как RU
+    if isinstance(f, str):
+        ru = html.escape(f.strip())
+        return (f"<b>RU</b>\n{ru}").strip() or "Пустой фрагмент"
+
+    if not isinstance(f, dict):
+        return "Пустой фрагмент"  # 💬 защита от мусора
+
     es = html.escape(str(f.get("es") or ""))
     ru = html.escape(str(f.get("ru") or ""))
     hint = str(f.get("hint") or "")
@@ -1201,6 +1215,7 @@ def _format_read_fragment(f: Dict[str, Any]) -> str:
     if hint:
         text += f"💡 hint\n{hint}"
     return text.strip() or "Пустой фрагмент"
+
 
 
 async def _show_read(chat_id: int, state: FSMContext, topic: Dict[str, Any]) -> None:
