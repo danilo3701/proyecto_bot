@@ -2757,26 +2757,43 @@ async def ask_vocab_caption(message: Message, state: FSMContext):
 
 @router.message(NewTopicStates.waiting_vocab_photo_text)
 async def handle_vocab_text(message: Message, state: FSMContext):
-    # 💬 если вместо подписи прислали фото/гиф/стикер = не падаем, а принимаем медиа сразу
-    if not message.text and (message.photo or message.video or message.animation or message.sticker):
-        await state.update_data(vocab_caption=None)  # 💬 подпись пропускаем
-        await state.set_state(NewTopicStates.waiting_vocab_photo)  # 💬 переводим в шаг приёма медиа
-        return await receive_vocab_media(message, state)  # 💬 сохраняем присланное медиа сразу
+    # 💬 в этом state ждём подпись, но пользователь может прислать медиа или URL сразу
+    if message.text is None:
+        await state.update_data(vocab_caption=None)  # 💬 подписи нет = считаем пропуск
 
-    text = (message.text or "").strip()  # 💬 защита от NoneType.strip()
+        if message.photo or message.video or message.animation or message.sticker:
+            await state.set_state(NewTopicStates.waiting_vocab_photo)  # 💬 переводим на приём медиа
+            return await receive_vocab_media(message, state)  # 💬 сохраняем медиа без второго шага
 
-    # 💬 Сохраняем подпись или None
-    if text == '-':
+        await message.answer("Введите подпись к фото словаря или '-' для пропуска:")
+        return
+
+    raw = message.text.strip()
+    if not raw:
+        await message.answer("Введите подпись к фото словаря или '-' для пропуска:")
+        return
+
+    lower = raw.lower()
+
+    # 💬 если вместо подписи прислали URL медиа = принимаем его сразу как фото/гиф/видео
+    if raw.startswith(("http://", "https://", "www.")) and lower.endswith((".jpg", ".jpeg", ".png", ".gif", ".mp4")):
+        await state.update_data(vocab_caption=None)  # 💬 подпись пропущена
+        await state.set_state(NewTopicStates.waiting_vocab_photo)  # 💬 переводим на приём медиа
+        return await receive_vocab_media(message, state)  # 💬 receive_vocab_media сам распознает URL
+
+    # 💬 обычный режим = сохраняем подпись
+    if raw == "-":
         await state.update_data(vocab_caption=None)
     else:
-        await state.update_data(vocab_caption=text)
+        await state.update_data(vocab_caption=raw)
 
-    # 💬 Теперь запрашиваем само фото или URL
+    # 💬 теперь запрашиваем само фото или URL
     await message.answer(
         "🖼 Пришлите фотографию (JPG/PNG) или URL картинки для словаря:",
         reply_markup=ReplyKeyboardRemove()
     )
     await state.set_state(NewTopicStates.waiting_vocab_photo)
+
 
 
 # === БЛОК ДЛЯ "🖼 Добавить ФОТО / PHOTO" — расширенный вариант с GIF и стикерами ===
@@ -3423,6 +3440,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
