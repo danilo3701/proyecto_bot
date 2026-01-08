@@ -3113,8 +3113,11 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
     else:
         await query.answer()
 
-    # 💬 Удаляем сообщение со списком тем
-    await query.message.delete()
+    # 💬 Удаляем сообщение со списком тем (без падения, если уже удалено)
+    try:
+        await query.message.delete()
+    except TelegramBadRequest:
+        pass  # 💬 сообщение уже удалено или не найдено
 
     # 💬 Сохраняем выбранную тему в FSM
     await state.update_data(selected_topic=topic_key)
