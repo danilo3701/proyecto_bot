@@ -495,6 +495,18 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 
     await state.set_state(NewTopicStates.adding_category)
 
+@router.message(StateFilter("*"), F.text.in_(["📚 Лексика", "🧠 Грамматика", "⬅️ Назад"]))
+async def _admin_editmode_category_fallback(message: Message, state: FSMContext):
+    st = await state.get_data()
+    if not st.get(ADMIN_EDIT_MODE_KEY):
+        return
+
+    cur = await state.get_state()
+    if cur in {NewTopicStates.waiting_category.state, NewTopicStates.adding_category.state}:
+        return  # 💬 в норме это обработают основные хендлеры
+
+    await state.set_state(NewTopicStates.waiting_category)  # 💬 чинит “залипший” state, чтобы кнопки снова ловились
+    return await get_category_or_ads(message, state)
 
 
 @router.callback_query(F.data == "adm:close")
@@ -753,9 +765,17 @@ async def handle_edit_topic_choice(message: Message, state: FSMContext):
     topics_dir = get_topics_dir()  # 💬 что делает эта часть: читаем темы из Volume (/data/topics)
     path = topics_dir / f"{name}.json"
 
-    if not path.exists():
-        await message.answer("⚠️ Тема не найдена. Выберите из списка или нажмите «🚫 Отмена».")
+    if not exists:
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="🚫 Отмена")]],
+            resize_keyboard=True
+        )
+        await message.answer(
+            "⚠️ Тема не найдена.\nНажми «🚫 Отмена».",  # 💬 даём реальную кнопку выхода, без тупика
+            reply_markup=kb
+        )
         return
+
 
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -1825,12 +1845,21 @@ async def create_phase(message: Message, state: FSMContext):
     data = await state.get_data()
     phases = data["topic"]["vocab"]
     phase_name = message.text.strip()
+    category_now = ((topic.get("category") or "").strip().lower())
+    if category_now.startswith("gram"):
+        category_now = "gram"
+    else:
+        category_now = "lex"
+
     new_phase = {
-        "phase_id": len(phases) + 1,
+        "phase_id": phase_id,
         "phase_name": phase_name,
-        "vocab": [],
-        "phrases": []  # 💬 единый контейнер ALL IN для показа в боте
+        "vocab": []  # 💬 в грамматике тут храним text/photo/quiz_pool
     }
+
+    if category_now == "lex":
+        new_phase["phrases"] = []  # 💬 phrases нужны только для лексики, в грамматике не используем
+
 
     phases.append(new_phase)
     topic_path = data.get("topic_path")
@@ -2101,6 +2130,15 @@ async def import_vocab_allin_bulk(message: Message, state: FSMContext):
         return
 
     data = await state.get_data()
+    category_now = ((data.get("topic") or {}).get("category") or "").strip().lower()
+    if category_now.startswith("gram"):
+        await message.answer(
+            "⚠️ ALL IN доступен только для «📚 Лексика».\n"
+            "Для грамматики используй «📥 Пулквизы».",  # 💬 защита от ALL IN в грамматике
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return await send_post_menu(message, state)
+
     topic_data = data["topic"]
     topic_path = data["topic_path"]
     cp = data.get("current_phase_id")
@@ -3379,6 +3417,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
