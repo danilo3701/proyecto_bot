@@ -1475,6 +1475,7 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
             "opts": opts,
         }  # 💬 сохраняем контекст poll, чтобы PollAnswer не зависел от FSM-ключа
 
+
         await state.set_state(GrammarStates.practice_poll)  # 💬 ждём PollAnswer для практики
         await state.update_data(
             gram_poll_id=poll_msg.poll.id,
