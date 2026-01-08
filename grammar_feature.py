@@ -352,7 +352,13 @@ def _kb_phases(phases: List[Dict[str, Any]], done_flags: List[bool], *, show_ret
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _kb_nav_in_phase() -> InlineKeyboardMarkup:
+def _kb_nav_in_phase(back_to_phases: bool = False) -> InlineKeyboardMarkup:
+    # 💬 если пришли из практики = "Меню" ведёт назад к выбору фаз (чтобы была кнопка "Вернуться к практике")
+    back_btn = InlineKeyboardButton(
+        text="⬅️ Назад" if back_to_phases else "⬅️ Меню",
+        callback_data="gram:theory" if back_to_phases else "gram:menu",
+    )
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -360,11 +366,11 @@ def _kb_nav_in_phase() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="➡️", callback_data="gram:nav:next"),
             ],
             [
-                InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu"),
-            ],  # 💬 возвращаемся в меню топика
-
+                back_btn,
+            ],
         ]
     )
+
 
 
 
@@ -554,6 +560,8 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data == "gram:menu")
 async def gram_menu(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
+    await _safe_delete_message(_bot, cb.message.chat.id, cb.message.message_id)  # 💬 сразу убираем экран с кнопками после нажатия
+
     await open_grammar_topic(cb.message, state)
 
 
@@ -756,6 +764,8 @@ async def gram_practice_feedback(cb: CallbackQuery, state: FSMContext):
 async def gram_practice_next(cb: CallbackQuery, state: FSMContext):
     # 💬 "Продолжить" -> грузим следующую ссылку и показываем
     await cb.answer()
+    await _safe_delete_message(_bot, cb.message.chat.id, cb.message.message_id)  # 💬 сразу убираем экран с кнопками после нажатия
+
     data = await state.get_data()
     idx = int(data.get("gram_link_idx", 0)) + 1
     await state.update_data(gram_link_idx=idx)
@@ -900,6 +910,8 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
     st = await state.get_data()
     section = st.get("gram_section")
     topic_key = str(st.get("selected_topic") or "")
+    back_to_phases = bool(st.get("gram_return_to_practice"))  # 💬 из практики назад ведём к фазам, а не в меню
+
 
     if section == "theory":
         phase_idx = int(st.get("gram_phase_idx") or 0)
@@ -1031,7 +1043,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
             await _replace_content(
                 chat_id,
                 state,
-                _bot.send_photo(chat_id=chat_id, photo=photo, caption=cap, reply_markup=_kb_nav_in_phase(), parse_mode="HTML"),
+                _bot.send_photo(chat_id=chat_id, photo=photo, caption=cap, reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases), parse_mode="HTML"),
             )
             return
 
@@ -1040,7 +1052,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
         await _replace_content(
             chat_id,
             state,
-            _bot.send_message(chat_id=chat_id, text=text, reply_markup=_kb_nav_in_phase(), parse_mode="HTML", disable_web_page_preview=True),
+            _bot.send_message(chat_id=chat_id, text=text, reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases), parse_mode="HTML", disable_web_page_preview=True),
         )
         return
 
