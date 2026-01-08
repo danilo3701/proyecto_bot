@@ -1840,7 +1840,6 @@ async def send_post_menu(message: Message, state: FSMContext):
 
 
 @router.message(NewTopicStates.waiting_phase_name)
-@router.message(NewTopicStates.waiting_phase_name)
 async def create_phase(message: Message, state: FSMContext):
     # 💬 сохраняем новую фазу
     data = await state.get_data()
@@ -2558,28 +2557,25 @@ async def handle_post_action(message: Message, state: FSMContext):
 # 1) Сохраняем название упражнения
 @router.message(NewTopicStates.waiting_ex_title)
 async def get_ex_title(message: Message, state: FSMContext):
-    await state.update_data(current_ex_title=message.text.strip())
-    await message.answer("Введите ИНСТРУКЦИЮ для упражнения:")
-    await state.set_state(NewTopicStates.waiting_ex_instr)
-
-# 2) Запрашиваем инструкцию к упражнению
-@router.message(NewTopicStates.waiting_ex_instr)
-async def get_ex_instr(message: Message, state: FSMContext):
-    instr = message.text.strip()
-    await state.update_data(current_ex_instr=instr)
-    # 💬 Как в словаре: сразу просим ссылку или iframe
-    await message.answer("Введите ССЫЛКУ или iframe для упражнения:")
+    await state.update_data(current_ex_title=message.text.strip())  # 💬 запоминаем title
+    await message.answer("Введите ССЫЛКУ или iframe для упражнения:")  # 💬 без шага инструкции
     await state.set_state(NewTopicStates.waiting_ex_url)
 
+# 2) Совместимость со старым шагом (если кто то уже попал в waiting_ex_instr)
+@router.message(NewTopicStates.waiting_ex_instr)
+async def get_ex_instr(message: Message, state: FSMContext):
+    await state.update_data(current_ex_instr=None)  # 💬 инструкцию больше не используем
+    await state.set_state(NewTopicStates.waiting_ex_url)  # 💬 перенаправляем на ввод ссылки
+    return await get_ex_link(message, state)
 
-
-# 3) Сохраняем упражнение (title + instr + link) и возвращаем Главное меню
+# 3) Сохраняем упражнение (title + link) и возвращаем Главное меню
 @router.message(NewTopicStates.waiting_ex_url)
 async def get_ex_link(message: Message, state: FSMContext):
     raw = message.text.strip()
-    # — вытягиваем src из iframe, если нужно
+
+    # 💬 вытягиваем src из iframe, если нужно
     if "<iframe" in raw and 'src="' in raw:
-        link = raw.split('src="',1)[1].split('"',1)[0]
+        link = raw.split('src="', 1)[1].split('"', 1)[0]
     else:
         link = raw
 
@@ -2587,22 +2583,17 @@ async def get_ex_link(message: Message, state: FSMContext):
     topic      = data["topic"]
     topic_path = data["topic_path"]
 
-    # — прямо как в словаре, но добавляем инструкцию
     new_block = {
-        "title":       data["current_ex_title"],
-        "instruction": data["current_ex_instr"],
-        "link":        link
+        "title": data["current_ex_title"],
+        "link":  link
     }
     topic.setdefault("exercises", []).append(new_block)
-    # 🔄 Перезаписываем JSON
-    import json
-    with open(topic_path, "w", encoding="utf-8") as f:
-        json.dump(topic, f, ensure_ascii=False, indent=2)
 
-    # очищаем временные поля
+    atomic_save_json(topic_path, topic)  # 💬 сохраняем в volume Railway безопасно (atomic)
+
+    # 💬 очищаем временные поля
     await state.update_data(current_ex_title=None, current_ex_instr=None)
 
-    # — подтвердим и вернём Главное меню темы
     await message.answer("✅ Упражнение сохранено.", reply_markup=ReplyKeyboardRemove())
     await send_post_menu(message, state)
 
@@ -3426,6 +3417,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
