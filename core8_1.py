@@ -3085,12 +3085,19 @@ async def stats_export_handler(message: Message, state: FSMContext):
 
 @dp.callback_query(lambda c: c.data == "back_to_menu")
 async def inline_back_to_menu(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()  # 💬 убираем "часики" сразу, даже если дальше будет delete/edit
+
+    # 💬 TelegramBadRequest тут обычно из-за delete: message can't be deleted / message to delete not found
     try:
-        await callback.message.delete()  # 💬 удаляем только если сообщение ещё существует
+        await callback.message.delete()
     except TelegramBadRequest:
-        pass  # 💬 уже удалено = не падаем
-    await start_handler(callback.message, state)
-    await callback.answer()  # 💬 убираем "часики"
+        # 💬 если удалить нельзя = просто снимаем кнопки, чтобы не жать повторно и не ловить ошибку
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except TelegramBadRequest:
+            pass
+
+    return await start_handler(callback.message, state)  # 💬 возвращаем в выбор категории/тем без падений
 
 
 
