@@ -304,7 +304,7 @@ def _kb_menu() -> InlineKeyboardMarkup:
 def _kb_back_to_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics")]  # 💬 одна кнопка
+            [InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")]  # 💬 возвращаемся в меню топика
         ]
     )
 
@@ -317,7 +317,8 @@ def _kb_phases(phases: List[Dict[str, Any]], done_flags: List[bool]) -> InlineKe
         if i < len(done_flags) and done_flags[i]:
             label = f"⭐ {label}"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"gram:phase:{i}")])
-    rows.append([InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics")])  # 💬 одна кнопка
+    rows.append([InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")])  # 💬 назад в меню топика
+
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -329,8 +330,9 @@ def _kb_nav_in_phase() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="➡️", callback_data="gram:nav:next"),
             ],
             [
-                InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics"),
-            ],  # 💬 оставляем одну кнопку
+                InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu"),
+            ],  # 💬 возвращаемся в меню топика
+
         ]
     )
 
@@ -340,7 +342,8 @@ def _kb_practice_intro() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="▶️ Начать", callback_data="gram:practice:start")],
-            [InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics")],  # 💬 одна кнопка
+            [InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")],  # 💬 назад в меню топика
+
         ]
     )
 
@@ -354,7 +357,8 @@ def _kb_video_controls() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="⏭️ Дальше", callback_data="gram:video:next"),
             ],
             [
-                InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics"),
+                InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu"),
+
             ],  # 💬 одна кнопка
 
         ]
@@ -370,7 +374,8 @@ def _kb_read_controls() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="➡️", callback_data="gram:read:next"),
             ],
             [
-                InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics"),
+                InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu"),
+
             ],  # 💬 одна кнопка
 
         ]
@@ -531,11 +536,9 @@ async def gram_home(cb: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "gram:topics")
 async def gram_topics(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
-    st = await state.get_data()
-    old_id = st.get("gram_content_msg_id")
-    if old_id:
-        await _safe_delete_message(_bot, cb.from_user.id, int(old_id))  # 💬 убираем экран грамматики перед списком тем
-    await state.update_data(gram_content_msg_id=None)  # 💬 сбрасываем текущий экран грамматики
+    # 💬 не удаляем текущее сообщение, core будет редактировать его через edit_text
+    await state.update_data(gram_content_msg_id=None)  # 💬 выходим из грамматики в список тем
+
 
     # 💬 возвращаемся к списку тем грамматики выбранного уровня
     st = await state.get_data()
@@ -566,7 +569,19 @@ async def gram_topics(cb: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(selected_level=lvl)
 
     if _show_topics_for_category_level:
-        await _show_topics_for_category_level(cb, state, category="gram", level=lvl)  # 💬 обратно к темам
+        try:
+            await _show_topics_for_category_level(cb, state, category="gram", level=lvl)  # 💬 обратно к темам
+        except TelegramBadRequest:
+            # 💬 если текущее сообщение уже исчезло, возвращаем в старт без падения
+            if _start_handler:
+                try:
+                    await state.clear()
+                except Exception:
+                    pass
+                await _start_handler(cb.message, state)
+            else:
+                await cb.message.answer("Нажми /start")
+
 
     else:
         await cb.message.answer("⚠️ Нет show_topics_for_category_level.")
