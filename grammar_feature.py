@@ -1227,7 +1227,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
 
 
 
-@router.poll_answer(StateFilter(GrammarStates.theory_poll))
+@router.poll_answer()  # 💬 PollAnswer не всегда корректно матчится по FSM state, фильтруем по poll_id из state
 async def gram_poll_answer_theory(ans: PollAnswer, state: FSMContext) -> None:
     # 💬 обработка PollQuiz в теории: фидбек 1 сек -> удаляем poll+фидбек -> автопереход
     st = await state.get_data()
@@ -1522,7 +1522,7 @@ async def _show_practice_link(chat_id, state: FSMContext):
         )
     )
 
-@router.poll_answer(StateFilter(GrammarStates.practice_poll))
+@router.poll_answer()  # 💬 PollAnswer не всегда корректно матчится по FSM state, фильтруем по poll_id из state
 async def gram_poll_answer_practice(ans: PollAnswer, state: FSMContext) -> None:
     # 💬 обработка PollQuiz в практике: фидбек 1 сек -> удаляем poll+фидбек -> автопереход
     st = await state.get_data()
