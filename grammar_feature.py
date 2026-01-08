@@ -36,6 +36,9 @@ grammar_quiz_fail_phrases = [
     "🤏 Чуть-чуть не то…",
 ]  # 💬 короткие реакции на ошибку
 
+_GRAM_POLL_CTX: Dict[str, Dict[str, Any]] = {}  # 💬 poll_id -> контекст (chat_id/секция/индексы), чтобы PollAnswer работал даже если FSM ключ не совпал
+
+
 import random  # 💬 CTA фразы для link-блоков
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -1151,6 +1154,18 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                 gram_poll_options=opts,
                 gram_poll_section="theory",  # 💬 отмечаем, что это теория
             )
+            _GRAM_POLL_CTX[str(poll_msg.poll.id)] = {
+                "chat_id": chat_id,
+                "section": "theory",
+                "topic_key": topic_key,
+                "phase_idx": phase_idx,
+                "item_idx": idx,
+                "back_to_phases": back_to_phases,
+                "poll_msg_id": poll_msg.message_id,
+                "correct": correct,
+                "opts": opts,
+            }  # 💬 сохраняем контекст poll, чтобы PollAnswer не зависел от FSM-ключа
+
             return
 
         # link  # 💬 показываем ссылку на игру и скрываем URL в CTA, как в vocab
@@ -1231,15 +1246,35 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
 async def gram_poll_answer_theory(ans: PollAnswer, state: FSMContext) -> None:
     # 💬 обработка PollQuiz в теории: фидбек 1 сек -> удаляем poll+фидбек -> автопереход
     st = await state.get_data()
+
+    ctx = _GRAM_POLL_CTX.get(ans.poll_id)  # 💬 запасной путь, если FSM ключ для PollAnswer не совпал
+    if ctx and str(ctx.get("section")) != "theory":
+        return  # 💬 это poll из другой ветки
+
     poll_id = st.get("gram_poll_id")
-    if not poll_id or poll_id != ans.poll_id:
+    if (not poll_id or poll_id != ans.poll_id) and not ctx:
         return  # 💬 чужой poll_answer или уже сброшен
 
-    chat_id = ans.user.id
-    correct = int(st.get("gram_poll_correct") or 0)
-    opts = st.get("gram_poll_options") or []
+    chat_id = int((ctx or {}).get("chat_id") or ans.user.id)
+
+    if ctx:
+        await state.update_data(
+            selected_topic=str(ctx.get("topic_key") or st.get("selected_topic") or ""),
+            gram_section="theory",
+            gram_phase_idx=int(ctx.get("phase_idx") or 0),
+            gram_item_idx=int(ctx.get("item_idx") or 0),
+        )  # 💬 синхронизируем FSM, чтобы автопереход работал стабильно
+        st = await state.get_data()
+
+    try:
+        correct = int((ctx or {}).get("correct") if ctx else (st.get("gram_poll_correct") or 0))
+    except Exception:
+        correct = 0
+
+    opts = (ctx or {}).get("opts") if ctx else (st.get("gram_poll_options") or [])
     chosen = ans.option_ids[0] if ans.option_ids else -1
-    poll_msg_id = st.get("gram_poll_msg_id")
+    poll_msg_id = (ctx or {}).get("poll_msg_id") if ctx else st.get("gram_poll_msg_id")
+
 
     is_correct = (chosen == correct)
 
@@ -1260,6 +1295,8 @@ async def gram_poll_answer_theory(ans: PollAnswer, state: FSMContext) -> None:
     fb = await _bot.send_message(chat_id=chat_id, text=txt, parse_mode="HTML")
 
     await asyncio.sleep(1.0)  # 💬 даём увидеть фидбек
+
+    _GRAM_POLL_CTX.pop(ans.poll_id, None)  # 💬 чистим контекст, чтобы не копился
 
     # 💬 удаляем фидбек и poll-сообщение
     await _safe_delete_message(_bot, chat_id, fb.message_id)
@@ -1427,6 +1464,16 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
         )  # 💬 Poll тоже не копится в чате и не роняет хендлер
 
         if not poll_msg:
+        _GRAM_POLL_CTX[str(poll_msg.poll.id)] = {
+            "chat_id": chat_id,
+            "section": "practice",
+            "topic_key": topic_key,
+            "item_idx": idx,
+            "poll_msg_id": poll_msg.message_id,
+            "correct": correct,
+            "opts": opts,
+        }  # 💬 сохраняем контекст poll, чтобы PollAnswer не зависел от FSM-ключа
+
             return
 
         await state.set_state(GrammarStates.practice_poll)  # 💬 ждём PollAnswer для практики
@@ -1526,15 +1573,33 @@ async def _show_practice_link(chat_id, state: FSMContext):
 async def gram_poll_answer_practice(ans: PollAnswer, state: FSMContext) -> None:
     # 💬 обработка PollQuiz в практике: фидбек 1 сек -> удаляем poll+фидбек -> автопереход
     st = await state.get_data()
+
+    ctx = _GRAM_POLL_CTX.get(ans.poll_id)  # 💬 запасной путь, если FSM ключ для PollAnswer не совпал
+    if ctx and str(ctx.get("section")) != "practice":
+        return  # 💬 это poll из другой ветки
+
     poll_id = st.get("gram_poll_id")
-    if not poll_id or poll_id != ans.poll_id:
+    if (not poll_id or poll_id != ans.poll_id) and not ctx:
         return  # 💬 чужой poll_answer или уже сброшен
 
-    chat_id = ans.user.id
-    correct = int(st.get("gram_poll_correct") or 0)
-    opts = st.get("gram_poll_options") or []
+    chat_id = int((ctx or {}).get("chat_id") or ans.user.id)
+
+    if ctx:
+        await state.update_data(
+            selected_topic=str(ctx.get("topic_key") or st.get("selected_topic") or ""),
+            gram_item_idx=int(ctx.get("item_idx") or 0),
+        )  # 💬 синхронизируем FSM, чтобы автопереход работал стабильно
+        st = await state.get_data()
+
+    try:
+        correct = int((ctx or {}).get("correct") if ctx else (st.get("gram_poll_correct") or 0))
+    except Exception:
+        correct = 0
+
+    opts = (ctx or {}).get("opts") if ctx else (st.get("gram_poll_options") or [])
     chosen = ans.option_ids[0] if ans.option_ids else -1
-    poll_msg_id = st.get("gram_poll_msg_id")
+    poll_msg_id = (ctx or {}).get("poll_msg_id") if ctx else st.get("gram_poll_msg_id")
+
 
     is_correct = (chosen == correct)
 
@@ -1555,6 +1620,7 @@ async def gram_poll_answer_practice(ans: PollAnswer, state: FSMContext) -> None:
     fb = await _bot.send_message(chat_id=chat_id, text=txt, parse_mode="HTML")
 
     await asyncio.sleep(1.0)  # 💬 даём увидеть фидбек
+    _GRAM_POLL_CTX.pop(ans.poll_id, None)  # 💬 чистим контекст, чтобы не копился
 
     # 💬 удаляем фидбек и poll-сообщение
     await _safe_delete_message(_bot, chat_id, fb.message_id)
