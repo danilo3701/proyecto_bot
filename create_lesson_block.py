@@ -79,6 +79,11 @@ router = Router()
 ADMIN_INLINE_MSG_ID_KEY = "admin_inline_msg_id"  # 💬 где хранится id последнего inline-меню
 ADMIN_TOPIC_MAP_KEY = "admin_topic_map"          # 💬 tid -> filename stem для callback
 
+ADMIN_EDIT_MODE_KEY = "admin_edit_mode"            # 💬 режим фильтрованного редактирования
+ADMIN_EDIT_CATEGORY_KEY = "admin_edit_category"    # 💬 выбранная категория (lex/gram)
+ADMIN_EDIT_LEVEL_KEY = "admin_edit_level"          # 💬 выбранный уровень (A0/A1-A2/B1-B2/C1)
+
+
 def _ikb(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     # 💬 собираем InlineKeyboardMarkup из (text, callback_data)
     keyboard = []
@@ -424,35 +429,24 @@ async def start_adding_topic(message: Message, state: FSMContext):
 async def get_category_or_ads(message: Message, state: FSMContext):
     text = message.text.strip()
 
-    # 💬 Прямая кнопка в режим редактирования тем (аналог /edittopic)
+    st = await state.get_data()
+    if text == "⬅️ Назад" and st.get(ADMIN_EDIT_MODE_KEY):
+        return await start_adding_topic(message, state)  # 💬 выход из режима редактирования
+
+
+    # 💬 вход в режим редактирования тем = сначала фильтр (категория -> уровень)
     if text == "✏️ Редактировать темы":
-        # 💬 переходим в единое inline-меню (без захламления чата)
         await state.clear()
+        await state.update_data(**{ADMIN_EDIT_MODE_KEY: True})
 
-        topic_map, files = _load_topics_index()
-        await state.update_data(**{ADMIN_TOPIC_MAP_KEY: topic_map})
-
-        if not files:
-            await message.answer("⚠️ Нет доступных тем для редактирования.", reply_markup=ReplyKeyboardRemove())
-            return
-
-        rows = []
-        for name in files[:30]:
-            tid = _make_tid(name)
-            rows.append([(name, f"adm:topic:{tid}")])
-
-        rows.append([("🏠 В меню /addtopic", "adm:home")])  # 💬 быстрый выход без тупиков
-        rows.append([("⬅️ Закрыть", "adm:close")])
-
-
-        kb = _ikb(rows)
-
-        await _inline_open(
-            message,
-            state,
-            "✏️ <b>Редактировать темы</b>\nВыбери тему:",
-            kb
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")],
+                [KeyboardButton(text="⬅️ Назад")]
+            ],
+            resize_keyboard=True
         )
+        await message.answer("✏️ Редактирование тем.\nВыбери категорию:", reply_markup=kb)  # 💬 шаг 1 фильтра
         return
 
 
@@ -482,6 +476,11 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 
     category = "lex" if text == "📚 Лексика" else "gram"
     await state.update_data(topic={"category": category})
+
+    st = await state.get_data()
+    if st.get(ADMIN_EDIT_MODE_KEY):
+        await state.update_data(**{ADMIN_EDIT_CATEGORY_KEY: category})  # 💬 фиксируем категорию для фильтра
+
 
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
@@ -549,6 +548,11 @@ async def admin_open_topic(cb: CallbackQuery, state: FSMContext):
         await cb.answer("Ошибка чтения JSON", show_alert=True)
         return
 
+    st_prev = await state.get_data()
+    edit_mode = st_prev.get(ADMIN_EDIT_MODE_KEY)
+    edit_cat = st_prev.get(ADMIN_EDIT_CATEGORY_KEY)
+    edit_lvl = st_prev.get(ADMIN_EDIT_LEVEL_KEY)
+
     await state.clear()
     await state.update_data(
         topic=topic_data,
@@ -556,6 +560,9 @@ async def admin_open_topic(cb: CallbackQuery, state: FSMContext):
         topic_level=topic_data.get("level"),
         **{ADMIN_TOPIC_MAP_KEY: topic_map},
         **{ADMIN_INLINE_MSG_ID_KEY: cb.message.message_id},
+        **{ADMIN_EDIT_MODE_KEY: edit_mode},
+        **{ADMIN_EDIT_CATEGORY_KEY: edit_cat},
+        **{ADMIN_EDIT_LEVEL_KEY: edit_lvl},
     )
 
     title = topic_data.get("visible_title") or topic_data.get("name") or name
@@ -569,28 +576,77 @@ async def admin_open_topic(cb: CallbackQuery, state: FSMContext):
 
     await _inline_replace(cb, state, f"✅ Открыта тема: <b>{title}</b>\nЧто сделать?", kb)
     await cb.answer()
-
 @router.callback_query(F.data == "adm:topics")
 async def admin_topics_list(cb: CallbackQuery, state: FSMContext):
-    # 💬 возвращаемся к списку тем в том же сообщении
-    topic_map, files = _load_topics_index()
-    await state.update_data(**{ADMIN_TOPIC_MAP_KEY: topic_map})
+    # 💬 возвращаемся к списку тем в том же сообщении (с учётом фильтра, если он есть)
+    st = await state.get_data()
 
-    if not files:
-        kb = _ikb([[("⬅️ Закрыть", "adm:close")]])
-        await _inline_replace(cb, state, "⚠️ Тем больше нет.", kb)
+    category = st.get(ADMIN_EDIT_CATEGORY_KEY) or ((st.get("topic") or {}).get("category"))
+    level = st.get(ADMIN_EDIT_LEVEL_KEY) or st.get("topic_level") or ((st.get("topic") or {}).get("level"))
+
+    topic_map_all, files = _load_topics_index()
+    show_files = files
+    titles = {}
+
+    if category and level:
+        topics_dir = get_topics_dir()
+        filtered = []
+
+        for name in files:
+            path = topics_dir / f"{name}.json"
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    topic_data = json.load(f) or {}
+            except Exception:
+                continue
+
+            if topic_data.get("category") != category:
+                continue
+            if topic_data.get("level") != level:
+                continue
+
+            filtered.append(name)
+            titles[name] = topic_data.get("visible_title") or topic_data.get("name") or name
+
+        show_files = filtered
+        topic_map = {_make_tid(n): n for n in filtered}
+        await state.update_data(**{
+            ADMIN_EDIT_MODE_KEY: True,
+            ADMIN_EDIT_CATEGORY_KEY: category,
+            ADMIN_EDIT_LEVEL_KEY: level,
+            ADMIN_TOPIC_MAP_KEY: topic_map
+        })
+    else:
+        await state.update_data(**{ADMIN_TOPIC_MAP_KEY: topic_map_all})
+
+    if not show_files:
+        kb = _ikb([
+            [("🏠 В меню /addtopic", "adm:home")],
+            [("⬅️ Закрыть", "adm:close")]
+        ])
+        await _inline_replace(cb, state, "⚠️ Нет тем для выбранной категории или уровня.", kb)
         await cb.answer()
         return
 
     rows = []
-    for name in files[:30]:
+    for name in show_files[:30]:
         tid = _make_tid(name)
-        rows.append([(name, f"adm:topic:{tid}")])
+        label = titles.get(name) or name
+        rows.append([(label, f"adm:topic:{tid}")])
 
+    rows.append([("🏠 В меню /addtopic", "adm:home")])
     rows.append([("⬅️ Закрыть", "adm:close")])
 
+    cat_label = ""
+    if category:
+        cat_label = "Лексика" if category == "lex" else "Грамматика"
+
+    header = "✏️ <b>Редактировать темы</b>\nВыбери тему:"
+    if category and level and cat_label:
+        header = f"✏️ <b>Редактировать темы</b>\nКатегория: {cat_label} | Уровень: {level}\nВыбери тему:"
+
     kb = _ikb(rows)
-    await _inline_replace(cb, state, "✏️ <b>Редактировать темы</b>\nВыбери тему:", kb)
+    await _inline_replace(cb, state, header, kb)
     await cb.answer()
 
 @router.callback_query(F.data.startswith("adm:topic_del:"))
@@ -750,9 +806,65 @@ async def get_level_for_topic(message: Message, state: FSMContext):
     await state.update_data(topic_level=level)
     # 💬 что делает эта часть: сохраняем 'A0' / 'A1-A2' / 'B1-B2' / 'C1' в state, без эмодзи
 
+    st = await state.get_data()
+    if st.get(ADMIN_EDIT_MODE_KEY):
+        category = (st.get("topic") or {}).get("category") or st.get(ADMIN_EDIT_CATEGORY_KEY)
+        await state.update_data(**{ADMIN_EDIT_CATEGORY_KEY: category, ADMIN_EDIT_LEVEL_KEY: level})  # 💬 фильтр списка тем
+
+        topic_map_all, files = _load_topics_index()
+        topics_dir = get_topics_dir()
+
+        filtered = []
+        titles = {}
+
+        for name in files:
+            path = topics_dir / f"{name}.json"
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    topic_data = json.load(f) or {}
+            except Exception:
+                continue
+
+            if topic_data.get("category") != category:
+                continue
+            if topic_data.get("level") != level:
+                continue
+
+            filtered.append(name)
+            titles[name] = topic_data.get("visible_title") or topic_data.get("name") or name  # 💬 показываем человеко-читаемый тайтл
+
+        topic_map = {_make_tid(n): n for n in filtered}
+        await state.update_data(**{ADMIN_TOPIC_MAP_KEY: topic_map})
+
+        if not filtered:
+            await message.answer("⚠️ Нет тем для редактирования в выбранном уровне.\nНажми ⬅️ Назад и выбери другой уровень.")  # 💬 защита от пустого фильтра
+            return
+
+        cat_label = "Лексика" if category == "lex" else "Грамматика"
+
+        rows = []
+        for name in filtered[:30]:
+            tid = _make_tid(name)
+            label = titles.get(name) or name
+            rows.append([(label, f"adm:topic:{tid}")])
+
+        rows.append([("🏠 В меню /addtopic", "adm:home")])  # 💬 быстрый выход без тупиков
+        rows.append([("⬅️ Закрыть", "adm:close")])
+
+        kb = _ikb(rows)
+        await _inline_open(
+            message,
+            state,
+            f"✏️ <b>Редактировать темы</b>\nКатегория: {cat_label} | Уровень: {level}\nВыбери тему:",
+            kb
+        )
+        await state.set_state(NewTopicStates.waiting_edit_topic_choice)  # 💬 фиксируем режим редактирования
+        return
+
     await message.answer("Уровень выбран. Теперь введи НАЗВАНИЕ новой темы:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(NewTopicStates.waiting_topic_name)
     # 💬 После выбора уровня переходим к вводу названия темы.
+
 
 
 
@@ -3244,6 +3356,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
