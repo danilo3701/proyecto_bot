@@ -1111,9 +1111,12 @@ async def gram_practice_intro(cb: CallbackQuery, state: FSMContext) -> None:
         return
 
     topic = _get_topic(str(topic_key))
-    items = _practice_items(topic)
-    if not items:
-        await cb.message.answer("Пока нет Практики.", reply_markup=_kb_back_to_menu())
+
+    exercises = topic.get("exercises") or []
+    link_items = [x for x in exercises if (x.get("url") or x.get("link"))]  # 💬 берём ссылки из exercises (как в админке)
+
+    if not link_items:
+        await cb.message.answer("Пока нет ссылок для Практики.", reply_markup=_kb_back_to_menu())
         return
 
     uid = str(cb.from_user.id)
@@ -1123,9 +1126,10 @@ async def gram_practice_intro(cb: CallbackQuery, state: FSMContext) -> None:
     tp = gp.setdefault(str(topic_key), {})
     pr = tp.setdefault("practice", {})
     done = int(pr.get("done", 0))
-    total = len(items)
+    total = len(link_items)  # 💬 прогресс считаем по количеству ссылок
     pct = (done / total) if total else 0.0
     _user_progress_save(data)
+
 
     await state.set_state(GrammarStates.practice_intro)
     await cb.message.answer(
@@ -1137,28 +1141,16 @@ async def gram_practice_intro(cb: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "gram:practice:start")
 async def gram_practice_start(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
-    chat_id = cb.message.chat.id  # 💬 единый chat_id для всего экрана
+    chat_id = cb.message.chat.id  # 💬 единый chat_id для replace/delete
 
     st = await state.get_data()
-    topic_key = st.get("selected_topic")
-    if not topic_key:
-        await cb.message.answer("⚠️ Не вижу тему.")
-        return
+    topic = _get_topic(str(st.get("selected_topic")))
 
-    topic = _get_topic(str(topic_key))
-    exercises = _practice_items(topic)  # 💬 практика лежит в topic["exercises"]
-    link_items = [x for x in (exercises or []) if isinstance(x, dict) and x.get("url")]  # 💬 только ссылки
+    exercises = topic.get("exercises") or []
+    link_items = [x for x in exercises if (x.get("url") or x.get("link"))]  # 💬 поддержка url/link
 
     if not link_items:
-        await _replace_content(
-            chat_id,
-            state,
-            _bot.send_message(
-                chat_id=chat_id,
-                text="Пока нет ссылок для Практики.",
-                reply_markup=_kb_back_to_menu(),
-            ),
-        )
+        await cb.message.answer("Пока нет ссылок для Практики.", reply_markup=_kb_back_to_menu())
         return
 
     await state.set_state(GrammarStates.practice_view)
@@ -1170,26 +1162,21 @@ async def gram_practice_start(cb: CallbackQuery, state: FSMContext) -> None:
         gram_links_total=len(link_items),
         gram_return_to_practice=False,
         gram_return_practice_idx=None
-    )  # 💬 готовим сессию ссылок
+    )
 
     await _replace_content(
         chat_id,
         state,
-        _bot.send_message(
+        lambda: _bot.send_message(
             chat_id=chat_id,
             text="🚀 Начинаем практику!\n⏳ Гружу ссылку...",
             parse_mode="HTML"
         )
-    )
+    )  # 💬 не копим сообщения, работаем одним фрагментом
+
     await asyncio.sleep(0.8)
     return await _show_practice_link(chat_id, state)
-    await state.update_data(
-        gram_section="practice",
-        gram_item_idx=0,
-        gram_poll_id=None,
-        gram_poll_msg_id=None,
-    )
-    await _show_practice_item(chat_id=cb.from_user.id, state=state, topic=topic)
+
 
 
 async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, Any]) -> None:
