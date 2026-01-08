@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import asyncio  # 💬 таймер для авто удаления
 import html
+import random  # 💬 CTA фразы для link-блоков
+from scenarios_estiloso8_1 import link_cta_phrases  # 💬 скрытые CTA для ссылок, как в vocab
+
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aiogram import Router, F
@@ -818,6 +821,39 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
             )
             return
 
+        # link  # 💬 показываем ссылку на игру и скрываем URL в CTA, как в vocab
+        if t == "link" or item.get("url") or item.get("link"):
+            url = str(item.get("url") or item.get("link") or "").strip()
+            title = str(item.get("title") or item.get("name") or "Упражнение").strip()
+
+            if not url or not (url.startswith("http://") or url.startswith("https://")):
+                await _replace_content(
+                    chat_id,
+                    state,
+                    _bot.send_message(
+                        chat_id=chat_id,
+                        text=header + "⚠️ Ссылка для упражнения не найдена.",
+                        reply_markup=_kb_back_to_menu(),
+                        parse_mode="HTML",
+                    ),
+                )
+                return
+
+            cta = random.choice(link_cta_phrases) if link_cta_phrases else "Открыть"
+            safe_url = html.escape(url, quote=True)
+
+            await _replace_content(
+                chat_id,
+                state,
+                _bot.send_message(
+                    chat_id=chat_id,
+                    text=header + f"🔗 <b>{html.escape(title)}</b>\n👇 <a href=\"{safe_url}\">{html.escape(cta)}</a>",
+                    reply_markup=_kb_back_to_menu(),
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                ),
+            )
+            return
 
 
         if t == "photo":
