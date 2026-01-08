@@ -3102,6 +3102,34 @@ async def inline_back_to_menu(callback: CallbackQuery, state: FSMContext):
 
 
 
+async def safe_open_grammar_topic(message: Message, state: FSMContext):
+    # 💬 безопасно открываем меню грамматики даже если текущее сообщение нельзя редактировать
+    try:
+        # 💬 снимаем кнопки с текущего экрана, чтобы не спамили кликами
+        try:
+            await message.edit_reply_markup(reply_markup=None)
+        except TelegramBadRequest:
+            pass
+
+        return await open_grammar_topic(message, state)
+
+    except TelegramBadRequest:
+        # 💬 fallback: создаём текстовое "хост-сообщение", которое точно можно редактировать
+        host = None
+        try:
+            host = await message.answer("⏳", reply_markup=ReplyKeyboardRemove())
+        except Exception:
+            host = message
+
+        try:
+            return await open_grammar_topic(host, state)
+        except TelegramBadRequest:
+            # 💬 последний fallback: хотя бы не падаем и возвращаем стандартное меню урока
+            return await lesson_menu_handler(host, state)
+
+
+
+
 
     #   🟡 2️⃣ Выбор темы (choosing_topic)
 # ================================================================================
@@ -3176,7 +3204,8 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
             topic = topics.get(topic_key, {})  # 💬 достаём тему, чтобы понять category
             
             if topics.get(topic_key, {}).get("category") == "gram":
-                return await open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню
+                return await safe_open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню без TelegramBadRequest
+
 
             return await lesson_menu_handler(query.message, state)  # 💬 query = текущий CallbackQuery
 
@@ -3221,7 +3250,8 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
             unlocked.append(topic_key)
             save_user_data(data)
         if topics.get(topic_key, {}).get("category") == "gram":
-            return await open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню
+            return await safe_open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню без TelegramBadRequest
+
 
 
         return await lesson_menu_handler(query.message, state)
@@ -3252,7 +3282,8 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
 
         save_user_data(data)
         if topics.get(topic_key, {}).get("category") == "gram":
-            return await open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню
+            return await safe_open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню без TelegramBadRequest
+
 
         return await lesson_menu_handler(query.message, state)
 
