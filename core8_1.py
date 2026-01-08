@@ -3085,9 +3085,12 @@ async def stats_export_handler(message: Message, state: FSMContext):
 
 @dp.callback_query(lambda c: c.data == "back_to_menu")
 async def inline_back_to_menu(callback: CallbackQuery, state: FSMContext):
-    await callback.message.delete()  # Удаляем сообщение с рейтингом (по желанию)
+    try:
+        await callback.message.delete()  # 💬 удаляем только если сообщение ещё существует
+    except TelegramBadRequest:
+        pass  # 💬 уже удалено = не падаем
     await start_handler(callback.message, state)
-    await callback.answer()  # Убирает "часики"
+    await callback.answer()  # 💬 убираем "часики"
 
 
 
@@ -3113,11 +3116,15 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
     else:
         await query.answer()
 
-    # 💬 Удаляем сообщение со списком тем (без падения, если уже удалено)
-    try:
-        await query.message.delete()
-    except TelegramBadRequest:
-        pass  # 💬 сообщение уже удалено или не найдено
+    # 💬 В грамматике обычно редактируем это же сообщение (edit_text) = не удаляем его заранее
+    is_gram = topics.get(topic_key, {}).get("category") == "gram"
+
+    # 💬 В лексике можно удалять список тем, потому что дальше мы отвечаем новыми сообщениями
+    if not is_gram:
+        try:
+            await query.message.delete()
+        except TelegramBadRequest:
+            pass  # 💬 сообщение уже удалено или не найдено
 
     # 💬 Сохраняем выбранную тему в FSM
     await state.update_data(selected_topic=topic_key)
@@ -8982,7 +8989,10 @@ async def check_subscription(query: CallbackQuery, state: FSMContext):
                 save_user_data(data)
 
             # удаляем старое сообщение и reply-кейборд
-            await query.message.delete()
+            try:
+                await query.message.delete()  # 💬 если сообщение уже удалено = не падаем
+            except TelegramBadRequest:
+                pass
             blank = await query.message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
             await blank.delete()
 
