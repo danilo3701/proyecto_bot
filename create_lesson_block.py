@@ -1649,11 +1649,12 @@ async def send_post_menu(message: Message, state: FSMContext):
         category = ((data.get("topic") or {}).get("category") or "").strip()  # 💬 определяем lex/gram для меню
 
         if category == "gram":
-            # 💬 грамматика (теория) = запрещаем ALL IN, чтобы не мешать лексике
+            # 💬 грамматика (теория) = только текст, фото, пулквизы (без VOC и без ALL IN)
             rows = [
-                [KeyboardButton(text="📘VOC")],
                 [KeyboardButton(text="📝ТЕКСТ"), KeyboardButton(text="🖼FOTO")],
+                [KeyboardButton(text="📥 Пулквизы")],  # 💬 пакетный ввод POLL: 4 поля через |
             ]
+
         else:
             # 💬 лексика = оставляем режим ALL IN (phrases)
             rows = [
@@ -2057,12 +2058,65 @@ async def import_vocab_allin_bulk(message: Message, state: FSMContext):
 
 @router.message(NewTopicStates.waiting_vocab_quiz_bulk)
 async def import_vocab_quiz_bulk(message: Message, state: FSMContext):
-    # 💬 bulk QUIZ отключён = всё добавляем через ALL IN (phrases)
-    await message.answer(
-        "❌ Импорт QUIZ отключён.\n"
-        "Используй 🧩 ALL IN и секции [TEXT]/[POLL] внутри [PHRASE].",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    raw = (message.text or "").strip()
+    data = await state.get_data()
+
+    category_now = ((data.get("topic") or {}).get("category") or "").strip()  # 💬 lex/gram
+
+    # 💬 этот bulk нужен только для грамматики (теория)
+    if category_now != "gram":
+        await message.answer(
+            "❌ Пулквизы доступны только в разделе Грамматика.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await send_post_menu(message, state)
+        return
+
+    cp = data.get("current_phase_id")
+    topic = data.get("topic") or {}
+
+    if not cp or not isinstance(cp, int) or cp < 1 or cp > len(topic.get("vocab") or []):
+        await message.answer("❌ Сначала выбери фазу заново (Теория).", reply_markup=ReplyKeyboardRemove())  # 💬 защита от рассинхрона phase_id
+        keyboard = get_main_menu("gram")
+        await message.answer("Возвращаемся в Главное меню.", reply_markup=keyboard)
+        await state.set_state(NewTopicStates.waiting_first_choice)
+        return
+
+    lines_in = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    added, skipped, skipped_idx = 0, 0, []
+
+    for i, ln in enumerate(lines_in, start=1):
+        parts = [p.strip() for p in ln.split("|")]
+
+        # 💬 строго 4 поля = защищаемся от '|' внутри полей
+        if len(parts) != 4 or not parts[0] or not parts[1] or not parts[2] or not parts[3]:
+            skipped += 1
+            skipped_idx.append(i)
+            continue
+
+        q, correct, wrong1, wrong2 = parts[0], parts[1], parts[2], parts[3]
+
+        block = {
+            "type": "quiz",  # 💬 POLL-квиз в теории
+            "question": q,
+            "options": [correct, wrong1, wrong2],  # 💬 правильный всегда первый в options
+            "correct_answer": correct
+        }
+
+        topic["vocab"][cp - 1].setdefault("vocab", []).append(block)
+        added += 1
+
+    with open(data["topic_path"], "w", encoding="utf-8") as f:
+        json.dump(topic, f, ensure_ascii=False, indent=2)  # 💬 сохраняем именно JSON грамматической темы
+
+    if skipped:
+        await message.answer(
+            f"✅ POLL: добавлено {added}.\n⚠️ Пропущено {skipped} (строки: {', '.join(map(str, skipped_idx))}).",
+            reply_markup=ReplyKeyboardRemove()
+        )
+    else:
+        await message.answer(f"✅ POLL: добавлено {added}.", reply_markup=ReplyKeyboardRemove())
+
     await send_post_menu(message, state)
 
 
@@ -2150,7 +2204,7 @@ async def handle_post_action(message: Message, state: FSMContext):
             # 💬 защита: ALL IN только для лексики, в грамматике не даём уходить в этот flow
             await message.answer(
                 "❌ ALL IN доступен только в разделе Лексика.\n"
-                "Для грамматики используй 📝ТЕКСТ или 🖼FOTO.",
+                "Для грамматики используй 📝ТЕКСТ, 🖼FOTO или 📥 Пулквизы.",
                 reply_markup=ReplyKeyboardRemove()
             )
             await send_post_menu(message, state)
@@ -2233,14 +2287,16 @@ async def handle_post_action(message: Message, state: FSMContext):
 
 
 
-        if text == "📥TXT_QUIZ":
-            # 💬 просим многострочный список: каждая строка "ВОПРОС | ПРАВИЛЬНЫЙ"
-            await message.answer("📥 Отправь список TEXT_QUIZ:\nкаждая строка: ВОПРОС | ПРАВИЛЬНЫЙ\n(пустые строки игнорируются)")
-            return await state.set_state(NewTopicStates.waiting_vocab_textquiz_bulk)
-
-        if text == "📥QUIZ":
-            # 💬 просим многострочный список: "вопрос | правильный | неверный1 | неверный2 | объяснение(опц.)"
-            await message.answer("📥 Отправь список QUIZ:\nкаждая строка: ВОПРОС | ПРАВИЛЬНЫЙ | НЕВЕРНЫЙ1 | НЕВЕРНЫЙ2 | ОБЪЯСНЕНИЕ(опционально)\n(пустые строки игнорируются)")
+        if category_now == "gram" and text == "📥 Пулквизы":
+            # 💬 грамматика: пакетный ввод POLL (4 поля), сохраняем в phase["vocab"]
+            await message.answer(
+                "📥 Отправь POLL-квизы списком.\n"
+                "Каждая строка = 4 поля через | \n"
+                "ВОПРОС | ПРАВИЛЬНЫЙ | НЕВЕРНЫЙ1 | НЕВЕРНЫЙ2\n"
+                "Правильный ответ всегда поле №2.\n"
+                "Символ | внутри полей запрещён.",
+                reply_markup=ReplyKeyboardRemove()
+            )
             return await state.set_state(NewTopicStates.waiting_vocab_quiz_bulk)
 
         # — Добавить ТЕКСТ
@@ -2290,9 +2346,20 @@ async def handle_post_action(message: Message, state: FSMContext):
 
 
     # ─── Некорректный ввод ───
-    await message.answer(
-        "❗ Пожалуйста, нажми одну из кнопок: «📘VOC», «📝ТЕКСТ», «🖼FOTO», «📥TXT_QUIZ», «📥QUIZ» или «↩️ Вернуться в Главное меню»."
-    )
+    if last_block == "vocab":
+        category_now = ((data.get("topic") or {}).get("category") or "").strip()  # 💬 показываем актуальные кнопки
+        if category_now == "gram":
+            await message.answer(
+                "❗ Пожалуйста, нажми одну из кнопок: «📝ТЕКСТ», «🖼FOTO», «📥 Пулквизы» или «↩️ Вернуться в Главное меню»."
+            )
+        else:
+            await message.answer(
+                "❗ Пожалуйста, нажми одну из кнопок: «📘VOC», «🧩 ALL IN» или «↩️ Вернуться в Главное меню»."
+            )
+        return
+
+    await message.answer("❗ Пожалуйста, нажми «↩️ Вернуться в Главное меню».")
+
 
 
 
@@ -3177,6 +3244,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
