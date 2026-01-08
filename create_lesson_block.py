@@ -2757,7 +2757,14 @@ async def ask_vocab_caption(message: Message, state: FSMContext):
 
 @router.message(NewTopicStates.waiting_vocab_photo_text)
 async def handle_vocab_text(message: Message, state: FSMContext):
-    text = message.text.strip()
+    # 💬 если вместо подписи прислали фото/гиф/стикер = не падаем, а принимаем медиа сразу
+    if not message.text and (message.photo or message.video or message.animation or message.sticker):
+        await state.update_data(vocab_caption=None)  # 💬 подпись пропускаем
+        await state.set_state(NewTopicStates.waiting_vocab_photo)  # 💬 переводим в шаг приёма медиа
+        return await receive_vocab_media(message, state)  # 💬 сохраняем присланное медиа сразу
+
+    text = (message.text or "").strip()  # 💬 защита от NoneType.strip()
+
     # 💬 Сохраняем подпись или None
     if text == '-':
         await state.update_data(vocab_caption=None)
@@ -2770,7 +2777,6 @@ async def handle_vocab_text(message: Message, state: FSMContext):
         reply_markup=ReplyKeyboardRemove()
     )
     await state.set_state(NewTopicStates.waiting_vocab_photo)
-
 
 
 # === БЛОК ДЛЯ "🖼 Добавить ФОТО / PHOTO" — расширенный вариант с GIF и стикерами ===
@@ -3417,6 +3423,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
