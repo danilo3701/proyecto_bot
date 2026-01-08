@@ -1143,28 +1143,29 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                 ),
             )  # 💬 Poll тоже не копится в чате и не роняет хендлер
 
-        if not poll_msg:
-            return  # 💬 если не смогли отправить poll = выходим без падения
+            if not poll_msg:
+                return  # 💬 защита: poll не отправился, не продолжаем цепочку
 
-        _GRAM_POLL_CTX[str(poll_msg.poll.id)] = {
-            "chat_id": chat_id,
-            "section": "practice",
-            "topic_key": topic_key,
-            "item_idx": idx,
-            "poll_msg_id": poll_msg.message_id,
-            "correct": correct,
-            "opts": opts,
-        }  # 💬 сохраняем контекст poll, чтобы PollAnswer не зависел от FSM-ключа
+            _GRAM_POLL_CTX[str(poll_msg.poll.id)] = {
+                "chat_id": chat_id,
+                "section": "theory",
+                "topic_key": topic_key,
+                "phase_idx": phase_idx,
+                "item_idx": idx,
+                "poll_msg_id": poll_msg.message_id,
+                "correct": correct,
+                "opts": opts,
+            }  # 💬 сохраняем контекст poll для теории
 
-        await state.set_state(GrammarStates.practice_poll)  # 💬 ждём PollAnswer для практики
-        await state.update_data(
-            gram_poll_id=poll_msg.poll.id,
-            gram_poll_msg_id=poll_msg.message_id,
-            gram_poll_correct=correct,
-            gram_poll_options=opts,
-            gram_poll_section="practice",  # 💬 отмечаем, что это практика
-        )
-        return
+            await state.set_state(GrammarStates.theory_poll)  # 💬 ждём PollAnswer для теории
+            await state.update_data(
+                gram_poll_id=poll_msg.poll.id,
+                gram_poll_msg_id=poll_msg.message_id,
+                gram_poll_correct=correct,
+                gram_poll_options=opts,
+                gram_poll_section="theory",  # 💬 отмечаем, что это теория
+            )
+            return  # 💬 важно: не проваливаемся дальше в link/text
 
 
         # link  # 💬 показываем ссылку на игру и скрываем URL в CTA, как в vocab
