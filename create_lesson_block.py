@@ -447,6 +447,7 @@ async def get_category_or_ads(message: Message, state: FSMContext):
             resize_keyboard=True
         )
         await message.answer("✏️ Редактирование тем.\nВыбери категорию:", reply_markup=kb)  # 💬 шаг 1 фильтра
+        await state.set_state(NewTopicStates.waiting_category)  # 💬 возвращаем state, иначе кнопки категории не ловятся
         return
 
 
@@ -1758,7 +1759,12 @@ async def send_post_menu(message: Message, state: FSMContext):
 
     # Составляем кнопки под тип последнего блока
     if last == "vocab":
-        category = ((data.get("topic") or {}).get("category") or "").strip()  # 💬 определяем lex/gram для меню
+        category = ((data.get("topic") or {}).get("category") or "").strip().lower()  # 💬 нормализуем lex/gram для меню
+        if category.startswith("gram"):
+            category = "gram"
+        elif category.startswith("lex"):
+            category = "lex"
+
 
         if category == "gram":
             # 💬 грамматика (теория) = только текст, фото, пулквизы (без VOC и без ALL IN)
@@ -2310,9 +2316,25 @@ async def handle_post_action(message: Message, state: FSMContext):
 
     # ─── БЛОК «СЛОВАРЬ» ───
     if last_block == "vocab":
-        category_now = ((data.get("topic") or {}).get("category") or "").strip()  # 💬 lex/gram в текущей теме
+        category_now = ((data.get("topic") or {}).get("category") or "").strip().lower()  # 💬 lex/gram в текущей теме
+        if category_now.startswith("gram"):
+            category_now = "gram"
+        elif category_now.startswith("lex"):
+            category_now = "lex"
 
-        if category_now == "gram" and text == "🧩 ALL IN":
+        pressed = (text or "").replace(" ", "")  # 💬 нормализуем кнопку, иногда Телеграм добавляет пробелы
+
+        if category_now == "gram" and pressed == "📘VOC":
+            # 💬 защита: VOC не должен жить в грамматике (иначе уводит в круг фаз)
+            await message.answer(
+                "❌ VOC доступен только в разделе Лексика.\n"
+                "Для грамматики используй 📝ТЕКСТ, 🖼FOTO или 📥 Пулквизы.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            await send_post_menu(message, state)
+            return
+
+        if category_now == "gram" and pressed == "🧩ALLIN":
             # 💬 защита: ALL IN только для лексики, в грамматике не даём уходить в этот flow
             await message.answer(
                 "❌ ALL IN доступен только в разделе Лексика.\n"
@@ -2321,6 +2343,7 @@ async def handle_post_action(message: Message, state: FSMContext):
             )
             await send_post_menu(message, state)
             return
+
 
         # 💬 для лексики отключаем старые ветки vocab = оставляем только ALL IN (phrases)
         disabled = {
@@ -3356,6 +3379,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
