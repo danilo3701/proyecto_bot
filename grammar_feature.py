@@ -838,17 +838,6 @@ async def gram_phase_open(cb: CallbackQuery, state: FSMContext) -> None:
     await _show_current_item(chat_id=cb.from_user.id, state=state, topic=topic)
 
 
-@dp.callback_query(lambda c: c.data == "gram:practice:return")
-async def gram_return_to_practice(cb: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    idx = data.get("gram_return_practice_idx", 0)
-    await state.update_data(
-        gram_return_to_practice=False,
-        gram_link_idx=idx
-    )
-    await cb.answer("Возвращаемся к практике…")
-    return await _show_practice_link(cb.message.chat.id, state)
-
 
 @router.callback_query(F.data.in_(["gram:nav:prev", "gram:nav:next"]))
 async def gram_nav(cb: CallbackQuery, state: FSMContext) -> None:
