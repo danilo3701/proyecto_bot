@@ -1646,11 +1646,21 @@ async def send_post_menu(message: Message, state: FSMContext):
 
     # Составляем кнопки под тип последнего блока
     if last == "vocab":
-        # 💬 оставляем единый формат добавления контента = только ALL IN (phrases)
-        rows = [
-            [KeyboardButton(text="📘VOC")],
-            [KeyboardButton(text="🧩 ALL IN")],
-        ]
+        category = ((data.get("topic") or {}).get("category") or "").strip()  # 💬 определяем lex/gram для меню
+
+        if category == "gram":
+            # 💬 грамматика (теория) = запрещаем ALL IN, чтобы не мешать лексике
+            rows = [
+                [KeyboardButton(text="📘VOC")],
+                [KeyboardButton(text="📝ТЕКСТ"), KeyboardButton(text="🖼FOTO")],
+            ]
+        else:
+            # 💬 лексика = оставляем режим ALL IN (phrases)
+            rows = [
+                [KeyboardButton(text="📘VOC")],
+                [KeyboardButton(text="🧩 ALL IN")],
+            ]
+
 
 
 
@@ -1704,6 +1714,10 @@ async def create_phase(message: Message, state: FSMContext):
     }
 
     phases.append(new_phase)
+    topic_path = data.get("topic_path")
+    if topic_path:
+        atomic_save_json(topic_path, data["topic"])  # 💬 сохраняем фазу сразу в JSON, чтобы не было рассинхрона
+
     await state.update_data(topic=data["topic"], current_phase_id=new_phase["phase_id"])
     await message.answer(f"Фаза «{phase_name}» создана.")
     # Далее просим заголовок словаря в этой фазе
@@ -2130,8 +2144,19 @@ async def handle_post_action(message: Message, state: FSMContext):
 
     # ─── БЛОК «СЛОВАРЬ» ───
     if last_block == "vocab":
-        # 💬 что делает эта часть: алиасы кнопок Теории (gram) на существующие ветки
-        # 💬 отключаем старые ветки vocab = оставляем только ALL IN (phrases)
+        category_now = ((data.get("topic") or {}).get("category") or "").strip()  # 💬 lex/gram в текущей теме
+
+        if category_now == "gram" and text == "🧩 ALL IN":
+            # 💬 защита: ALL IN только для лексики, в грамматике не даём уходить в этот flow
+            await message.answer(
+                "❌ ALL IN доступен только в разделе Лексика.\n"
+                "Для грамматики используй 📝ТЕКСТ или 🖼FOTO.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            await send_post_menu(message, state)
+            return
+
+        # 💬 для лексики отключаем старые ветки vocab = оставляем только ALL IN (phrases)
         disabled = {
             "🔗 LINK",
             "📥QUIZ",
@@ -2142,7 +2167,7 @@ async def handle_post_action(message: Message, state: FSMContext):
             "🖼 Фото",
             "📥 Пулквизы",
         }
-        if text in disabled:
+        if category_now != "gram" and text in disabled:
             await message.answer(
                 "❌ Эта ветка отключена.\n"
                 "Используй 🧩 ALL IN (phrases).",
@@ -2150,6 +2175,7 @@ async def handle_post_action(message: Message, state: FSMContext):
             )
             await send_post_menu(message, state)
             return
+
 
         if text == "🧩 ALL IN":
             cp = data.get("current_phase_id")
@@ -2256,17 +2282,12 @@ async def handle_post_action(message: Message, state: FSMContext):
 
     # ─── Вернуться в Главное меню ───
     if text == "↩️ Вернуться в Главное меню":
-        keyboard = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="📚 словарь"), KeyboardButton(text="✏️ Добавить упражнение")],
-                [KeyboardButton(text="🎥 Добавить видео"),     KeyboardButton(text="💬 Добавить диалог")],
-                [KeyboardButton(text="👁 Просмотреть"),       KeyboardButton(text="✏️ Редактировать")]
-            ],
-            resize_keyboard=True
-        )
+        category_now = ((data.get("topic") or {}).get("category") or "").strip()  # 💬 возвращаемся в правильное меню
+        keyboard = get_main_menu(category_now)
         await message.answer("Возвращаемся в Главное меню.", reply_markup=keyboard)
         await state.set_state(NewTopicStates.waiting_first_choice)
         return
+
 
     # ─── Некорректный ввод ───
     await message.answer(
@@ -3156,6 +3177,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
