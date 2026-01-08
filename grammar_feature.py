@@ -336,21 +336,19 @@ def _kb_back_to_menu() -> InlineKeyboardMarkup:
     )
 
 
-
-def _kb_phases(phases: List[Dict[str, Any]], done_flags: List[bool]) -> InlineKeyboardMarkup:
+def _kb_phases(phases: List[Dict[str, Any]], done_flags: List[bool], *, show_return_button: bool = False) -> InlineKeyboardMarkup:
     rows: List[List[InlineKeyboardButton]] = []
-    # 💬 если пользователь пришёл из практики — добавляем кнопку возврата
-    data = asyncio.get_event_loop().run_until_complete(state.get_data())
-    if data.get("gram_return_to_practice"):
-        rows.append([InlineKeyboardButton(text="↩️ Вернуться к практике", callback_data="gram:practice:return")])
+
+    if show_return_button:
+        rows.append([InlineKeyboardButton(text="↩️ Вернуться к практике", callback_data="gram:practice:return")])  # 💬 возврат в link-практику
 
     for i, ph in enumerate(phases):
         label = _phase_title(ph, i)
         if i < len(done_flags) and done_flags[i]:
             label = f"⭐ {label}"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"gram:phase:{i}")])
-    rows.append([InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")])  # 💬 назад в меню топика
 
+    rows.append([InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")])  # 💬 назад в меню топика
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -661,7 +659,10 @@ async def gram_theory(cb: CallbackQuery, state: FSMContext) -> None:
     await _replace_content(
         chat_id=cb.from_user.id,
         state=state,
-        send_coro=cb.message.answer("Выбери фазу:", reply_markup=_kb_phases(phases, done_flags)),
+        send_coro=cb.message.answer(
+            "Выбери фазу:",
+            reply_markup=_kb_phases(phases, done_flags, show_return_button=bool((await state.get_data()).get("gram_return_to_practice"))),
+        ),
     )  # 💬 список фаз в одном сообщении
 
 
@@ -1136,20 +1137,32 @@ async def gram_practice_intro(cb: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "gram:practice:start")
 async def gram_practice_start(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
+    chat_id = cb.message.chat.id  # 💬 единый chat_id для всего экрана
+
     st = await state.get_data()
-    topic = _get_topic(str(st.get("selected_topic")))
-    items = _practice_items(topic)
-    if not items:
-        await cb.message.answer("Пока нет Практики.", reply_markup=_kb_back_to_menu())
+    topic_key = st.get("selected_topic")
+    if not topic_key:
+        await cb.message.answer("⚠️ Не вижу тему.")
+        return
+
+    topic = _get_topic(str(topic_key))
+    exercises = _practice_items(topic)  # 💬 практика лежит в topic["exercises"]
+    link_items = [x for x in (exercises or []) if isinstance(x, dict) and x.get("url")]  # 💬 только ссылки
+
+    if not link_items:
+        await _replace_content(
+            chat_id,
+            state,
+            _bot.send_message(
+                chat_id=chat_id,
+                text="Пока нет ссылок для Практики.",
+                reply_markup=_kb_back_to_menu(),
+            ),
+        )
         return
 
     await state.set_state(GrammarStates.practice_view)
-    # 💬 перед стартом практики очищаем прогресс и подготавливаем ссылки
-    data = await state.get_data()
-    topic = data.get("topic_data") or {}
-    exercises = topic.get("exercises") or []
 
-    link_items = [x for x in exercises if x.get("url")]
     await state.update_data(
         gram_link_items=link_items,
         gram_link_idx=0,
@@ -1157,7 +1170,7 @@ async def gram_practice_start(cb: CallbackQuery, state: FSMContext) -> None:
         gram_links_total=len(link_items),
         gram_return_to_practice=False,
         gram_return_practice_idx=None
-    )
+    )  # 💬 готовим сессию ссылок
 
     await _replace_content(
         chat_id,
@@ -1170,7 +1183,6 @@ async def gram_practice_start(cb: CallbackQuery, state: FSMContext) -> None:
     )
     await asyncio.sleep(0.8)
     return await _show_practice_link(chat_id, state)
-
     await state.update_data(
         gram_section="practice",
         gram_item_idx=0,
