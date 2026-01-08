@@ -296,6 +296,9 @@ def _item_type(item: Any) -> str:
         return "text"  # 💬 защита от неожиданных типов
 
     t = (item.get("type") or "").strip().lower()
+    if t in ("quiz", "pollquiz", "poll_quiz"):
+        return "poll"  # 💬 совместимость: CreateLessonBlock сохраняет poll-квизы как type=quiz
+
     if t:
         return t
     if "question" in item and ("options" in item or "answers" in item):
