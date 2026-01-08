@@ -5142,12 +5142,15 @@ async def start_vocab(message: Message, state: FSMContext):
     if idx >= len(vocab_list):
         await smart_reply(message, "🎉 Все задания в этой фазе пройдены!", reply_markup=ReplyKeyboardRemove())
         return await lesson_menu_handler(message, state)
+        
     # 6) Сохраняем в state stats по текст-квизам (печеньки)
-    max_cookies = sum(1 for b in vocab_list if b.get("type") == "textquiz")
+    max_cookies = sum(1 for b in vocab_list if b.get("type") == "textquiz") * 2  # 💬 1 фраза = 2 слова = 2 🍪
     xp_all = load_xp_data().get(str(message.chat.id), {})
     initial_cookies = xp_all.get("stats", {}).get("words_learned", 0)
     await state.update_data(max_cookies=max_cookies,
                             initial_cookies=initial_cookies)
+
+
 
     # 7) Вступительная фраза
     if idx == 0:
@@ -7350,16 +7353,31 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
              .get("words_learned", 0)
          ) - data.get("initial_cookies", 0)
 
-    if is_correct and given < data.get("max_cookies", 0):
-        # 📌 даём +1 «слово выучено», если не исчерпан лимит
-        await add_xp(user_id, topic_key, 0, action="words_learned")
+    max_cookies = data.get("max_cookies", 0)
+    to_give = min(2, max(0, max_cookies - given))  # 💬 даём 2 🍪 за 1 текстквиз, но не превышаем лимит
 
-        # 💬 каждые 3 правильных TEXTQUIZ показываем батч "+3 слова выучено"
-        given_after = given + 1  # текущее количество в рамках урока
-        if given_after % 3 == 0:
-            extra_fb = await message.answer("+3 слова выучено", parse_mode="HTML")
-        else:
-            extra_fb = None
+    if is_correct and to_give > 0:
+        # 📌 начисляем «слова выучено» как печеньки (1 слово = 1 🍪)
+        for _ in range(to_give):
+            await add_xp(user_id, topic_key, 0, action="words_learned")  # 💬 +1 слово (🍪)
+
+        given_after = given + to_give
+
+        # 💬 редко показываем прогресс внутри фазы и удаляем (каждые 6 слов = 3 фразы)
+        if given_after % 6 == 0:
+            asyncio.create_task(
+                send_and_auto_delete_text(
+                    bot,
+                    message.chat.id,
+                    f"📚 В этой фазе уже +{given_after} слов",
+                    delay=2.0,
+                    parse_mode="HTML"
+                )
+            )
+
+        # 💬 показываем сколько «печенька» дала слов за этот текстквиз
+        extra_fb = await message.answer(f"🍪 +{to_give}\n📚 +{to_give} слов", parse_mode="HTML")
+
 
     elif not is_correct:
         # 📌 показываем правильный ответ заглавными
@@ -8450,16 +8468,31 @@ async def handle_failed_textquiz(message: Message, state: FSMContext):
              .get("words_learned", 0)
          ) - data.get("initial_cookies", 0)
 
-    if is_correct and given < data.get("max_cookies", 0):
-        # 📌 даём +1 «слово выучено», если не исчерпан лимит
-        await add_xp(user_id, topic_key, 0, action="words_learned")
+    max_cookies = data.get("max_cookies", 0)
+    to_give = min(2, max(0, max_cookies - given))  # 💬 даём 2 🍪 за 1 текстквиз, но не превышаем лимит
 
-        # 💬 каждые 3 правильных TEXTQUIZ (включая ревью) показываем батч "+3 слова выучено"
-        given_after = given + 1
-        if given_after % 3 == 0:
-            extra_fb = await message.answer("+3 слова выучено", parse_mode="HTML")
-        else:
-            extra_fb = None
+    if is_correct and to_give > 0:
+        # 📌 начисляем «слова выучено» как печеньки (1 слово = 1 🍪)
+        for _ in range(to_give):
+            await add_xp(user_id, topic_key, 0, action="words_learned")  # 💬 +1 слово (🍪)
+
+        given_after = given + to_give
+
+        # 💬 редко показываем прогресс внутри фазы и удаляем (каждые 6 слов = 3 фразы)
+        if given_after % 6 == 0:
+            asyncio.create_task(
+                send_and_auto_delete_text(
+                    bot,
+                    message.chat.id,
+                    f"📚 В этой фазе уже +{given_after} слов",
+                    delay=2.0,
+                    parse_mode="HTML"
+                )
+            )
+
+        # 💬 показываем сколько «печенька» дала слов за этот текстквиз
+        extra_fb = await message.answer(f"🍪 +{to_give}\n📚 +{to_give} слов", parse_mode="HTML")
+
 
     elif not is_correct:
         # 📌 показываем все допустимые ответы заглавными, через «или»
