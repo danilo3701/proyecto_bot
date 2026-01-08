@@ -5,6 +5,10 @@ from __future__ import annotations
 
 import asyncio  # 💬 таймер для авто удаления
 import html
+import random  # 💬 для выбора CTA фраз и случайных кнопок Feedback
+from feedback_difficulty_block import feedback_questions  # 💬 вопросы и кнопки Feedback
+from scenarios_estiloso8_1 import link_cta_phrases  # 💬 CTA фразы для ссылок
+
 import random  # 💬 CTA фразы для link-блоков
 from scenarios_estiloso8_1 import link_cta_phrases  # 💬 скрытые CTA для ссылок, как в vocab
 
@@ -321,6 +325,11 @@ def _kb_back_to_menu() -> InlineKeyboardMarkup:
 
 def _kb_phases(phases: List[Dict[str, Any]], done_flags: List[bool]) -> InlineKeyboardMarkup:
     rows: List[List[InlineKeyboardButton]] = []
+    # 💬 если пользователь пришёл из практики — добавляем кнопку возврата
+    data = asyncio.get_event_loop().run_until_complete(state.get_data())
+    if data.get("gram_return_to_practice"):
+        rows.append([InlineKeyboardButton(text="↩️ Вернуться к практике", callback_data="gram:practice:return")])
+
     for i, ph in enumerate(phases):
         label = _phase_title(ph, i)
         if i < len(done_flags) and done_flags[i]:
@@ -356,6 +365,14 @@ def _kb_practice_intro() -> InlineKeyboardMarkup:
         ]
     )
 
+def _kb_practice_continue_menu(done, total):
+    # 💬 клавиатура после Feedback: Продолжить или Меню
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"▶️ Продолжить ({done}/{total})", callback_data="gram:practice:next")],
+            [InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")]
+        ]
+    )
 
 
 def _kb_video_controls() -> InlineKeyboardMarkup:
@@ -633,6 +650,84 @@ async def gram_theory(cb: CallbackQuery, state: FSMContext) -> None:
         send_coro=cb.message.answer("Выбери фазу:", reply_markup=_kb_phases(phases, done_flags)),
     )  # 💬 список фаз в одном сообщении
 
+
+
+@dp.callback_query(lambda c: c.data == "gram:practice:done")
+async def gram_practice_done(cb: CallbackQuery, state: FSMContext):
+    # 💬 кнопка "Сделано" → показываем Feedback Difficulty
+    question = random.choice(feedback_questions)
+    opts = question.get("options", ["Легко", "Сложно"])
+    text = question.get("text", "Как тебе было это упражнение?")
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=opts[0], callback_data="gram:practice:fd:0"),
+             InlineKeyboardButton(text=opts[1], callback_data="gram:practice:fd:1")]
+        ]
+    )
+    await _replace_content(
+        cb.message.chat.id,
+        state,
+        _bot.send_message(
+            chat_id=cb.message.chat.id,
+            text=text,
+            reply_markup=kb
+        )
+    )
+    await cb.answer()
+
+
+@dp.callback_query(lambda c: c.data.startswith("gram:practice:fd:"))
+async def gram_practice_feedback(cb: CallbackQuery, state: FSMContext):
+    # 💬 пользователь выбрал сложность → увеличиваем прогресс, показываем "Продолжить/Меню"
+    data = await state.get_data()
+    done = int(data.get("gram_links_done", 0)) + 1
+    total = data.get("gram_links_total", 1)
+    await state.update_data(gram_links_done=done)
+    bar = f"[{done}/{total}]"
+
+    await _replace_content(
+        cb.message.chat.id,
+        state,
+        _bot.send_message(
+            chat_id=cb.message.chat.id,
+            text=f"👍 Отлично! {bar}",
+            reply_markup=_kb_practice_continue_menu(done, total)
+        )
+    )
+    await cb.answer()
+
+
+@dp.callback_query(lambda c: c.data == "gram:practice:next")
+async def gram_practice_next(cb: CallbackQuery, state: FSMContext):
+    # 💬 переход к следующей ссылке
+    data = await state.get_data()
+    idx = data.get("gram_link_idx", 0) + 1
+    await state.update_data(gram_link_idx=idx)
+    await _replace_content(
+        cb.message.chat.id,
+        state,
+        _bot.send_message(
+            chat_id=cb.message.chat.id,
+            text="⏳ Гружу следующую ссылку...",
+            parse_mode="HTML"
+        )
+    )
+    await asyncio.sleep(0.8)
+    return await _show_practice_link(cb.message.chat.id, state)
+
+
+@dp.callback_query(lambda c: c.data == "gram:practice:theory")
+async def gram_practice_theory(cb: CallbackQuery, state: FSMContext):
+    # 💬 переход в теорию с возможностью вернуться к практике
+    data = await state.get_data()
+    await state.update_data(
+        gram_return_to_practice=True,
+        gram_return_practice_idx=data.get("gram_link_idx", 0)
+    )
+    await cb.answer()
+    return await gram_phases(cb, state)
+
+
 @router.callback_query(F.data.startswith("gram:phase:"))
 async def gram_phase_open(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
@@ -669,6 +764,18 @@ async def gram_phase_open(cb: CallbackQuery, state: FSMContext) -> None:
         gram_poll_msg_id=None,
     )
     await _show_current_item(chat_id=cb.from_user.id, state=state, topic=topic)
+
+
+@dp.callback_query(lambda c: c.data == "gram:practice:return")
+async def gram_return_to_practice(cb: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    idx = data.get("gram_return_practice_idx", 0)
+    await state.update_data(
+        gram_return_to_practice=False,
+        gram_link_idx=idx
+    )
+    await cb.answer("Возвращаемся к практике…")
+    return await _show_practice_link(cb.message.chat.id, state)
 
 
 @router.callback_query(F.data.in_(["gram:nav:prev", "gram:nav:next"]))
@@ -976,6 +1083,33 @@ async def gram_practice_start(cb: CallbackQuery, state: FSMContext) -> None:
         return
 
     await state.set_state(GrammarStates.practice_view)
+    # 💬 перед стартом практики очищаем прогресс и подготавливаем ссылки
+    data = await state.get_data()
+    topic = data.get("topic_data") or {}
+    exercises = topic.get("exercises") or []
+
+    link_items = [x for x in exercises if x.get("url")]
+    await state.update_data(
+        gram_link_items=link_items,
+        gram_link_idx=0,
+        gram_links_done=0,
+        gram_links_total=len(link_items),
+        gram_return_to_practice=False,
+        gram_return_practice_idx=None
+    )
+
+    await _replace_content(
+        chat_id,
+        state,
+        _bot.send_message(
+            chat_id=chat_id,
+            text="🚀 Начинаем практику!\n⏳ Гружу ссылку...",
+            parse_mode="HTML"
+        )
+    )
+    await asyncio.sleep(0.8)
+    return await _show_practice_link(chat_id, state)
+
     await state.update_data(
         gram_section="practice",
         gram_item_idx=0,
@@ -1086,6 +1220,56 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
     await asyncio.sleep(0.7)
     await state.update_data(gram_item_idx=idx + 1)
     return await _show_practice_item(chat_id, state, topic)
+
+
+async def _show_practice_link(chat_id, state: FSMContext):
+    # 💬 показываем текущую ссылку в практике
+    data = await state.get_data()
+    items = data.get("gram_link_items", [])
+    idx = data.get("gram_link_idx", 0)
+    done = data.get("gram_links_done", 0)
+    total = data.get("gram_links_total", len(items))
+
+    if idx >= len(items):
+        # 💬 все ссылки закончились
+        bar = f"[{done}/{total}] ✅"
+        return await _replace_content(
+            chat_id,
+            state,
+            _bot.send_message(
+                chat_id=chat_id,
+                text=f"Практика завершена!\n{bar}",
+                reply_markup=_kb_practice_continue_menu(done, total),
+                parse_mode="HTML"
+            )
+        )
+
+    item = items[idx]
+    title = item.get("title") or item.get("name") or "Упражнение"
+    url = item.get("url")
+    cta = random.choice(link_cta_phrases) if link_cta_phrases else "Перейти"
+    bar = f"[{done}/{total}]"
+
+    # 💬 кнопки: ссылка + Сделано + Теория + Меню
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=cta, url=url)],
+            [InlineKeyboardButton(text="✅ Сделано", callback_data="gram:practice:done")],
+            [InlineKeyboardButton(text="📚 Теория", callback_data="gram:practice:theory")],
+            [InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")],
+        ]
+    )
+
+    await _replace_content(
+        chat_id,
+        state,
+        _bot.send_message(
+            chat_id=chat_id,
+            text=f"{bar}\n<b>{html.escape(title)}</b>",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+    )
 
 
 @router.poll_answer(GrammarStates.practice_poll)
