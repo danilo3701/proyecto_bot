@@ -1198,13 +1198,24 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
             return
 
         # text
-        text = header + str(item.get("text") or "")
+        raw_text = str(item.get("text") or "").strip()  # 💬 берём текст теории
+        safe_text = html.escape(raw_text)  # 💬 экранируем HTML, чтобы не ломало разметку
+
+        text = f"{header}<b><i><code>{safe_text}</code></i></b>"  # 💬 весь text = жирный + курсив + код
+
         await _replace_content(
             chat_id,
             state,
-            _bot.send_message(chat_id=chat_id, text=text, reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases), parse_mode="HTML", disable_web_page_preview=True),
+            _bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases),
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            ),
         )
         return
+
 
     # 💬 safety
     await _replace_content(
