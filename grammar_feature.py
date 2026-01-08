@@ -203,6 +203,11 @@ def _phase_title(phase: Dict[str, Any], idx: int) -> str:
     # 💬 название фазы, поддержка разных ключей (админка и ручные JSON)
     return str(phase.get("title") or phase.get("name") or phase.get("phase_name") or f"Фаза {idx + 1}")
 
+def _strike_text(text: str) -> str:
+    # 💬 псевдо-зачёркивание для InlineKeyboard (HTML/Markdown в кнопках не работает)
+    return "".join(ch + "\u0336" for ch in str(text))
+
+
 def _phase_items(phase: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     💬 копируем логику core get_vocab_list:
@@ -336,7 +341,13 @@ def _kb_back_to_menu() -> InlineKeyboardMarkup:
     )
 
 
-def _kb_phases(phases: List[Dict[str, Any]], done_flags: List[bool], *, show_return_button: bool = False) -> InlineKeyboardMarkup:
+def _kb_phases(
+    phases: List[Dict[str, Any]],
+    done_flags: List[bool],
+    phase_pcts: Optional[List[float]] = None,
+    *,
+    show_return_button: bool = False
+) -> InlineKeyboardMarkup:
     rows: List[List[InlineKeyboardButton]] = []
 
     if show_return_button:
@@ -344,8 +355,14 @@ def _kb_phases(phases: List[Dict[str, Any]], done_flags: List[bool], *, show_ret
 
     for i, ph in enumerate(phases):
         label = _phase_title(ph, i)
+
         if i < len(done_flags) and done_flags[i]:
-            label = f"⭐ {label}"
+            label = f"⭐ {label}"  # 💬 старый бейдж за “done” оставляем
+
+        # 💬 зачёркиваем строго при 100% (все блоки фазы просмотрены)
+        if phase_pcts and i < len(phase_pcts) and phase_pcts[i] >= 0.999999:
+            label = _strike_text(label)
+
         rows.append([InlineKeyboardButton(text=label, callback_data=f"gram:phase:{i}")])
 
     rows.append([InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")])  # 💬 назад в меню топика
@@ -511,6 +528,40 @@ def _theory_overall_pct(uid: str, topic_key: str, topic: Dict[str, Any]) -> floa
 
     return (seen_all / total_all) if total_all else 0.0
 
+
+def _theory_phase_pcts(uid: str, topic_key: str, phases: List[Dict[str, Any]]) -> List[float]:
+    # 💬 pct по каждой фазе Теории = уникальные просмотренные индексы / всего блоков фазы
+    data = _user_progress_get(uid)
+    u = (data.get(uid) or {})
+    gp = (u.get("grammar_progress") or {})
+    tp = (gp.get(topic_key) or {})
+    theory = (tp.get("theory") or {})
+
+    pcts: List[float] = []
+
+    for i, ph in enumerate(phases):
+        items = _phase_items(ph)
+        total_phase = len(items)
+
+        ph_prog = theory.get(str(i)) or {}
+        seen = ph_prog.get("seen") or []
+        if not isinstance(seen, list):
+            seen = []
+
+        # 💬 уникальные валидные индексы, чтобы не было дублей/мусора
+        uniq_valid = set()
+        for x in seen:
+            try:
+                xi = int(x)
+            except Exception:
+                continue
+            if 0 <= xi < total_phase:
+                uniq_valid.add(xi)
+
+        pct = (len(uniq_valid) / total_phase) if total_phase else 0.0
+        pcts.append(pct)
+
+    return pcts
 
 
 
@@ -707,13 +758,22 @@ async def gram_theory(cb: CallbackQuery, state: FSMContext) -> None:
     uid = str(cb.from_user.id)
     done_flags, _ = _progress_flags(uid, str(topic_key), len(phases))
 
+    phase_pcts = _theory_phase_pcts(uid, str(topic_key), phases)  # 💬 pct по каждой фазе для зачёркивания при 100%
+
+
     await state.set_state(GrammarStates.theory_phases)
     await _replace_content(
         chat_id=cb.from_user.id,
         state=state,
         send_coro=cb.message.answer(
             "Выбери фазу:",
-            reply_markup=_kb_phases(phases, done_flags, show_return_button=bool((await state.get_data()).get("gram_return_to_practice"))),
+            reply_markup=_kb_phases(
+                phases,
+                done_flags,
+                phase_pcts=phase_pcts,  # 💬 зачёркиваем фазу при 100%
+                show_return_button=bool((await state.get_data()).get("gram_return_to_practice")),
+            ),
+
         ),
     )  # 💬 список фаз в одном сообщении
 
