@@ -22,9 +22,21 @@ except Exception:
     ]
 
 from scenarios_estiloso8_1 import link_cta_phrases  # 💬 CTA фразы для ссылок
+grammar_quiz_success_phrases = [
+    "✅ Так держать! Двигаем дальше",
+    "🔥 Отлично! Следующий",
+    "💪 Так держать! Погнали",
+    "🎯 В точку! Едем дальше",
+]  # 💬 короткие реакции как в лексике
+
+grammar_quiz_fail_phrases = [
+    "❌ Неа…",
+    "😅 Почти…",
+    "🙃 Мимо…",
+    "🤏 Чуть-чуть не то…",
+]  # 💬 короткие реакции на ошибку
 
 import random  # 💬 CTA фразы для link-блоков
-from scenarios_estiloso8_1 import link_cta_phrases  # 💬 скрытые CTA для ссылок, как в vocab
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -939,8 +951,17 @@ async def gram_phase_open(cb: CallbackQuery, state: FSMContext) -> None:
     phase = phases[phase_idx]
     items = _phase_items(phase)
     if not items:
-        await cb.message.answer("Пока нет блоков в этой фазе.", reply_markup=_kb_back_to_menu())
+        back_to_phases = bool(st.get("gram_return_to_practice"))  # 💬 если пришли из практики = кнопка ведёт назад к фазам
+        await _replace_content(
+            chat_id=cb.from_user.id,
+            state=state,
+            send_coro=cb.message.answer(
+                "Пока нет блоков в этой фазе.",
+                reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases),
+            ),
+        )  # 💬 не плодим сообщения, возвращаемся корректно
         return
+
 
     await state.set_state(GrammarStates.theory_view)
     await state.update_data(
