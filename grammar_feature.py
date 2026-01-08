@@ -1002,6 +1002,28 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
 
         header = f"📖 <b>{title}</b>\n{_bar(pct)}  {int(pct * 100)}%\n\n"
 
+        if t == "photo":
+            file_id = item.get("file_id") or item.get("photo") or item.get("image") or item.get("url")
+            cap_raw = (item.get("caption") or item.get("text") or "")
+            cap_raw = str(cap_raw).strip()
+
+            # 💬 caption нужен, чтобы кнопки листания были на этом же сообщении
+            caption = header if not cap_raw else f"{header}\n\n{html.escape(cap_raw)}"
+
+            await _replace_content(
+                chat_id,
+                state,
+                _bot.send_photo(
+                    chat_id,
+                    photo=file_id,
+                    caption=caption,
+                    parse_mode="HTML",
+                    reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases)
+                )
+            )
+            return  # 💬 важно: не проваливаемся дальше в poll/link/text
+
+
         if t == "poll":
             q = str(item.get("question") or "Выбери ответ")
             opts = item.get("options") or item.get("answers") or []
