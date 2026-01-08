@@ -473,6 +473,47 @@ def _progress_flags(uid: str, topic_key: str, phases_count: int) -> Tuple[List[b
     return done_flags, pct
 
 
+
+def _theory_overall_pct(uid: str, topic_key: str, topic: Dict[str, Any]) -> float:
+    # 💬 общий прогресс Теории = по всем индексам элементов во всех фазах (а не по done фазам)
+    phases = _get_theory_phases(topic)
+
+    data = _user_progress_get(uid)
+    u = (data.get(uid) or {})
+    gp = (u.get("grammar_progress") or {})
+    tp = (gp.get(topic_key) or {})
+    theory = (tp.get("theory") or {})
+
+    total_all = 0
+    seen_all = 0
+
+    for i, ph in enumerate(phases):
+        items = _phase_items(ph)
+        total_phase = len(items)
+        total_all += total_phase
+
+        ph_prog = theory.get(str(i)) or {}
+        seen = ph_prog.get("seen") or []
+        if not isinstance(seen, list):
+            seen = []
+
+        # 💬 считаем уникальные валидные индексы внутри фазы, чтобы не было дублей/мусора
+        uniq_valid = set()
+        for x in seen:
+            try:
+                xi = int(x)
+            except Exception:
+                continue
+            if 0 <= xi < total_phase:
+                uniq_valid.add(xi)
+
+        seen_all += len(uniq_valid)
+
+    return (seen_all / total_all) if total_all else 0.0
+
+
+
+
 async def open_grammar_topic(message: Message, state: FSMContext) -> None:
     """
     💬 вход в грамматику после выбора темы
@@ -505,7 +546,10 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
 
     uid = str(message.from_user.id)
     phases = _get_theory_phases(topic)
-    done_flags, theory_pct = _progress_flags(uid, str(topic_key), len(phases))
+
+    done_flags, _ = _progress_flags(uid, str(topic_key), len(phases))  # 💬 звёздочки по фазам оставляем как раньше
+    theory_pct = _theory_overall_pct(uid, str(topic_key), topic)       # 💬 общий % Теории по всем индексам во всех фазах
+
 
     practice = _practice_items(topic)
     videos = _video_items(topic)
