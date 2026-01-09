@@ -292,6 +292,20 @@ def _read_fragments(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
         fr = p.get("fragments") or []
         if isinstance(fr, list):
             out.extend(fr)
+
+        assets = p.get("assets") or []
+        if isinstance(assets, list):
+            for a in assets:
+                if isinstance(a, dict) and (a.get("type") == "asset"):
+                    # 💬 совместимость со старым форматом CreateLessonBlock: assets -> photo
+                    media = a.get("file") or a.get("photo") or a.get("file_id") or a.get("url") or ""
+                    cap = a.get("text") or a.get("caption") or ""
+                    if media:
+                        out.append({"type": "photo", "photo": media, "caption": cap})
+                else:
+                    # 💬 если вдруг там уже лежит нормальный dict = просто добавим
+                    out.append(a)
+
     return out
 
 
@@ -335,24 +349,35 @@ def _ensure_di() -> bool:
     return bool(_load_user_data and _save_user_data and _show_topics_for_category_level and _start_handler and _bot)
 
 
-def _kb_menu() -> InlineKeyboardMarkup:
+def _kb_menu(
+    theory_done: int = 0, theory_total: int = 0,
+    practice_done: int = 0, practice_total: int = 0,
+    video_done: int = 0, video_total: int = 0,
+    read_done: int = 0, read_total: int = 0,
+) -> InlineKeyboardMarkup:
+    def _lbl(base: str, done: int, total: int) -> str:
+        # 💬 добавляем счётчик прямо в кнопку, чтобы видеть прогресс
+        if total and total > 0:
+            d = min(max(int(done), 0), int(total))
+            return f"{base} ({d}/{int(total)})"
+        return base
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="📖 Теория", callback_data="gram:theory"),
-                InlineKeyboardButton(text="🧪 Практика", callback_data="gram:practice"),
+                InlineKeyboardButton(text=_lbl("📖 Теория", theory_done, theory_total), callback_data="gram:theory"),
+                InlineKeyboardButton(text=_lbl("🧪 Практика", practice_done, practice_total), callback_data="gram:practice"),
             ],
             [
-                InlineKeyboardButton(text="🎬 Видео", callback_data="gram:video"),
-                InlineKeyboardButton(text="📚 Читать", callback_data="gram:read"),
+                InlineKeyboardButton(text=_lbl("🎬 Видео", video_done, video_total), callback_data="gram:video"),
+                InlineKeyboardButton(text=_lbl("📚 Читать", read_done, read_total), callback_data="gram:read"),
             ],
             [
                 InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics"),
-            ],  # 💬 оставляем одну кнопку
-
-
+            ],
         ]
     )
+
 
 
 def _kb_back_to_menu() -> InlineKeyboardMarkup:
@@ -623,33 +648,70 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
     phases = _get_theory_phases(topic)
 
     done_flags, _ = _progress_flags(uid, str(topic_key), len(phases))  # 💬 звёздочки по фазам оставляем как раньше
-    theory_pct = _theory_overall_pct(uid, str(topic_key), topic)       # 💬 общий % Теории по всем индексам во всех фазах
 
+    # 💬 Теория: считаем общий прогресс как просмотренные индексы / все блоки во всех фазах
+    data = _user_progress_get(uid)
+    u = (data.get(uid) or {})
+    gp = (u.get("grammar_progress") or {})
+    tp = (gp.get(str(topic_key)) or {})
+    theory = (tp.get("theory") or {})
+
+    theory_total = 0
+    theory_seen = 0
+    for i, ph in enumerate(phases):
+        items = _phase_items(ph)
+        total_phase = len(items)
+        theory_total += total_phase
+
+        ph_prog = theory.get(str(i)) or {}
+        seen = ph_prog.get("seen") or []
+        if not isinstance(seen, list):
+            seen = []
+
+        uniq_valid = set()
+        for x in seen:
+            try:
+                xi = int(x)
+            except Exception:
+                continue
+            if 0 <= xi < total_phase:
+                uniq_valid.add(xi)
+
+        theory_seen += len(uniq_valid)
+
+    theory_pct = (theory_seen / theory_total) if theory_total else 0.0
 
     practice = _practice_items(topic)
     videos = _video_items(topic)
     reads = _read_fragments(topic)
 
-    # 💬 практика pct
-    data = _user_progress_get(uid)
-    u = data.setdefault(uid, {})
-    gp = u.setdefault("grammar_progress", {})
-    tp = gp.setdefault(str(topic_key), {})
+    # 💬 практика pct (done уже хранится как количество)
     pr = tp.setdefault("practice", {})
-    pr_done = int(pr.get("done", 0))
+    pr_done = int(pr.get("done") or 0)
     pr_total = len(practice) if practice else 0
+    pr_done = min(pr_done, pr_total) if pr_total else 0
     pr_pct = (pr_done / pr_total) if pr_total else 0.0
 
-    # 💬 видео pct
+    # 💬 видео pct (done хранится как индекс, поэтому +1)
     vd = tp.setdefault("video", {})
-    vd_done = int(vd.get("done", 0))
+    raw_vd = vd.get("done")
+    try:
+        vd_done_idx = int(raw_vd) if raw_vd is not None else -1
+    except Exception:
+        vd_done_idx = -1
     vd_total = len(videos) if videos else 0
+    vd_done = (min(vd_done_idx + 1, vd_total) if (vd_total and vd_done_idx >= 0) else 0)
     vd_pct = (vd_done / vd_total) if vd_total else 0.0
 
-    # 💬 читать pct
+    # 💬 читать pct (done хранится как индекс, поэтому +1)
     rd = tp.setdefault("read", {})
-    rd_done = int(rd.get("done", 0))
+    raw_rd = rd.get("done")
+    try:
+        rd_done_idx = int(raw_rd) if raw_rd is not None else -1
+    except Exception:
+        rd_done_idx = -1
     rd_total = len(reads) if reads else 0
+    rd_done = (min(rd_done_idx + 1, rd_total) if (rd_total and rd_done_idx >= 0) else 0)
     rd_pct = (rd_done / rd_total) if rd_total else 0.0
 
     _user_progress_save(data)
@@ -668,8 +730,18 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
     await _replace_content(
         chat_id=message.chat.id,
         state=state,
-        send_coro=message.answer(text, reply_markup=_kb_menu(), parse_mode="HTML"),
+        send_coro=message.answer(
+            text,
+            reply_markup=_kb_menu(
+                theory_done=theory_seen, theory_total=theory_total,
+                practice_done=pr_done, practice_total=pr_total,
+                video_done=vd_done, video_total=vd_total,
+                read_done=rd_done, read_total=rd_total,
+            ),
+            parse_mode="HTML",
+        ),
     )  # 💬 показываем меню грамматики одним сообщением
+
 
 
 
