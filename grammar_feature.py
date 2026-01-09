@@ -37,6 +37,7 @@ grammar_quiz_fail_phrases = [
 ]  # 💬 короткие реакции на ошибку
 
 _GRAM_POLL_CTX: Dict[str, Dict[str, Any]] = {}  # 💬 poll_id -> контекст (chat_id/секция/индексы), чтобы PollAnswer работал даже если FSM ключ не совпал
+_GRAM_RENDER_LOCKS: Dict[int, asyncio.Lock] = {}  # 💬 лок на рендер теории, чтобы не было дублей при быстрых кликах
 
 
 import random  # 💬 CTA фразы для link-блоков
@@ -482,6 +483,9 @@ async def _replace_content(
         return await send_factory
 
     msg = await _tg_retry(_call)  # 💬 ретраи при таймауте
+    tries = int(st.get("gram_replace_tries") or 3)  # 💬 дефолт 3, но для Теории можно снизить до 1
+    msg = await _tg_retry(_call, tries=tries)  # 💬 ретраи при таймауте, tries управляем через state
+
     if not msg:
         return None
 
@@ -989,15 +993,35 @@ async def gram_nav(cb: CallbackQuery, state: FSMContext) -> None:
     if st.get("gram_section") != "theory":
         return
 
+    topic = _get_topic(str(st.get("selected_topic")))
+    phase_idx = int(st.get("gram_phase_idx") or 0)
+    phases = _get_theory_phases(topic)
+    if phase_idx < 0 or phase_idx >= len(phases):
+        await cb.answer("Фаза не найдена", show_alert=False)
+        return
+
+    items = _phase_items(phases[phase_idx])
+    total = len(items)
+    if total <= 0:
+        await cb.answer("Пока нет блоков", show_alert=False)
+        return
+
     idx = int(st.get("gram_item_idx") or 0)
+
     if cb.data.endswith("prev"):
+        if idx <= 0:
+            await cb.answer("Это начало", show_alert=False)  # 💬 не уходим в минус, просто подсказка
+            return
         idx -= 1
     else:
+        if idx >= total - 1:
+            await cb.answer("Это конец", show_alert=False)  # 💬 не уходим за предел, просто подсказка
+            return
         idx += 1
 
     await state.update_data(gram_item_idx=idx)
-    topic = _get_topic(str(st.get("selected_topic")))
     await _show_current_item(chat_id=cb.from_user.id, state=state, topic=topic)
+
 
 
 async def _mark_seen(uid: str, topic_key: str, section: str, phase_idx: Optional[int], item_idx: int, total: int) -> None:
@@ -1041,6 +1065,11 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
     # 💬 показываем текущий элемент (текст/фото) или шлём poll
     st = await state.get_data()
     section = st.get("gram_section")
+    lock = _GRAM_RENDER_LOCKS.setdefault(chat_id, asyncio.Lock())  # 💬 один рендер за раз, антидубли
+    async with lock:
+        st = await state.get_data()  # 💬 обновляем данные внутри лока
+        section = st.get("gram_section")
+
     topic_key = str(st.get("selected_topic") or "")
     back_to_phases = bool(st.get("gram_return_to_practice"))  # 💬 из практики назад ведём к фазам, а не в меню
 
@@ -1064,13 +1093,8 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
         if idx < 0:
             idx = 0
         if idx >= total:
-            # 💬 конец фазы
-            await _replace_content(
-                chat_id,
-                state,
-                _bot.send_message(chat_id, "✅ Фаза закончилась.", reply_markup=_kb_back_to_menu()),
-            )  # 💬 конец фазы без накопления сообщений
-            return
+            idx = max(0, total - 1)  # 💬 clamp на последний, навигация остаётся
+            await state.update_data(gram_item_idx=idx)
 
 
         item = items[idx]
@@ -1088,7 +1112,8 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
         except Exception:
             pct = 0.0
 
-        header = f"📖 <b>{title}</b>\n{_bar(pct)}  {int(pct * 100)}%\n\n"
+        header = f"📖 <b>{title}</b>\n{_bar(pct)}  {int(pct * 100)}%   {idx + 1}/{total}\n\n"  # 💬 добавили счётчик блока
+
 
         if t == "photo":
             file_id = item.get("file_id") or item.get("photo") or item.get("image") or item.get("url")
