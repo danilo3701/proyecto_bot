@@ -7,11 +7,19 @@
 
 # ——— Standard library ——————————————————————————————————————————————
 import os                           # Работа с файлами и папками
-# ⛔ Проверка отключения бота через переменну
-if os.getenv("DISABLED") == "true":
-    print("🚫 Бот временно отключён.")
-    exit()
-os.makedirs("/data", exist_ok=True)  # 💬 создаём папку Volume, если ещё не создана
+
+# ⛔ Проверка отключения бота через переменную
+if (os.getenv("DISABLED") or "").strip().lower() == "true":
+    print("🚫 DISABLED=true → бот не запускаем", flush=True)  # 💬 чтобы это точно попало в Railway logs
+    raise SystemExit(0)
+
+# 📦 Volume-папка (не даём деплою “упасть молча”)
+try:
+    os.makedirs("/data", exist_ok=True)  # 💬 создаём папку Volume, если ещё не создана
+except Exception as e:
+    print(f"⚠️ Не могу создать /data: {e}", flush=True)  # 💬 явный лог причины падения
+    raise
+
 from pathlib import Path  # 💬 чтобы строить путь к файлу надёжно
 
 import json                         # Чтение/запись JSON-топиков
