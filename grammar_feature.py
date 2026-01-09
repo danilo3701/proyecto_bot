@@ -349,34 +349,22 @@ def _ensure_di() -> bool:
     return bool(_load_user_data and _save_user_data and _show_topics_for_category_level and _start_handler and _bot)
 
 
-def _kb_menu(
-    theory_done: int = 0, theory_total: int = 0,
-    practice_done: int = 0, practice_total: int = 0,
-    video_done: int = 0, video_total: int = 0,
-    read_done: int = 0, read_total: int = 0,
-) -> InlineKeyboardMarkup:
-    def _lbl(base: str, done: int, total: int) -> str:
-        # 💬 добавляем счётчик прямо в кнопку, чтобы видеть прогресс
-        if total and total > 0:
-            d = min(max(int(done), 0), int(total))
-            return f"{base} ({d}/{int(total)})"
-        return base
-
+def _kb_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text=_lbl("📖 Теория", theory_done, theory_total), callback_data="gram:theory"),
-                InlineKeyboardButton(text=_lbl("🧪 Практика", practice_done, practice_total), callback_data="gram:practice"),
+                InlineKeyboardButton(text="📖 Теория", callback_data="gram:theory"),
+                InlineKeyboardButton(text="🧪 Практика", callback_data="gram:practice"),
             ],
             [
-                InlineKeyboardButton(text=_lbl("🎬 Видео", video_done, video_total), callback_data="gram:video"),
-                InlineKeyboardButton(text=_lbl("📚 Читать", read_done, read_total), callback_data="gram:read"),
+                InlineKeyboardButton(text="🎬 Видео", callback_data="gram:video"),
+                InlineKeyboardButton(text="📚 Читать", callback_data="gram:read"),
             ],
             [
                 InlineKeyboardButton(text="⬅️ Темы", callback_data="gram:topics"),
             ],
         ]
-    )
+    )  # 💬 меню без счётчиков внутри кнопок
 
 
 
@@ -732,12 +720,7 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
         state=state,
         send_coro=message.answer(
             text,
-            reply_markup=_kb_menu(
-                theory_done=theory_seen, theory_total=theory_total,
-                practice_done=pr_done, practice_total=pr_total,
-                video_done=vd_done, video_total=vd_total,
-                read_done=rd_done, read_total=rd_total,
-            ),
+            reply_markup=_kb_menu(),
             parse_mode="HTML",
         ),
     )  # 💬 показываем меню грамматики одним сообщением
@@ -930,6 +913,21 @@ async def gram_practice_feedback(cb: CallbackQuery, state: FSMContext):
     done = int(data.get("gram_links_done", 0)) + 1
     total = int(data.get("gram_links_total", 1))
     await state.update_data(gram_links_done=done)  # 💬 прогресс считаем здесь
+
+    # 💬 сохраняем прогресс практики в RailwayData, чтобы он обновлялся в меню темы
+    topic_key = str(data.get("selected_topic") or "")
+    if topic_key:
+        uid = str(cb.from_user.id)
+        pdata = _user_progress_get(uid)
+        u = pdata.setdefault(uid, {})
+        gp = u.setdefault("grammar_progress", {})
+        tp = gp.setdefault(topic_key, {})
+        pr = tp.setdefault("practice", {})
+        safe_done = min(int(done), int(total)) if total else int(done)
+        pr["done"] = safe_done
+        pr["pct"] = (safe_done / int(total)) if total else 0.0
+        _user_progress_save(pdata)
+
 
     bar = _bar((done / total) if total else 1.0)
     txt = (str(reaction_text).strip() + "\n\n") if reaction_text else ""
@@ -1831,13 +1829,20 @@ async def _show_video(chat_id: int, state: FSMContext, topic: Dict[str, Any]) ->
     gp = u.setdefault("grammar_progress", {})
     tp = gp.setdefault(topic_key, {})
     vd = tp.setdefault("video", {})
-    done = int(vd.get("done", 0))
-    if idx > done:
-        done = idx
-        vd["done"] = done
-        _user_progress_save(data)
+    raw_done = vd.get("done")
+    try:
+        done_idx = int(raw_done) if raw_done is not None else -1
+    except Exception:
+        done_idx = -1
 
+    if idx > done_idx:
+        done_idx = idx
+        vd["done"] = done_idx
+        _user_progress_save(data)  # 💬 сохраняем прогресс видео в RailwayData
+
+    done = (min(done_idx + 1, total) if (total and done_idx >= 0) else 0)  # 💬 индекс -> количество
     pct = (done / total) if total else 0.0
+
     text = (
         f"🎬 <b>{title}</b>\n"
         f"{_bar(pct)}  {int(pct * 100)}%\n\n"
@@ -1936,12 +1941,20 @@ async def _show_read(chat_id: int, state: FSMContext, topic: Dict[str, Any]) -> 
     gp = u.setdefault("grammar_progress", {})
     tp = gp.setdefault(topic_key, {})
     rd = tp.setdefault("read", {})
-    done = int(rd.get("done", 0))
-    if idx > done:
-        rd["done"] = idx
-        _user_progress_save(data)
+    raw_done = rd.get("done")
+    try:
+        done_idx = int(raw_done) if raw_done is not None else -1
+    except Exception:
+        done_idx = -1
 
+    if idx > done_idx:
+        done_idx = idx
+        rd["done"] = done_idx
+        _user_progress_save(data)  # 💬 сохраняем прогресс чтения в RailwayData
+
+    done = (min(done_idx + 1, total) if (total and done_idx >= 0) else 0)  # 💬 индекс -> количество
     pct = (done / total) if total else 0.0
+
     header = f"📚 <b>Читать</b>\n{_bar(pct)}  {int(pct * 100)}%\n\n"
 
     if t == "photo":
