@@ -1443,8 +1443,9 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
     )  # 💬 без спама сообщениями
 
 
-@router.poll_answer()  # 💬 единый PollAnswer для теории и практики, чтобы не было конфликта и залипания
-async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext) -> None:
+@router.poll_answer(StateFilter(GrammarStates.theory_poll, GrammarStates.practice_poll))  # 💬 ловим poll_answer только внутри грамматики
+async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext):
+
     # 💬 общий обработчик PollQuiz: реакция + фидбек 1 сек = удаляем poll+фидбек = автопереход дальше
     st = await state.get_data()
 
