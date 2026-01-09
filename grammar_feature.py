@@ -1273,20 +1273,20 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
     )  # 💬 без спама сообщениями
 
 
-
 @router.poll_answer()  # 💬 единый PollAnswer для теории и практики, чтобы не было конфликта двух хендлеров
 async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext) -> None:
-    # 💬 общий обработчик PollQuiz: фидбек 1 сек -> удаляем poll+фидбек -> автопереход дальше
+    # 💬 общий обработчик PollQuiz: реакция + фидбек 1 сек = удаляем poll+фидбек = автопереход дальше
     st = await state.get_data()
 
-    ctx = _GRAM_POLL_CTX.get(ans.poll_id)  # 💬 основной источник правды для PollAnswer (у PollAnswer нет chat_id)
+    poll_key = str(ans.poll_id)  # 💬 нормализуем ключ (иногда poll_id приходит не как чистый str)
+    ctx = _GRAM_POLL_CTX.get(poll_key)  # 💬 основной источник правды для PollAnswer (у PollAnswer нет chat_id)
     section = str((ctx or {}).get("section") or st.get("gram_poll_section") or st.get("gram_section") or "")
 
     if section not in ("theory", "practice"):
         return  # 💬 не наш PollQuiz
 
     poll_id = st.get("gram_poll_id")
-    if (not poll_id or poll_id != ans.poll_id) and not ctx:
+    if (not poll_id or str(poll_id) != poll_key) and not ctx:
         return  # 💬 чужой poll_answer или уже сброшен
 
     chat_id = int((ctx or {}).get("chat_id") or ans.user.id)
@@ -1329,6 +1329,17 @@ async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext) -> None:
         except Exception:
             pass
 
+        # 💬 реакция как в лексике (если API/клиент не поддерживает = тихо пропускаем)
+        try:
+            await _bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=int(poll_msg_id),
+                reaction=[ReactionTypeEmoji(emoji="🎉" if is_correct else "😅")],
+                is_big=True
+            )
+        except Exception:
+            pass
+
     # 💬 фидбек как в лексике: похвала или правильный ответ
     if is_correct:
         txt = random.choice(grammar_quiz_success_phrases)
@@ -1338,9 +1349,9 @@ async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext) -> None:
 
     fb = await _bot.send_message(chat_id=chat_id, text=txt, parse_mode="HTML")
 
-    await asyncio.sleep(1.0)  # 💬 даём пользователю увидеть фидбек
+    await asyncio.sleep(1.0)  # 💬 даём пользователю увидеть реакцию и фидбек
 
-    _GRAM_POLL_CTX.pop(ans.poll_id, None)  # 💬 чистим контекст poll
+    _GRAM_POLL_CTX.pop(poll_key, None)  # 💬 чистим контекст poll
 
     # 💬 удаляем фидбек и poll-сообщение
     await _safe_delete_message(_bot, chat_id, fb.message_id)
