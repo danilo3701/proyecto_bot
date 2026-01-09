@@ -1242,14 +1242,16 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
 
 
 
-@router.poll_answer()  # 💬 PollAnswer не всегда корректно матчится по FSM state, фильтруем по poll_id из state
-async def gram_poll_answer_theory(ans: PollAnswer, state: FSMContext) -> None:
-    # 💬 обработка PollQuiz в теории: фидбек 1 сек -> удаляем poll+фидбек -> автопереход
+@router.poll_answer()  # 💬 единый PollAnswer для теории и практики, чтобы не было конфликта двух хендлеров
+async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext) -> None:
+    # 💬 общий обработчик PollQuiz: фидбек 1 сек -> удаляем poll+фидбек -> автопереход дальше
     st = await state.get_data()
 
-    ctx = _GRAM_POLL_CTX.get(ans.poll_id)  # 💬 запасной путь, если FSM ключ для PollAnswer не совпал
-    if ctx and str(ctx.get("section")) != "theory":
-        return  # 💬 это poll из другой ветки
+    ctx = _GRAM_POLL_CTX.get(ans.poll_id)  # 💬 основной источник правды для PollAnswer (у PollAnswer нет chat_id)
+    section = str((ctx or {}).get("section") or st.get("gram_poll_section") or st.get("gram_section") or "")
+
+    if section not in ("theory", "practice"):
+        return  # 💬 не наш PollQuiz
 
     poll_id = st.get("gram_poll_id")
     if (not poll_id or poll_id != ans.poll_id) and not ctx:
@@ -1257,13 +1259,24 @@ async def gram_poll_answer_theory(ans: PollAnswer, state: FSMContext) -> None:
 
     chat_id = int((ctx or {}).get("chat_id") or ans.user.id)
 
+    # 💬 синхронизируем FSM из ctx, чтобы автопереход работал даже если ключ FSM у PollAnswer отличается
     if ctx:
-        await state.update_data(
-            selected_topic=str(ctx.get("topic_key") or st.get("selected_topic") or ""),
-            gram_section="theory",
-            gram_phase_idx=int(ctx.get("phase_idx") or 0),
-            gram_item_idx=int(ctx.get("item_idx") or 0),
-        )  # 💬 синхронизируем FSM, чтобы автопереход работал стабильно
+        upd: Dict[str, Any] = {
+            "selected_topic": str(ctx.get("topic_key") or st.get("selected_topic") or ""),
+        }
+        if section == "theory":
+            upd.update(
+                gram_section="theory",
+                gram_phase_idx=int(ctx.get("phase_idx") or 0),
+                gram_item_idx=int(ctx.get("item_idx") or 0),
+            )
+        else:
+            upd.update(
+                gram_section="practice",
+                gram_item_idx=int(ctx.get("item_idx") or 0),
+            )
+
+        await state.update_data(**upd)
         st = await state.get_data()
 
     try:
@@ -1275,17 +1288,16 @@ async def gram_poll_answer_theory(ans: PollAnswer, state: FSMContext) -> None:
     chosen = ans.option_ids[0] if ans.option_ids else -1
     poll_msg_id = (ctx or {}).get("poll_msg_id") if ctx else st.get("gram_poll_msg_id")
 
-
     is_correct = (chosen == correct)
 
-    # 💬 закрываем poll (без таймаута), чтобы не висел
+    # 💬 закрываем poll, чтобы не висел
     if poll_msg_id:
         try:
             await _bot.stop_poll(chat_id=chat_id, message_id=int(poll_msg_id))
         except Exception:
             pass
 
-    # 💬 реакция как в лексике: короткая похвала или короткий фейл + правильный ответ
+    # 💬 фидбек как в лексике: похвала или правильный ответ
     if is_correct:
         txt = random.choice(grammar_quiz_success_phrases)
     else:
@@ -1294,16 +1306,16 @@ async def gram_poll_answer_theory(ans: PollAnswer, state: FSMContext) -> None:
 
     fb = await _bot.send_message(chat_id=chat_id, text=txt, parse_mode="HTML")
 
-    await asyncio.sleep(1.0)  # 💬 даём увидеть фидбек
+    await asyncio.sleep(1.0)  # 💬 даём пользователю увидеть фидбек
 
-    _GRAM_POLL_CTX.pop(ans.poll_id, None)  # 💬 чистим контекст, чтобы не копился
+    _GRAM_POLL_CTX.pop(ans.poll_id, None)  # 💬 чистим контекст poll
 
     # 💬 удаляем фидбек и poll-сообщение
     await _safe_delete_message(_bot, chat_id, fb.message_id)
     if poll_msg_id:
         await _safe_delete_message(_bot, chat_id, int(poll_msg_id))
 
-    # 💬 идём дальше по индексу (авто)
+    # 💬 идём дальше автоматически
     idx = int(st.get("gram_item_idx") or 0) + 1
     await state.update_data(
         gram_item_idx=idx,
@@ -1311,11 +1323,17 @@ async def gram_poll_answer_theory(ans: PollAnswer, state: FSMContext) -> None:
         gram_poll_msg_id=None,
         gram_poll_correct=None,
         gram_poll_options=None,
+        gram_poll_section=None,
     )
-    await state.set_state(GrammarStates.theory_view)
 
     topic = _get_topic(str(st.get("selected_topic")))
-    await _show_current_item(chat_id=chat_id, state=state, topic=topic)
+
+    if section == "theory":
+        await state.set_state(GrammarStates.theory_view)
+        await _show_current_item(chat_id=chat_id, state=state, topic=topic)
+    else:
+        await state.set_state(GrammarStates.practice_view)
+        await _show_practice_item(chat_id=chat_id, state=state, topic=topic)
 
 
 # -----------------------------
