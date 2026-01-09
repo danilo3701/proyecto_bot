@@ -1267,6 +1267,8 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                 gram_poll_correct=correct,
                 gram_poll_options=opts,
                 gram_poll_section="theory",  # 💬 отмечаем, что это теория
+                gram_section="theory",  # 💬 дублируем секцию, чтобы PollAnswer не залипал на пустом gram_poll_section
+
             )
             await state.update_data(gram_replace_tries=3)  # 💬 возвращаем дефолт после poll
             return  # 💬 важно: не проваливаемся дальше в link/text
@@ -1345,25 +1347,31 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
     )  # 💬 без спама сообщениями
 
 
-@router.poll_answer()  # 💬 единый PollAnswer для теории и практики, чтобы не было конфликта двух хендлеров
+@router.poll_answer()  # 💬 единый PollAnswer для теории и практики, чтобы не было конфликта и залипания
 async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext) -> None:
     # 💬 общий обработчик PollQuiz: реакция + фидбек 1 сек = удаляем poll+фидбек = автопереход дальше
     st = await state.get_data()
 
-    poll_key = str(ans.poll_id)  # 💬 нормализуем ключ (иногда poll_id приходит не как чистый str)
-    ctx = _GRAM_POLL_CTX.get(poll_key)  # 💬 основной источник правды для PollAnswer (у PollAnswer нет chat_id)
-    section = str((ctx or {}).get("section") or st.get("gram_poll_section") or st.get("gram_section") or "")
-
-    if section not in ("theory", "practice"):
-        return  # 💬 не наш PollQuiz
+    poll_key = str(ans.poll_id)  # 💬 приводим к строке для стабильного ключа
+    ctx = _GRAM_POLL_CTX.get(poll_key) or _GRAM_POLL_CTX.get(ans.poll_id)  # 💬 поддерживаем старый ключ, если где то сохранился иначе
 
     poll_id = st.get("gram_poll_id")
-    if (not poll_id or str(poll_id) != poll_key) and not ctx:
-        return  # 💬 чужой poll_answer или уже сброшен
+    if not ctx and (not poll_id or str(poll_id) != poll_key):
+        return  # 💬 не наш poll_answer
+
+    section = str((ctx or {}).get("section") or st.get("gram_poll_section") or st.get("gram_section") or "")
+    if section not in ("theory", "practice"):
+        cur_state = await state.get_state()  # 💬 пытаемся восстановить ветку по текущему state
+        if cur_state and "theory" in cur_state:
+            section = "theory"
+        elif cur_state and "practice" in cur_state:
+            section = "practice"
+        else:
+            section = "theory"  # 💬 дефолт чтобы не залипать
 
     chat_id = int((ctx or {}).get("chat_id") or ans.user.id)
 
-    # 💬 синхронизируем FSM из ctx, чтобы автопереход работал даже если ключ FSM у PollAnswer отличается
+    # 💬 синхронизируем FSM из ctx, чтобы автопереход работал даже если ключ FSM у PollAnswer отличается (группы, разные chat_id)
     if ctx:
         upd: Dict[str, Any] = {
             "selected_topic": str(ctx.get("topic_key") or st.get("selected_topic") or ""),
@@ -1379,7 +1387,6 @@ async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext) -> None:
                 gram_section="practice",
                 gram_item_idx=int(ctx.get("item_idx") or 0),
             )
-
         await state.update_data(**upd)
         st = await state.get_data()
 
@@ -1394,14 +1401,13 @@ async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext) -> None:
 
     is_correct = (chosen == correct)
 
-    # 💬 закрываем poll, чтобы не висел
+    # 💬 закрываем poll чтобы не висел и ставим реакцию как в лексике
     if poll_msg_id:
         try:
             await _bot.stop_poll(chat_id=chat_id, message_id=int(poll_msg_id))
         except Exception:
             pass
 
-        # 💬 реакция как в лексике (если API/клиент не поддерживает = тихо пропускаем)
         try:
             await _bot.set_message_reaction(
                 chat_id=chat_id,
@@ -1421,16 +1427,17 @@ async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext) -> None:
 
     fb = await _bot.send_message(chat_id=chat_id, text=txt, parse_mode="HTML")
 
-    await asyncio.sleep(1.0)  # 💬 даём пользователю увидеть реакцию и фидбек
+    await asyncio.sleep(1.0)  # 💬 даём увидеть фидбек
 
     _GRAM_POLL_CTX.pop(poll_key, None)  # 💬 чистим контекст poll
+    _GRAM_POLL_CTX.pop(ans.poll_id, None)  # 💬 на всякий случай чистим не нормализованный ключ
 
-    # 💬 удаляем фидбек и poll-сообщение
+    # 💬 удаляем фидбек и poll сообщение
     await _safe_delete_message(_bot, chat_id, fb.message_id)
     if poll_msg_id:
         await _safe_delete_message(_bot, chat_id, int(poll_msg_id))
 
-    # 💬 идём дальше автоматически
+    # 💬 идём дальше автоматически и чистим poll ключи чтобы не было повторов
     idx = int(st.get("gram_item_idx") or 0) + 1
     await state.update_data(
         gram_item_idx=idx,
@@ -1617,6 +1624,8 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
             gram_poll_correct=correct,
             gram_poll_options=opts,
             gram_poll_section="practice",  # 💬 отмечаем, что это практика
+            gram_section="practice",  # 💬 дублируем секцию, чтобы PollAnswer не залипал на пустом gram_poll_section
+
         )
         return
 
