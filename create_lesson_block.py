@@ -502,22 +502,35 @@ async def _admin_editmode_category_fallback(message: Message, state: FSMContext)
         return
 
     cur = await state.get_state()
-    if cur in {NewTopicStates.waiting_category.state, NewTopicStates.adding_category.state}:
-        return  # 💬 в норме это обработают основные хендлеры
+    if cur in {
+        NewTopicStates.waiting_category.state,
+        NewTopicStates.adding_category.state
+    }:
+        return  # 💬 не перехватываем тут, чтобы основной хендлер категории успел отработать
+
 
     await state.set_state(NewTopicStates.waiting_category)  # 💬 чинит “залипший” state, чтобы кнопки снова ловились
     return await get_category_or_ads(message, state)
 
 
 @router.callback_query(F.data == "adm:close")
-async def admin_close(cb: CallbackQuery, state: FSMContext):
-    # 💬 закрываем inline меню
+async def adm_close(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     try:
         await cb.message.delete()
     except Exception:
         pass
-    await state.update_data(**{ADMIN_INLINE_MSG_ID_KEY: None})
-    await cb.answer()
+
+    # 💬 выходим из режима админ-редактирования и возвращаемся в /addtopic
+    await state.update_data(
+        **{
+            ADMIN_EDIT_MODE_KEY: False,
+            ADMIN_INLINE_MSG_ID_KEY: None,
+            ADMIN_EDIT_CATEGORY_KEY: None,
+            ADMIN_EDIT_LEVEL_KEY: None,
+        }
+    )
+    return await start_adding_topic(cb.message, state)
 
 @router.callback_query(F.data == "adm:home")
 async def admin_home(cb: CallbackQuery, state: FSMContext):
@@ -3487,6 +3500,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
