@@ -1686,10 +1686,17 @@ async def save_dialog_markdown(message: Message, state: FSMContext):
     await state.update_data(topic=topic, dialog_phase_index=None, last_block="dialog")
 
     keyboard = get_main_menu()
+    total_lines = len(lines)  # 💬 сколько НЕпустых строк пришло
+    total_sets = len(blocks)  # 💬 сколько сетов RU+ES сохранено
+
     await message.answer(
-        f"✅ Диалоговая фаза сохранена.\nБлоков: {len(blocks)}.",
+        "✅ Диалоговая фаза сохранена.\n"
+        f"📌 Строк получено: {total_lines}\n"
+        f"✅ Сетов (RU+ES) добавлено: {total_sets}\n"
+        f"✅ Строк сохранено: {total_sets * 2}",  # 💬 каждая пара = 2 строки
         reply_markup=keyboard
     )
+
     await state.set_state(NewTopicStates.waiting_first_choice)
 
 
@@ -3500,6 +3507,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
