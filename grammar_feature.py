@@ -482,7 +482,6 @@ async def _replace_content(
             return await send_factory()
         return await send_factory
 
-    msg = await _tg_retry(_call)  # 💬 ретраи при таймауте
     tries = int(st.get("gram_replace_tries") or 3)  # 💬 дефолт 3, но для Теории можно снизить до 1
     msg = await _tg_retry(_call, tries=tries)  # 💬 ретраи при таймауте, tries управляем через state
 
@@ -1113,6 +1112,8 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
             pct = 0.0
 
         header = f"📖 <b>{title}</b>\n{_bar(pct)}  {int(pct * 100)}%   {idx + 1}/{total}\n\n"  # 💬 добавили счётчик блока
+        await state.update_data(gram_replace_tries=1)  # 💬 в Теории не ретраим send, чтобы не плодить дубли
+
 
 
         if t == "photo":
@@ -1133,6 +1134,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                     parse_mode="HTML",
                     reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases)
                 )
+            await state.update_data(gram_replace_tries=3)  # 💬 возвращаем дефолт для остальных разделов
             )
             return  # 💬 важно: не проваливаемся дальше в poll/link/text
 
@@ -1190,6 +1192,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                 gram_poll_options=opts,
                 gram_poll_section="theory",  # 💬 отмечаем, что это теория
             )
+            await state.update_data(gram_replace_tries=3)  # 💬 возвращаем дефолт после poll
             return  # 💬 важно: не проваливаемся дальше в link/text
 
 
