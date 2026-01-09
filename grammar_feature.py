@@ -21,6 +21,8 @@ except Exception:
         }
     ]
 
+
+
 from scenarios_estiloso8_1 import link_cta_phrases  # 💬 CTA фразы для ссылок
 grammar_quiz_success_phrases = [
     "✅ Так держать! Двигаем дальше",
