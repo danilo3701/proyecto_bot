@@ -202,6 +202,81 @@ def _bar(pct: float, width: int = 10) -> str:
     filled = int(round(pct * width))
     return "█" * filled + "░" * (width - filled)
 
+def _sess_progress_from_state(st: Dict[str, Any]) -> Dict[str, Any]:
+    # 💬 session progress хранится только в FSM state (не в RailwayData)
+    sp = st.get("gram_session_progress") or {}
+    if not isinstance(sp, dict):
+        sp = {}
+    sp.setdefault("theory", {})   # 💬 phase_idx -> {seen:[], pct:float, done:bool}
+    sp.setdefault("practice", {}) # 💬 {done:int, seen:[], pct:float}
+    sp.setdefault("video", {})    # 💬 {done_idx:int}
+    sp.setdefault("read", {})     # 💬 {done_idx:int}
+    return sp
+
+
+async def _mark_seen_session(
+    state: FSMContext,
+    section: str,
+    phase_idx: Optional[int],
+    item_idx: int,
+    total: int
+) -> None:
+    # 💬 отмечаем прогресс только в session (FSM), без сохранения в user_data
+    st = await state.get_data()
+    sp = _sess_progress_from_state(st)
+
+    if section == "theory" and phase_idx is not None:
+        th = sp.setdefault("theory", {})
+        ph = th.setdefault(str(phase_idx), {})
+        seen = ph.setdefault("seen", [])
+        if not isinstance(seen, list):
+            seen = []
+            ph["seen"] = seen
+
+        if 0 <= int(item_idx) < int(total):
+            if int(item_idx) not in seen:
+                seen.append(int(item_idx))
+
+        pct = (len(seen) / int(total)) if total else 0.0
+        ph["pct"] = pct
+        if pct >= 0.7:
+            ph["done"] = True  # 💬 фаза засчитана на 70% в рамках сессии
+
+    elif section == "practice":
+        pr = sp.setdefault("practice", {})
+        seen = pr.setdefault("seen", [])
+        if not isinstance(seen, list):
+            seen = []
+            pr["seen"] = seen
+
+        if 0 <= int(item_idx) < int(total):
+            if int(item_idx) not in seen:
+                seen.append(int(item_idx))
+
+        pct = (len(seen) / int(total)) if total else 0.0
+        pr["pct"] = pct
+        pr["done"] = len(seen)  # 💬 done как количество просмотренных в рамках сессии
+
+    elif section == "video":
+        vd = sp.setdefault("video", {})
+        try:
+            done_idx = int(vd.get("done_idx")) if vd.get("done_idx") is not None else -1
+        except Exception:
+            done_idx = -1
+        if int(item_idx) > done_idx:
+            vd["done_idx"] = int(item_idx)  # 💬 max индекс видео в рамках сессии
+
+    elif section == "read":
+        rd = sp.setdefault("read", {})
+        try:
+            done_idx = int(rd.get("done_idx")) if rd.get("done_idx") is not None else -1
+        except Exception:
+            done_idx = -1
+        if int(item_idx) > done_idx:
+            rd["done_idx"] = int(item_idx)  # 💬 max индекс чтения в рамках сессии
+
+    await state.update_data(gram_session_progress=sp)
+
 
 def _get_topic(topic_key: str) -> Dict[str, Any]:
     # 💬 достаём тему из общего topics
@@ -632,18 +707,19 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
     topic = _get_topic(str(topic_key))
     title = html.escape(str(topic.get("visible_title") or topic.get("title") or "Грамматика"))
 
-    uid = str(message.from_user.id)
     phases = _get_theory_phases(topic)
 
-    done_flags, _ = _progress_flags(uid, str(topic_key), len(phases))  # 💬 звёздочки по фазам оставляем как раньше
+    st_now = await state.get_data()
+    sp = _sess_progress_from_state(st_now)
+    th = sp.get("theory") or {}
 
-    # 💬 Теория: считаем общий прогресс как просмотренные индексы / все блоки во всех фазах
-    data = _user_progress_get(uid)
-    u = (data.get(uid) or {})
-    gp = (u.get("grammar_progress") or {})
-    tp = (gp.get(str(topic_key)) or {})
-    theory = (tp.get("theory") or {})
+    # 💬 done_flags по фазам = из session (pct>=0.7)
+    done_flags = []
+    for i in range(len(phases)):
+        ph = th.get(str(i)) or {}
+        done_flags.append(bool(ph.get("done")))
 
+    # 💬 Теория общий % = все просмотренные индексы по всем фазам в рамках сессии
     theory_total = 0
     theory_seen = 0
     for i, ph in enumerate(phases):
@@ -651,7 +727,7 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
         total_phase = len(items)
         theory_total += total_phase
 
-        ph_prog = theory.get(str(i)) or {}
+        ph_prog = th.get(str(i)) or {}
         seen = ph_prog.get("seen") or []
         if not isinstance(seen, list):
             seen = []
@@ -669,40 +745,33 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
 
     theory_pct = (theory_seen / theory_total) if theory_total else 0.0
 
-    practice = _practice_items(topic)
-    videos = _video_items(topic)
-    reads = _read_fragments(topic)
-
-    # 💬 практика pct (done уже хранится как количество)
-    pr = tp.setdefault("practice", {})
-    pr_done = int(pr.get("done") or 0)
-    pr_total = len(practice) if practice else 0
+    # 💬 Практика в меню считаем по ссылкам (FeedbackDifficulty done) в рамках сессии
+    exercises = topic.get("exercises") or []
+    link_items = [x for x in exercises if (isinstance(x, dict) and (x.get("url") or x.get("link")))]
+    pr_total = len(link_items)
+    pr_done = int(st_now.get("gram_links_done") or 0)
     pr_done = min(pr_done, pr_total) if pr_total else 0
     pr_pct = (pr_done / pr_total) if pr_total else 0.0
 
-    # 💬 видео pct (done хранится как индекс, поэтому +1)
-    vd = tp.setdefault("video", {})
-    raw_vd = vd.get("done")
+    # 💬 Видео session
+    videos = _video_items(topic)
+    vd_total = len(videos) if videos else 0
     try:
-        vd_done_idx = int(raw_vd) if raw_vd is not None else -1
+        vd_done_idx = int((sp.get("video") or {}).get("done_idx")) if (sp.get("video") or {}).get("done_idx") is not None else -1
     except Exception:
         vd_done_idx = -1
-    vd_total = len(videos) if videos else 0
     vd_done = (min(vd_done_idx + 1, vd_total) if (vd_total and vd_done_idx >= 0) else 0)
     vd_pct = (vd_done / vd_total) if vd_total else 0.0
 
-    # 💬 читать pct (done хранится как индекс, поэтому +1)
-    rd = tp.setdefault("read", {})
-    raw_rd = rd.get("done")
+    # 💬 Читать session
+    reads = _read_fragments(topic)
+    rd_total = len(reads) if reads else 0
     try:
-        rd_done_idx = int(raw_rd) if raw_rd is not None else -1
+        rd_done_idx = int((sp.get("read") or {}).get("done_idx")) if (sp.get("read") or {}).get("done_idx") is not None else -1
     except Exception:
         rd_done_idx = -1
-    rd_total = len(reads) if reads else 0
     rd_done = (min(rd_done_idx + 1, rd_total) if (rd_total and rd_done_idx >= 0) else 0)
     rd_pct = (rd_done / rd_total) if rd_total else 0.0
-
-    _user_progress_save(data)
 
     text = (
         f"<b>{title}</b>\n\n"
@@ -758,6 +827,16 @@ async def gram_topics(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
     # 💬 не удаляем текущее сообщение, core будет редактировать его через edit_text
     await state.update_data(gram_content_msg_id=None)  # 💬 выходим из грамматики в список тем
+    await state.update_data(
+        gram_session_progress=None,  # 💬 сбрасываем progress внутри темы
+        gram_links_done=0,
+        gram_links_total=0,
+        gram_link_idx=0,
+        gram_link_items=None,
+        gram_section=None,
+        gram_phase_idx=None,
+        gram_item_idx=None,
+    )  # 💬 при новом входе в тему прогресс начинается с нуля
 
 
     # 💬 возвращаемся к списку тем грамматики выбранного уровня
@@ -834,11 +913,33 @@ async def gram_theory(cb: CallbackQuery, state: FSMContext) -> None:
         )  # 💬 не плодим сообщения
         return
 
-    uid = str(cb.from_user.id)
-    done_flags, _ = _progress_flags(uid, str(topic_key), len(phases))
+    st_now = await state.get_data()
+    sp = _sess_progress_from_state(st_now)
+    th = sp.get("theory") or {}
 
-    phase_pcts = _theory_phase_pcts(uid, str(topic_key), phases)  # 💬 pct по каждой фазе для зачёркивания при 100%
+    done_flags = []
+    phase_pcts = []
+    for i, ph in enumerate(phases):
+        items = _phase_items(ph)
+        total_phase = len(items)
 
+        ph_prog = th.get(str(i)) or {}
+        seen = ph_prog.get("seen") or []
+        if not isinstance(seen, list):
+            seen = []
+
+        uniq_valid = set()
+        for x in seen:
+            try:
+                xi = int(x)
+            except Exception:
+                continue
+            if 0 <= xi < total_phase:
+                uniq_valid.add(xi)
+
+        pct = (len(uniq_valid) / total_phase) if total_phase else 0.0
+        phase_pcts.append(pct)
+        done_flags.append(bool(ph_prog.get("done")))  # 💬 done в рамках сессии
 
     await state.set_state(GrammarStates.theory_phases)
     await _replace_content(
@@ -914,19 +1015,14 @@ async def gram_practice_feedback(cb: CallbackQuery, state: FSMContext):
     total = int(data.get("gram_links_total", 1))
     await state.update_data(gram_links_done=done)  # 💬 прогресс считаем здесь
 
-    # 💬 сохраняем прогресс практики в RailwayData, чтобы он обновлялся в меню темы
-    topic_key = str(data.get("selected_topic") or "")
-    if topic_key:
-        uid = str(cb.from_user.id)
-        pdata = _user_progress_get(uid)
-        u = pdata.setdefault(uid, {})
-        gp = u.setdefault("grammar_progress", {})
-        tp = gp.setdefault(topic_key, {})
-        pr = tp.setdefault("practice", {})
-        safe_done = min(int(done), int(total)) if total else int(done)
-        pr["done"] = safe_done
-        pr["pct"] = (safe_done / int(total)) if total else 0.0
-        _user_progress_save(pdata)
+    # 💬 сохраняем прогресс практики только в session (FSM), чтобы меню обновлялось без RailwayData
+    st_now = await state.get_data()
+    sp = _sess_progress_from_state(st_now)
+    pr = sp.setdefault("practice", {})
+    safe_done = min(int(done), int(total)) if total else int(done)
+    pr["done"] = safe_done
+    pr["pct"] = (safe_done / int(total)) if total else 0.0
+    await state.update_data(gram_session_progress=sp)
 
 
     bar = _bar((done / total) if total else 1.0)
@@ -1171,17 +1267,19 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
         item = items[idx]
         t = _item_type(item)
 
-        await _mark_seen(str(chat_id), topic_key, "theory", phase_idx, idx, total)  # 💬 фиксируем просмотр
+        await _mark_seen_session(state, "theory", phase_idx, idx, total)  # 💬 фиксируем просмотр только в session
+
 
         title = html.escape(_phase_title(phase, phase_idx))
         pct = 0.0
-        data = _user_progress_get(str(chat_id))
-        u = data.get(str(chat_id), {})
-        ph = (u.get("grammar_progress", {}).get(topic_key, {}).get("theory", {}).get(str(phase_idx), {}) or {})
+        st_now = await state.get_data()
+        sp = _sess_progress_from_state(st_now)
+        ph = ((sp.get("theory") or {}).get(str(phase_idx)) or {})
         try:
             pct = float(ph.get("pct") or 0.0)
         except Exception:
             pct = 0.0
+
 
         header = f"📖 <b>{title}</b>\n{_bar(pct)}  {int(pct * 100)}%   {idx + 1}/{total}\n\n"  # 💬 добавили счётчик блока
         await state.update_data(gram_replace_tries=1)  # 💬 в Теории не ретраим send, чтобы не плодить дубли
@@ -1823,13 +1921,11 @@ async def _show_video(chat_id: int, state: FSMContext, topic: Dict[str, Any]) ->
     title = html.escape(str(vid.get("title") or f"Видео {idx + 1}"))
     link = str(vid.get("link") or vid.get("url") or "")
 
-    # 💬 считаем done как max просмотренного индекса
-    data = _user_progress_get(str(chat_id))
-    u = data.setdefault(str(chat_id), {})
-    gp = u.setdefault("grammar_progress", {})
-    tp = gp.setdefault(topic_key, {})
-    vd = tp.setdefault("video", {})
-    raw_done = vd.get("done")
+    # 💬 session progress видео (FSM only)
+    st_now = await state.get_data()
+    sp = _sess_progress_from_state(st_now)
+    vd = sp.setdefault("video", {})
+    raw_done = vd.get("done_idx")
     try:
         done_idx = int(raw_done) if raw_done is not None else -1
     except Exception:
@@ -1837,8 +1933,12 @@ async def _show_video(chat_id: int, state: FSMContext, topic: Dict[str, Any]) ->
 
     if idx > done_idx:
         done_idx = idx
-        vd["done"] = done_idx
-        _user_progress_save(data)  # 💬 сохраняем прогресс видео в RailwayData
+        vd["done_idx"] = done_idx  # 💬 фиксируем просмотр видео в рамках сессии
+        await state.update_data(gram_session_progress=sp)
+
+    done = (min(done_idx + 1, total) if (total and done_idx >= 0) else 0)
+    pct = (done / total) if total else 0.0
+
 
     done = (min(done_idx + 1, total) if (total and done_idx >= 0) else 0)  # 💬 индекс -> количество
     pct = (done / total) if total else 0.0
@@ -1936,12 +2036,11 @@ async def _show_read(chat_id: int, state: FSMContext, topic: Dict[str, Any]) -> 
     t = _item_type(f)
 
     # 💬 read done = max индекс
-    data = _user_progress_get(str(chat_id))
-    u = data.setdefault(str(chat_id), {})
-    gp = u.setdefault("grammar_progress", {})
-    tp = gp.setdefault(topic_key, {})
-    rd = tp.setdefault("read", {})
-    raw_done = rd.get("done")
+    # 💬 session progress чтения (FSM only)
+    st_now = await state.get_data()
+    sp = _sess_progress_from_state(st_now)
+    rd = sp.setdefault("read", {})
+    raw_done = rd.get("done_idx")
     try:
         done_idx = int(raw_done) if raw_done is not None else -1
     except Exception:
@@ -1949,8 +2048,12 @@ async def _show_read(chat_id: int, state: FSMContext, topic: Dict[str, Any]) -> 
 
     if idx > done_idx:
         done_idx = idx
-        rd["done"] = done_idx
-        _user_progress_save(data)  # 💬 сохраняем прогресс чтения в RailwayData
+        rd["done_idx"] = done_idx  # 💬 фиксируем просмотр читать в рамках сессии
+        await state.update_data(gram_session_progress=sp)
+
+    done = (min(done_idx + 1, total) if (total and done_idx >= 0) else 0)
+    pct = (done / total) if total else 0.0
+
 
     done = (min(done_idx + 1, total) if (total and done_idx >= 0) else 0)  # 💬 индекс -> количество
     pct = (done / total) if total else 0.0
