@@ -2991,11 +2991,17 @@ async def handle_reading_action(message: Message, state: FSMContext):
     if action == "🧩 Ассет блоки":
         await message.answer(
             "Отправь ассет блоки текстом.\n"
-            "Каждый фрагмент с новой строки.\n"
+            "Формат каждой строки: ES | RU | hint (опц.)\n"
+            "Минимум 2 поля: ES | RU\n"
+            "Символ | внутри полей запрещён\n\n"
+            "Пример:\n"
+            "Estoy listo. | Я готов. | 💡 listo = готовый\n"
+            "¿Qué tal? | Как дела?\n\n"
             "Пустые строки игнорируются.",
             reply_markup=ReplyKeyboardRemove(),
         )
         return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
+
 
     if action == "🖼 Фото":
         await message.answer(
@@ -3070,11 +3076,51 @@ async def save_reading_fragments(message: Message, state: FSMContext):
         await message.answer("Ок, выбери действие.", reply_markup=kb)
         return await state.set_state(NewTopicStates.waiting_reading_action)
 
-    fragments = [line.strip() for line in raw.split("\n") if line.strip()]
-    if not fragments:
+    lines_in = [line.strip() for line in raw.split("\n") if line.strip()]
+    if not lines_in:
         await message.answer(
             "⚠️ Пусто. Пришли ассет блоки текстом.\n"
-            "Каждый фрагмент с новой строки.",
+            "Формат: ES | RU | hint (опц.)\n\n"
+            "Пример:\n"
+            "Estoy listo. | Я готов. | 💡 listo = готовый\n"
+            "¿Qué tal? | Как дела?",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
+
+    parsed: list = []
+    bad_idx: list = []
+
+    for i, ln in enumerate(lines_in, start=1):
+        parts = [p.strip() for p in ln.split("|")]
+        # 💬 допускаем только 2 или 3 поля: ES | RU | hint(опц.)
+        if len(parts) < 2 or len(parts) > 3:
+            bad_idx.append(i)
+            continue
+
+        es = parts[0]
+        ru = parts[1]
+        hint = parts[2] if len(parts) == 3 else ""
+
+        if not es or not ru:
+            bad_idx.append(i)
+            continue
+
+        parsed.append({
+            "type": "text",   # 💬 чтобы грамматика показывала как текстовый фрагмент
+            "es": es,
+            "ru": ru,
+            "hint": hint,
+        })
+
+    if bad_idx:
+        await message.answer(
+            "⛔ Формат неверный. Исправь и пришли заново.\n"
+            f"Проблемные строки: {', '.join(map(str, bad_idx))}\n\n"
+            "Формат: ES | RU | hint (опц.)\n"
+            "Пример:\n"
+            "Estoy listo. | Я готов. | 💡 listo = готовый\n"
+            "¿Qué tal? | Как дела?",
             reply_markup=ReplyKeyboardRemove(),
         )
         return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
@@ -3098,7 +3144,8 @@ async def save_reading_fragments(message: Message, state: FSMContext):
 
     pack = packs[pack_index]
     pack.setdefault("fragments", [])
-    pack["fragments"].extend(fragments)
+    pack["fragments"].extend(parsed)  # 💬 сохраняем только валидные структурированные фрагменты
+
 
     import json
 
@@ -3440,6 +3487,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
