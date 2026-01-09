@@ -1128,15 +1128,17 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                 chat_id,
                 state,
                 _bot.send_photo(
-                    chat_id,
+                    chat_id=chat_id,
                     photo=file_id,
                     caption=caption,
                     parse_mode="HTML",
-                    reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases)
-                )
-            await state.update_data(gram_replace_tries=3)  # 💬 возвращаем дефолт для остальных разделов
+                    reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases),
+                ),
             )
+
+            await state.update_data(gram_replace_tries=3)  # 💬 возвращаем дефолт после photo
             return  # 💬 важно: не проваливаемся дальше в poll/link/text
+
 
 
         if t == "poll":
