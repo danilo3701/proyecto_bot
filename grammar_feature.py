@@ -547,16 +547,26 @@ def _kb_read_controls() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="⬅️", callback_data="gram:read:prev"),
-                InlineKeyboardButton(text="⭐", callback_data="gram:read:star"),
                 InlineKeyboardButton(text="➡️", callback_data="gram:read:next"),
             ],
             [
                 InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu"),
-
             ],  # 💬 одна кнопка
-
         ]
     )
+
+
+def _kb_read_packs(packs: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+    rows: List[List[InlineKeyboardButton]] = []
+
+    for i, p in enumerate(packs or []):
+        title = str((p or {}).get("title") or f"Фаза {i + 1}").strip()
+        if len(title) > 40:
+            title = title[:37] + "..."  # 💬 чтобы кнопки не разъезжались
+        rows.append([InlineKeyboardButton(text=title, callback_data=f"gram:read_pack:{i}")])
+
+    rows.append([InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")])  # 💬 выход в меню
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _replace_content(
@@ -2017,101 +2027,147 @@ async def gram_read_intro(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
     st = await state.get_data()
     topic = _get_topic(str(st.get("selected_topic")))
-    frags = _read_fragments(topic)
-    if not frags:
-        await cb.message.answer("Пока нет фрагментов для Читать.", reply_markup=_kb_back_to_menu())
-        return
+    packs = _read_packs(topic)
+
+    if not packs:
+        await cb.message.answer("Пока нет фаз для Читать.", reply_markup=_kb_back_to_menu())
+        return  # 💬 защита от пустого чтения
+
+    await state.set_state(GrammarStates.read_intro)
+    await state.update_data(
+        gram_section="read_intro",
+        gram_read_pack_idx=None,  # 💬 пока фаза не выбрана
+        gram_item_idx=0,
+    )
+
+    await _replace_content(
+        chat_id=cb.from_user.id,
+        state=state,
+        send_coro=cb.message.answer(
+            "📚 Выбери фазу Читать:",
+            reply_markup=_kb_read_packs(packs),
+        ),
+    )  # 💬 список фаз в одном сообщении
+
+@router.callback_query(F.data.startswith("gram:read_pack:"))
+async def gram_read_pack_open(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+
+    st = await state.get_data()
+    topic_key = st.get("selected_topic")
+    if not topic_key:
+        await cb.message.answer("⚠️ Не вижу тему.")
+        return  # 💬 защита от пустого контекста
+
+    try:
+        pack_idx = int(cb.data.split(":", 2)[2])
+    except Exception:
+        await cb.answer("⚠️ Не понял фазу", show_alert=False)
+        return  # 💬 защита от мусорного callback
+
+    topic = _get_topic(str(topic_key))
+    packs = _read_packs(topic)
+    if pack_idx < 0 or pack_idx >= len(packs):
+        await cb.answer("Фаза не найдена", show_alert=False)
+        return  # 💬 защита от выхода за пределы
 
     await state.set_state(GrammarStates.read_view)
-    await state.update_data(gram_section="read", gram_item_idx=0)
-    await _show_read(chat_id=cb.from_user.id, state=state, topic=topic)
+    await state.update_data(
+        gram_section="read",
+        gram_read_pack_idx=pack_idx,  # 💬 фиксируем выбранную фазу
+        gram_item_idx=0,
+    )
+
+    await _show_read(
+        chat_id=cb.from_user.id,
+        state=state,
+        topic=topic,
+        message=cb.message,
+    )  # 💬 показываем первый фрагмент через edit_text как в подкастах
 
 
 def _format_read_fragment(f: Any) -> str:
-    # 💬 совместимость: если фрагмент = строка, показываем как RU
+    # 💬 стиль как в подкастах: ES видно, RU спрятано, hint видно
     if isinstance(f, str):
-        ru = html.escape(f.strip())
-        return (f"<b>RU</b>\n{ru}").strip() or "Пустой фрагмент"
+        ru_txt = html.escape((f or "").strip())
+        return (f"<i>🔹 <tg-spoiler>{ru_txt}</tg-spoiler></i>").strip() or "Пустой фрагмент"
 
     if not isinstance(f, dict):
         return "Пустой фрагмент"  # 💬 защита от мусора
 
-    es = html.escape(str(f.get("es") or ""))
-    ru = html.escape(str(f.get("ru") or ""))
-    hint = str(f.get("hint") or "")
-    hint = html.escape(hint) if hint else ""
-    text = ""
-    if es:
-        text += f"<b>ES</b>\n{es}\n\n"
-    if ru:
-        text += f"<b>RU</b>\n{ru}\n\n"
-    if hint:
-        text += f"💡 hint\n{hint}"
-    return text.strip() or "Пустой фрагмент"
+    es_txt = html.escape(str(f.get("es") or "").strip())
+    ru_txt = html.escape(str(f.get("ru") or "").strip())
+    hint_txt = html.escape(str(f.get("hint") or "").strip())
+
+    lines: List[str] = []
+    if es_txt:
+        lines.append(f"<b>🇪🇸 {es_txt}</b>")
+    if ru_txt:
+        lines.append(f"<i>🔹 <tg-spoiler>{ru_txt}</tg-spoiler></i>")
+    if hint_txt:
+        lines.append(f"<b><i>💡 {hint_txt}</i></b>")
+
+    return "\n".join(lines).strip() or "Пустой фрагмент"
 
 
-
-async def _show_read(chat_id: int, state: FSMContext, topic: Dict[str, Any]) -> None:
+async def _show_read(chat_id: int, state: FSMContext, topic: Dict[str, Any], message: Optional[Message] = None) -> None:
     st = await state.get_data()
-    topic_key = str(st.get("selected_topic") or "")
-    frags = _read_fragments(topic)
-    total = len(frags)
+
+    pack_idx = int(st.get("gram_read_pack_idx") or 0)
+    frags = _read_fragments_from_pack(topic, pack_idx)
+    frags = [x for x in (frags or []) if _item_type(x) != "photo"]  # 💬 в Читать используем только текст
+
+    if not frags:
+        text = "Пока нет фрагментов для Читать."
+        if message:
+            try:
+                await message.edit_text(text, reply_markup=_kb_back_to_menu())
+            except Exception:
+                await message.answer(text, reply_markup=_kb_back_to_menu())
+        else:
+            await _replace_content(chat_id, state, _bot.send_message(chat_id, text, reply_markup=_kb_back_to_menu()))
+        return
+
     idx = int(st.get("gram_item_idx") or 0)
-    if idx < 0:
-        idx = 0
-    if idx >= total:
-        await _replace_content(
-            chat_id,
-            state,
-            _bot.send_message(chat_id, "✅ Читать закончено.", reply_markup=_kb_back_to_menu()),
-        )  # 💬 конец чтения одним сообщением
-        return
+    idx = max(0, min(len(frags) - 1, idx))  # 💬 как в подкастах, не выходим за пределы
+    await state.update_data(gram_item_idx=idx)
 
+    frag = frags[idx]
+    text = _format_read_fragment(frag)
 
-    f = frags[idx]
-    t = _item_type(f)
-
-    # 💬 read done = max индекс
-    # 💬 session progress чтения (FSM only)
-    st_now = await state.get_data()
-    sp = _sess_progress_from_state(st_now)
-    rd = sp.setdefault("read", {})
-    raw_done = rd.get("done_idx")
     try:
-        done_idx = int(raw_done) if raw_done is not None else -1
+        if message:
+            await message.edit_text(
+                text,
+                reply_markup=_kb_read_controls(),
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+        else:
+            await _replace_content(
+                chat_id,
+                state,
+                _bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    reply_markup=_kb_read_controls(),
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                ),
+            )
     except Exception:
-        done_idx = -1
-
-    if idx > done_idx:
-        done_idx = idx
-        rd["done_idx"] = done_idx  # 💬 фиксируем просмотр читать в рамках сессии
-        await state.update_data(gram_session_progress=sp)
-
-    done = (min(done_idx + 1, total) if (total and done_idx >= 0) else 0)
-    pct = (done / total) if total else 0.0
-
-
-    done = (min(done_idx + 1, total) if (total and done_idx >= 0) else 0)  # 💬 индекс -> количество
-    pct = (done / total) if total else 0.0
-
-    header = f"📚 <b>Читать</b>\n{_bar(pct)}  {int(pct * 100)}%\n\n"
-
-    if t == "photo":
-        photo = f.get("photo") or f.get("file_id") or f.get("image") or f.get("url")
-        cap = header + html.escape(str(f.get("caption") or ""))
         await _replace_content(
             chat_id,
             state,
-            _bot.send_photo(chat_id=chat_id, photo=photo, caption=cap, reply_markup=_kb_read_controls(), parse_mode="HTML"),
-        )
-        return
+            _bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=_kb_read_controls(),
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            ),
+        )  # 💬 fallback, если edit_text невозможен
 
-    text = header + _format_read_fragment(f)
-    await _replace_content(
-        chat_id,
-        state,
-        _bot.send_message(chat_id=chat_id, text=text, reply_markup=_kb_read_controls(), parse_mode="HTML", disable_web_page_preview=True),
-    )
 
 
 @router.callback_query(F.data.in_(["gram:read:prev", "gram:read:next"]))
@@ -2121,46 +2177,20 @@ async def gram_read_nav(cb: CallbackQuery, state: FSMContext) -> None:
     if st.get("gram_section") != "read":
         return
 
+    topic = _get_topic(str(st.get("selected_topic")))
+    pack_idx = int(st.get("gram_read_pack_idx") or 0)
+
+    frags = _read_fragments_from_pack(topic, pack_idx)
+    frags = [x for x in (frags or []) if _item_type(x) != "photo"]  # 💬 в Читать только текст
+    if not frags:
+        return  # 💬 нечего листать
+
     idx = int(st.get("gram_item_idx") or 0)
     if cb.data.endswith("prev"):
-        idx -= 1
+        idx = max(0, idx - 1)
     else:
-        idx += 1
+        idx = min(len(frags) - 1, idx + 1)
+
     await state.update_data(gram_item_idx=idx)
+    await _show_read(chat_id=cb.from_user.id, state=state, topic=topic, message=cb.message)  # 💬 edit_text как в подкастах
 
-    topic = _get_topic(str(st.get("selected_topic")))
-    await _show_read(chat_id=cb.from_user.id, state=state, topic=topic)
-
-
-@router.callback_query(F.data == "gram:read:star")
-async def gram_read_star(cb: CallbackQuery, state: FSMContext) -> None:
-    await cb.answer()
-    st = await state.get_data()
-    topic_key = str(st.get("selected_topic") or "")
-    idx = int(st.get("gram_item_idx") or 0)
-
-    topic = _get_topic(topic_key)
-    frags = _read_fragments(topic)
-    if idx < 0 or idx >= len(frags):
-        await cb.answer("Фрагмент не найден", show_alert=False)
-        return
-
-    uid = str(cb.from_user.id)
-    data = _user_progress_get(uid)
-    u = data.setdefault(uid, {})
-    gp = u.setdefault("grammar_progress", {})
-    tp = gp.setdefault(topic_key, {})
-    notes = tp.setdefault("read_notes", [])
-
-    # 💬 антидубликаты по idx
-    for n in notes:
-        try:
-            if int(n.get("idx", -1)) == idx:
-                await cb.answer("Уже сохранено ⭐", show_alert=False)
-                return
-        except Exception:
-            continue
-
-    notes.append({"idx": idx, "frag": frags[idx]})
-    _user_progress_save(data)
-    await cb.answer("Сохранено ⭐", show_alert=False)
