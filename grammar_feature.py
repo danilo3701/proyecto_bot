@@ -395,6 +395,12 @@ def _item_type(item: Any) -> str:
     if t in ("quiz", "pollquiz", "poll_quiz"):
         return "poll"  # 💬 совместимость: CreateLessonBlock сохраняет poll-квизы как type=quiz
 
+    # 💬 если блок содержит медиа, считаем его фото (бывает, что подпись лежит в text)
+    if isinstance(item, dict):
+        if (item.get("photo") or item.get("file_id") or item.get("image") or item.get("file")) and (t in (None, "", "text", "asset")):
+            return "photo"
+
+
     if t:
         return t
     if "question" in item and ("options" in item or "answers" in item):
@@ -1287,24 +1293,53 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
 
 
         if t == "photo":
-            file_id = item.get("file_id") or item.get("photo") or item.get("image") or item.get("url")
-            cap_raw = (item.get("caption") or item.get("text") or "")
-            cap_raw = str(cap_raw).strip()
-
-            # 💬 caption нужен, чтобы кнопки листания были на этом же сообщении
-            caption = header if not cap_raw else f"{header}\n\n{html.escape(cap_raw)}"
-
-            await _replace_content(
-                chat_id,
-                state,
-                _bot.send_photo(
-                    chat_id=chat_id,
-                    photo=file_id,
-                    caption=caption,
-                    parse_mode="HTML",
-                    reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases),
-                ),
+            file_id = (
+                item.get("file_id")
+                or item.get("photo")
+                or item.get("image")
+                or item.get("file")
+                or item.get("url")
             )
+
+            cap_raw = item.get("caption") or item.get("text") or ""
+            cap_body = html.escape(str(cap_raw)).strip()
+            cap = header + (f"\n\n{cap_body}" if cap_body else "")
+
+            mt = (item.get("media_type") or "photo").strip().lower()  # 💬 поддержка photo|animation из админки
+
+            if not file_id:
+                msg = await _replace_content(
+                    _bot.send_message(
+                        chat_id,
+                        cap,
+                        parse_mode="HTML",
+                        reply_markup=kb,
+                        disable_notification=True,
+                    )
+                )
+            elif mt == "animation":
+                msg = await _replace_content(
+                    _bot.send_animation(
+                        chat_id,
+                        animation=file_id,
+                        caption=cap,
+                        parse_mode="HTML",
+                        reply_markup=kb,
+                        disable_notification=True,
+                    )
+                )
+            else:
+                msg = await _replace_content(
+                    _bot.send_photo(
+                        chat_id,
+                        photo=file_id,
+                        caption=cap,
+                        parse_mode="HTML",
+                        reply_markup=kb,
+                        disable_notification=True,
+                    )
+                )
+
 
             await state.update_data(gram_replace_tries=3)  # 💬 возвращаем дефолт после photo
             return  # 💬 важно: не проваливаемся дальше в poll/link/text
