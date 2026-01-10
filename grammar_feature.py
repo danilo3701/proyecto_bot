@@ -1367,7 +1367,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
             pct = 0.0
 
 
-        header = f"📖 <b>{title}</b>\n{_bar(pct)}  {int(pct * 100)}%   {idx + 1}/{total}\n\n"  # 💬 добавили счётчик блока
+        header = f"📖 <b>{title}</b>\n{_bar(pct)} {int(pct * 100)}% {idx + 1}/{total}"  # 💬 компактный header без лишних пустых строк
         await state.update_data(gram_replace_tries=1)  # 💬 в Теории не ретраим send, чтобы не плодить дубли
         kb = _kb_nav_in_phase(back_to_phases=back_to_phases)  # 💬 единая клавиатура навигации для фазы (fix NameError kb)
 
@@ -1431,17 +1431,34 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
         # =========================
 
 
-        # 💬 дефолт = обычный текстовый блок
-        body = (item.get("text") or "").strip()
+        # 💬 дефолт = обычный текстовый блок (компакт + форматирование)
+        body_raw = (item.get("text") or "").strip()
         hint = (item.get("hint") or "").strip()
+        
+        # 💬 чистим лишние пустые строки внутри body, чтобы не было "простыней"
+        while "\n\n\n" in body_raw:
+            body_raw = body_raw.replace("\n\n\n", "\n\n")
+        
         text = header
-        if body:
-            text += "\n\n" + _safe_html(body)
+        
+        if body_raw:
+            body_html = _safe_html(body_raw)
+        
+            # 💬 Telegram не умеет "bold+italic+code" в одном фрагменте без конфликтов
+            # 💬 поэтому делаем жирный+италик основным стилем, а code = отдельной строкой (если коротко)
+            body_pretty = f"<b><i>{body_html}</i></b>"
+        
+            if "\n" not in body_raw and len(body_raw) <= 120:
+                body_pretty += f"\n<code>{body_html}</code>"  # 💬 code-строка как доп. стиль (без риска падений)
+        
+            text += "\n\n" + body_pretty
+        
         if hint:
-            text += "\n\n💡 " + _safe_html(hint)  # 💬 hint не спойлерим
-
+            text += "\n\n " + _safe_html(hint)  # 💬 hint не спойлерим
+        
         await _gram_edit_or_replace_text(chat_id, state, text, kb)
         return
+
 
 
 @router.poll_answer(StateFilter(GrammarStates.practice_poll))  # 💬 Теория без poll, оставляем poll только для Практики
