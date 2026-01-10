@@ -841,6 +841,17 @@ async def gram_home(cb: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "gram:topics")
 async def gram_topics(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
+
+    # 💬 чистим poll ctx и локи при выходе из грамматики, чтобы не было утечек/фантомных poll
+    cid = int(cb.from_user.id)
+    for k, v in list(_GRAM_POLL_CTX.items()):
+        try:
+            if int((v or {}).get("chat_id") or 0) == cid:
+                _GRAM_POLL_CTX.pop(k, None)
+        except Exception:
+            continue
+    _GRAM_RENDER_LOCKS.pop(cid, None)
+
     # 💬 не удаляем текущее сообщение, core будет редактировать его через edit_text
     await state.update_data(gram_content_msg_id=None)  # 💬 выходим из грамматики в список тем
     await state.update_data(
@@ -1329,36 +1340,42 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
 
             if not file_id:
                 msg = await _replace_content(
-                    _bot.send_message(
-                        chat_id,
-                        cap,
+                    chat_id,
+                    state,
+                    send_coro=_bot.send_message(
+                        chat_id=chat_id,
+                        text=cap,
                         parse_mode="HTML",
                         reply_markup=kb,
                         disable_notification=True,
-                    )
-                )
-            elif mt == "animation":
+                    ),
+                )  # 💬 корректный вызов _replace_content(chat_id, state, ...)
+
                 msg = await _replace_content(
-                    _bot.send_animation(
-                        chat_id,
+                    chat_id,
+                    state,
+                    send_coro=_bot.send_animation(
+                        chat_id=chat_id,
                         animation=file_id,
                         caption=cap,
                         parse_mode="HTML",
                         reply_markup=kb,
                         disable_notification=True,
-                    )
-                )
-            else:
+                    ),
+                )  # 💬 корректный вызов
+                
                 msg = await _replace_content(
-                    _bot.send_photo(
-                        chat_id,
+                    chat_id,
+                    state,
+                    send_coro=_bot.send_photo(
+                        chat_id=chat_id,
                         photo=file_id,
                         caption=cap,
                         parse_mode="HTML",
                         reply_markup=kb,
                         disable_notification=True,
-                    )
-                )
+                    ),
+                )  # 💬 корректный вызов
 
 
             await state.update_data(gram_replace_tries=3)  # 💬 возвращаем дефолт после photo
@@ -1437,7 +1454,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                     _bot.send_message(
                         chat_id=chat_id,
                         text=header + "⚠️ Ссылка для упражнения не найдена.",
-                        reply_markup=_kb_back_to_menu(),
+                        reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases),  # 💬 не выкидываем из фазы, можно листать дальше
                         parse_mode="HTML",
                     ),
                 )
@@ -1452,7 +1469,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                 _bot.send_message(
                     chat_id=chat_id,
                     text=header + f"🔗 <b>{html.escape(title)}</b>\n👇 <a href=\"{safe_url}\">{html.escape(cta)}</a>",
-                    reply_markup=_kb_back_to_menu(),
+                    reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases),  # 💬 не выкидываем из фазы, можно листать дальше
                     parse_mode="HTML",
                     disable_web_page_preview=True,
                 ),
@@ -2141,6 +2158,8 @@ async def _show_read(chat_id: int, state: FSMContext, topic: Dict[str, Any], mes
     idx = int(st.get("gram_item_idx") or 0)
     idx = max(0, min(len(frags) - 1, idx))  # 💬 как в подкастах, не выходим за пределы
     await state.update_data(gram_item_idx=idx)
+    await _mark_seen_session(state, "read", None, idx, len(frags))  # 💬 фиксируем прогресс чтения в session для меню
+
 
     frag = frags[idx]
     text = _format_read_fragment(frag)
