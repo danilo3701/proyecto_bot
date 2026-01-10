@@ -1603,17 +1603,20 @@ async def handle_main_menu(message: Message, state: FSMContext):
             return
 
         # — 1) Выбор раздела для редактирования —
-        buttons = [
-            [KeyboardButton(text="📚 Словарь"),  KeyboardButton(text="🎲 Упражнения")],
-            [KeyboardButton(text="🎬 Видео"),      KeyboardButton(text="💬 Диалоги")],
-            [KeyboardButton(text="🚫 Отмена")]
-        ]
-        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-        await message.answer("✏️ Режим редактирования. Выберите раздел:", reply_markup=kb)
-
-        from edit_topic_flow import EditTopicStates
-        await state.set_state(EditTopicStates.waiting_section)
+        # 💬 лексика: открываем рабочее меню действий (без внешних импортов, чтобы кнопка реально работала)
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➕ Добавить словарь"), KeyboardButton(text="➕ Добавить упражнение")],
+                [KeyboardButton(text="➕ Добавить видео"),   KeyboardButton(text="➕ Добавить диалог")],
+                [KeyboardButton(text="➕ Добавить QUIZ"),    KeyboardButton(text="📝 Добавить ТЕКСТ")],
+                [KeyboardButton(text="↩️ Вернуться в Главное меню")],
+            ],
+            resize_keyboard=True,
+        )
+        await message.answer("✏️ Режим редактирования. Что вы хотите сделать?", reply_markup=kb)
+        await state.set_state(EditTopicStates.choose_action)
         return
+
 
 
 
@@ -3852,6 +3855,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
