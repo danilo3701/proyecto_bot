@@ -1052,11 +1052,12 @@ async def gram_practice_feedback(cb: CallbackQuery, state: FSMContext):
             _bot.send_message(
                 chat_id=cb.message.chat.id,
                 text=txt,
-                reply_markup=_kb_back_to_menu(),
+                reply_markup=_kb_practice_continue_menu(done, total),  # 💬 остаёмся в Практике, меню доступно
                 parse_mode="HTML"
             )
         )
         return
+
 
     await _replace_content(
         cb.message.chat.id,
@@ -1072,13 +1073,20 @@ async def gram_practice_feedback(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "gram:practice:next")
 async def gram_practice_next(cb: CallbackQuery, state: FSMContext):
-    # 💬 "Продолжить" -> грузим следующую ссылку и показываем
-    await cb.answer()
-    await _safe_delete_message(_bot, cb.message.chat.id, cb.message.message_id)  # 💬 сразу убираем экран с кнопками после нажатия
-
+    # 💬 "Продолжить" = если это конец, не меняем экран, только подсказка
     data = await state.get_data()
-    idx = int(data.get("gram_link_idx", 0)) + 1
-    await state.update_data(gram_link_idx=idx)
+    items = data.get("gram_link_items", []) or []
+    cur_idx = int(data.get("gram_link_idx", 0))
+    next_idx = cur_idx + 1
+
+    if next_idx >= len(items):
+        await cb.answer("Это конец", show_alert=False)  # 💬 остаёмся на текущем экране
+        return
+
+    await cb.answer()
+    await _safe_delete_message(_bot, cb.message.chat.id, cb.message.message_id)  # 💬 убираем экран только если реально идём дальше
+
+    await state.update_data(gram_link_idx=next_idx)
 
     await _replace_content(
         cb.message.chat.id,
@@ -1091,6 +1099,7 @@ async def gram_practice_next(cb: CallbackQuery, state: FSMContext):
     )
     await asyncio.sleep(0.8)
     return await _show_practice_link(cb.message.chat.id, state)
+
 
 
 @router.callback_query(F.data == "gram:practice:theory")
@@ -2187,11 +2196,18 @@ async def gram_read_nav(cb: CallbackQuery, state: FSMContext) -> None:
         return  # 💬 нечего листать
 
     idx = int(st.get("gram_item_idx") or 0)
+
     if cb.data.endswith("prev"):
-        idx = max(0, idx - 1)
+        if idx <= 0:
+            await cb.answer("Это начало", show_alert=False)  # 💬 не уходим за пределы
+            return
+        idx -= 1
     else:
-        idx = min(len(frags) - 1, idx + 1)
+        if idx >= len(frags) - 1:
+            await cb.answer("Это конец", show_alert=False)  # 💬 не уходим за пределы
+            return
+        idx += 1
 
     await state.update_data(gram_item_idx=idx)
-    await _show_read(chat_id=cb.from_user.id, state=state, topic=topic, message=cb.message)  # 💬 edit_text как в подкастах
+    await _show_read(chat_id=cb.from_user.id, state=state, topic=topic, message=cb.message)  # 💬 остаёмся в этом же экране
 
