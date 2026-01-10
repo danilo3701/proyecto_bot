@@ -83,6 +83,20 @@ ADMIN_EDIT_MODE_KEY = "admin_edit_mode"            # 💬 режим фильт�
 ADMIN_EDIT_CATEGORY_KEY = "admin_edit_category"    # 💬 выбранная категория (lex/gram)
 ADMIN_EDIT_LEVEL_KEY = "admin_edit_level"          # 💬 выбранный уровень (A0/A1-A2/B1-B2/C1)
 
+ADMIN_CURRENT_TID_KEY = "adm_current_tid"          # 💬 tid текущей открытой темы
+ADMIN_EDIT_VIEW_KEY = "adm_view"                   # 💬 какой экран сейчас открыт в админ-редакторе
+ADMIN_EDIT_SCOPE_KEY = "adm_scope"                 # 💬 над каким списком сейчас работаем (practice/video/theory_items/...)
+ADMIN_EDIT_PAGE_KEY = "adm_page"                   # 💬 текущая страница списка
+ADMIN_EDIT_PHASE_INDEX_KEY = "adm_phase_index"     # 💬 индекс фазы (0-based) в topic["vocab"]
+ADMIN_EDIT_PACK_INDEX_KEY = "adm_pack_index"       # 💬 индекс пака чтения (0-based) в topic["reading"]
+ADMIN_EDIT_SUBLIST_KEY = "adm_sublist"             # 💬 fragments | assets
+
+ADMIN_PENDING_ACTION_KEY = "adm_pending_action"            # 💬 delete | move | insert
+ADMIN_PENDING_INSERT_KIND_KEY = "adm_insert_kind"          # 💬 text | photo | link | fragment | asset
+ADMIN_PENDING_INSERT_PAYLOAD_KEY = "adm_insert_payload"    # 💬 dict | list для вставки
+ADMIN_PENDING_MOVE_FROM_KEY = "adm_move_from"              # 💬 from index для перемещения
+ADMIN_PAGE_SIZE = 6  # 💬 сколько элементов показываем на одной странице в админ-листах
+
 
 def _ikb(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     # 💬 собираем InlineKeyboardMarkup из (text, callback_data)
@@ -371,6 +385,18 @@ class EditGrammarStates(StatesGroup):
     waiting_delete_index = State()   # 💬 ввод индекса для удаления
 
 
+class AdminInlineEditStates(StatesGroup):
+    # 💬 FSM для ввода индексов и контента в админ-inline редакторе
+    waiting_phase_name = State()        # 💬 добавление фазы
+    waiting_reading_title = State()     # 💬 добавление пака чтения
+    waiting_delete_index = State()      # 💬 ввод индекса для удаления
+    waiting_move_from = State()         # 💬 откуда перемещаем
+    waiting_move_to = State()           # 💬 куда перемещаем
+    waiting_insert_payload = State()    # 💬 ждём контент для вставки
+    waiting_insert_index = State()      # 💬 ждём индекс вставки
+
+
+
 def get_main_menu(category: str | None = None) -> ReplyKeyboardMarkup:
     # 💬 что делает эта часть: разные кнопки для lex и gram, но структура JSON та же
     if category == "gram":
@@ -589,10 +615,12 @@ async def admin_open_topic(cb: CallbackQuery, state: FSMContext):
         **{ADMIN_EDIT_MODE_KEY: edit_mode},
         **{ADMIN_EDIT_CATEGORY_KEY: edit_cat},
         **{ADMIN_EDIT_LEVEL_KEY: edit_lvl},
+        **{ADMIN_CURRENT_TID_KEY: tid},          # 💬 запоминаем tid, чтобы вернуться к карточке темы
+        **{ADMIN_EDIT_VIEW_KEY: "topic_card"},   # 💬 стартовый экран
     )
-
-    title = topic_data.get("visible_title") or topic_data.get("name") or name
+    
     kb = _ikb([
+        [("👁 Просмотр", "adm:topic_preview"), ("✏️ Редактировать", "adm:topic_edit")],
         [("🗑 Удалить тему", f"adm:topic_del:{tid}")],
         [("⬅️ К списку тем", "adm:topics")],
         [("🏠 В меню /addtopic", "adm:home")],  # 💬 выход из админки
@@ -602,6 +630,185 @@ async def admin_open_topic(cb: CallbackQuery, state: FSMContext):
 
     await _inline_replace(cb, state, f"✅ Открыта тема: <b>{title}</b>\nЧто сделать?", kb)
     await cb.answer()
+
+
+
+# ===========================
+# ✅ Админ-inline редактор темы
+# ===========================
+
+async def _inline_edit_by_id(message: Message, state: FSMContext, text: str, kb: InlineKeyboardMarkup):
+    # 💬 редактируем сохранённое inline-сообщение по message_id (когда ввод идёт обычным сообщением)
+    st = await state.get_data()
+    msg_id = st.get(ADMIN_INLINE_MSG_ID_KEY)
+    if not msg_id:
+        await message.answer(text, reply_markup=kb, parse_mode="HTML")
+        return
+    try:
+        await message.bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=int(msg_id),
+            text=text,
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+    except Exception:
+        await message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+
+def _admin_is_gram(topic: dict) -> bool:
+    # 💬 определяем, что тема относится к грамматике
+    cat = str((topic or {}).get("category") or "").strip().lower()
+    return cat.startswith("gram")
+
+
+def _admin_clamp_page(total: int, page: int) -> tuple[int, int]:
+    # 💬 ограничиваем номер страницы и возвращаем max_page
+    if total <= 0:
+        return 0, 0
+    max_page = max(0, (total - 1) // ADMIN_PAGE_SIZE)
+    page = max(0, min(int(page), max_page))
+    return page, max_page
+
+
+def _admin_page_slice(items: list, page: int) -> tuple[list, int]:
+    # 💬 берём срез списка под текущую страницу
+    start = page * ADMIN_PAGE_SIZE
+    return items[start:start + ADMIN_PAGE_SIZE], start
+
+
+def _admin_preview_reading_fragment(item: dict) -> str:
+    # 💬 короткое превью фрагмента чтения (es + ru)
+    if not isinstance(item, dict):
+        return "фрагмент"
+    es = str(item.get("es") or "").strip()
+    ru = str(item.get("ru") or "").strip()
+    if es and ru:
+        return f"🧩 {_preview_text(es, 34)} | {_preview_text(ru, 34)}"
+    if es:
+        return f"🧩 {_preview_text(es, 48)}"
+    return "🧩 фрагмент"
+
+
+async def _admin_load_topic_from_disk(state: FSMContext) -> tuple[dict, str | None]:
+    # 💬 всегда читаем тему с диска, чтобы правки были актуальны
+    st = await state.get_data()
+    topic_path = st.get("topic_path")
+    if not topic_path:
+        return {}, None
+    try:
+        with open(topic_path, "r", encoding="utf-8") as f:
+            return (json.load(f) or {}), topic_path
+    except Exception:
+        return {}, topic_path
+
+
+async def _admin_save_topic_to_disk(state: FSMContext, topic: dict, topic_path: str) -> bool:
+    # 💬 атомарно сохраняем тему и обновляем FSM data
+    ok = atomic_save_json(topic_path, topic)
+    if ok:
+        await state.update_data(topic=topic)  # 💬 держим актуальную тему в FSM
+    return ok
+
+
+async def _admin_try_reload_topics_cache():
+    # 💬 пробуем обновить кэш тем в core (если он есть), чтобы не требовался рестарт
+    try:
+        import core8_1  # type: ignore
+        if hasattr(core8_1, "load_topics"):
+            new_topics = core8_1.load_topics()
+            if hasattr(core8_1, "topics"):
+                core8_1.topics = new_topics
+            if hasattr(core8_1, "TOPICS"):
+                core8_1.TOPICS = new_topics
+    except Exception:
+        pass
+
+
+def _admin_kb_footer(back_cb: str) -> list[list[tuple[str, str]]]:
+    # 💬 общий футер меню (назад + домой + закрыть)
+    return [
+        [("⬅️ Назад", back_cb)],
+        [("⬅️ К списку тем", "adm:topics")],
+        [("🏠 В меню /addtopic", "adm:home")],
+        [("⬅️ Закрыть", "adm:close")],
+    ]
+
+
+async def _admin_show_topic_card(cb: CallbackQuery, state: FSMContext):
+    # 💬 рисуем карточку темы снова
+    st = await state.get_data()
+    tid = st.get(ADMIN_CURRENT_TID_KEY)
+    topic, _ = await _admin_load_topic_from_disk(state)
+    if not tid:
+        await cb.answer("Нет открытой темы", show_alert=True)
+        return
+    title = topic.get("visible_title") or topic.get("name") or "тема"
+    kb = _ikb([
+        [("👁 Просмотр", "adm:topic_preview"), ("✏️ Редактировать", "adm:topic_edit")],
+        [("🗑 Удалить тему", f"adm:topic_del:{tid}")],
+        [("⬅️ К списку тем", "adm:topics")],
+        [("🏠 В меню /addtopic", "adm:home")],
+        [("⬅️ Закрыть", "adm:close")],
+    ])
+    await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "topic_card"})
+    await _inline_replace(cb, state, f"✅ Открыта тема: <b>{_preview_text(str(title), 80)}</b>\nЧто сделать?", kb)
+    await cb.answer()
+
+
+def _admin_render_preview_text(topic_data: dict) -> str:
+    # 💬 компактный предпросмотр структуры темы
+    title = topic_data.get("visible_title") or topic_data.get("name") or "тема"
+    level = topic_data.get("level") or "-"
+    category = topic_data.get("category") or "-"
+    phases = topic_data.get("vocab") or []
+    exercises = topic_data.get("exercises") or []
+    videos = topic_data.get("videos") or []
+    reading = topic_data.get("reading") or []
+    lines = [
+        f"👁 <b>{_preview_text(str(title), 90)}</b>",
+        f"Категория: <b>{_preview_text(str(category), 30)}</b>",
+        f"Уровень: <b>{_preview_text(str(level), 12)}</b>",
+        "",
+        f"📖 Теория (фазы): <b>{len(phases)}</b>",
+        f"📝 Практика (блоки): <b>{len(exercises)}</b>",
+        f"🎥 Видео (ссылки): <b>{len(videos)}</b>",
+        f"📚 Читать (паки): <b>{len(reading)}</b>",
+    ]
+    return "\n".join(lines)
+
+
+async def _admin_show_sections(cb: CallbackQuery, state: FSMContext):
+    # 💬 меню выбора раздела
+    topic, _ = await _admin_load_topic_from_disk(state)
+    if not _admin_is_gram(topic):
+        kb = _ikb(_admin_kb_footer("adm:topic_card"))
+        await _inline_replace(cb, state, "⚠️ Редактор тут включён только для грамматики.", kb)
+        await cb.answer()
+        return
+    kb = _ikb([
+        [("📖 Теория", "adm:edit:theory"), ("📝 Практика", "adm:edit:practice")],
+        [("🎥 Видео", "adm:edit:video"), ("📚 Читать", "adm:edit:reading")],
+        [("⬅️ К теме", "adm:topic_card")],
+        [("⬅️ К списку тем", "adm:topics")],
+        [("🏠 В меню /addtopic", "adm:home")],
+        [("⬅️ Закрыть", "adm:close")],
+    ])
+    await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "edit_sections"})
+    await _inline_replace(cb, state, "✏️ Редактирование\nВыбери раздел:", kb)
+    await cb.answer()
+
+# --- дальше идёт: теория фазы, теория элементы, практика, видео, чтение (паки, фрагменты, картинки)
+# --- операции: удалить индекс, вставить (с типами), переместить, очистить
+# --- FSM ввод: phase_name, reading_title, delete_index, move_from/to, insert_payload, insert_index
+# --- пагинация кнопками: "⬅️ Назад" и "Еще"
+
+# ВАЖНО: этот блок большой
+# чтобы не перегружать ответ, я продолжу ровно тем же блоком в следующем сообщении
+# и дам его целиком одним куском, без пропусков
+
+
+
 @router.callback_query(F.data == "adm:topics")
 async def admin_topics_list(cb: CallbackQuery, state: FSMContext):
     # 💬 возвращаемся к списку тем в том же сообщении (с учётом фильтра, если он есть)
@@ -3507,6 +3714,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
