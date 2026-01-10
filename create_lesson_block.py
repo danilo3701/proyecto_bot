@@ -3061,19 +3061,34 @@ async def receive_vocab_media(message: Message, state: FSMContext):
     else:
         url = (message.text or "").strip()
         lower = url.lower()
+
         if lower.endswith((".mp4", ".gif")):
             entry["media_type"] = "animation"
         elif lower.endswith((".jpg", ".jpeg", ".png")):
             entry["media_type"] = "photo"
         else:
-            entry["media_type"] = "sticker"
+            entry["media_type"] = "photo"  # 💬 по умолчанию считаем, что это file_id/URL для фото
         entry["photo"] = url
 
-    # 💬 подпись к фото (если была введена)
-    caption = data.get("vocab_caption")
+
+    # 💬 подпись к фото (опционально): или из FSM, или из message.caption
+    caption_state = data.get("vocab_caption")
+    caption_inline = (getattr(message, "caption", None) or "").strip()
+
+    caption = None
+    if caption_state:
+        caption = str(caption_state).strip()
+    elif caption_inline:
+        caption = caption_inline
+
+    if caption == "-":
+        caption = None  # 💬 поддержка пропуска подписи
+
+    await state.update_data(vocab_caption=None)  # 💬 чистим всегда, чтобы подпись не прилипала к следующему фото
+
     if caption:
-        entry["text"] = caption
-        await state.update_data(vocab_caption=None)
+        entry["text"] = caption  # 💬 сохраняем подпись (если она есть)
+
 
     # 💬 сохраняем медиа-блок в выбранной фазе
     try:
@@ -3714,6 +3729,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
