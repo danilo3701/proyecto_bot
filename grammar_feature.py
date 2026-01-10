@@ -820,13 +820,20 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
         pad = max(0, label_width - len(w))
         return w + ("&nbsp;" * pad)
 
+    label_width = len("Практика")  # 💬 фиксируем ширину по самому длинному слову, чтобы двоеточия были ровно
+
+    def _lbl(w: str) -> str:
+        # 💬 добиваем пробелами (НЕ HTML-entity), чтобы не печаталось "&nbsp;" в чате
+        return str(w).ljust(label_width)
+
     text = (
         f"<b>{title}</b>\n\n"
-        f"<b><i>📖 {_lbl('Теория')}:&nbsp;{_bar(theory_pct, width=10)}&nbsp;&nbsp;{int(theory_pct * 100)}%</i></b>\n"
-        f"<b><i>🧪 {_lbl('Практика')}:&nbsp;{_bar(pr_pct, width=10)}&nbsp;&nbsp;{int(pr_pct * 100)}%</i></b>\n"
-        f"<b><i>🎬 {_lbl('Видео')}:&nbsp;{_bar(vd_pct, width=10)}&nbsp;&nbsp;{int(vd_pct * 100)}%</i></b>\n"
-        f"<b><i>📚 {_lbl('Читать')}:&nbsp;{_bar(rd_pct, width=10)}&nbsp;&nbsp;{int(rd_pct * 100)}%</i></b>\n"
+        f"<b><i>📖 {_lbl('Теория')}:  {_bar(theory_pct, width=10)}  {int(theory_pct * 100)}%</i></b>\n"
+        f"<b><i>🧪 {_lbl('Практика')}:  {_bar(pr_pct, width=10)}  {int(pr_pct * 100)}%</i></b>\n"
+        f"<b><i>🎬 {_lbl('Видео')}:  {_bar(vd_pct, width=10)}  {int(vd_pct * 100)}%</i></b>\n"
+        f"<b><i>📚 {_lbl('Читать')}:  {_bar(rd_pct, width=10)}  {int(rd_pct * 100)}%</i></b>\n"
     )
+
 
     await state.set_state(GrammarStates.menu)
     await state.update_data(gram_ctx=True, gram_topic_key=str(topic_key))  # 💬 не сбрасываем id, чтобы удалять прошлый экран
