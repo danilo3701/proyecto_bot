@@ -1378,7 +1378,8 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
         # =========================
         if t == "photo":
             file_id = item.get("photo") or ""  # 💬 file_id фото
-            cap_user = (item.get("caption") or "").strip()  # 💬 caption опционален
+            cap_user = (item.get("caption") or item.get("text") or "").strip()  # 💬 caption опционален (fallback на text)
+
             cap_full = header if not cap_user else (header + "\n\n" + _safe_html(cap_user))  # 💬 header всегда сверху
 
             if not file_id:
@@ -1443,15 +1444,12 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
         
         if body_raw:
             body_html = _safe_html(body_raw)
-        
-            # 💬 Telegram не умеет "bold+italic+code" в одном фрагменте без конфликтов
-            # 💬 поэтому делаем жирный+италик основным стилем, а code = отдельной строкой (если коротко)
-            body_pretty = f"<b><i>{body_html}</i></b>"
-        
-            if "\n" not in body_raw and len(body_raw) <= 120:
-                body_pretty += f"\n<code>{body_html}</code>"  # 💬 code-строка как доп. стиль (без риска падений)
-        
+
+            # 💬 quote-оформление для теории (без дублей текста)
+            body_pretty = f"<blockquote><b><i>{body_html}</i></b></blockquote>"
+
             text += "\n\n" + body_pretty
+
         
         if hint:
             text += "\n\n " + _safe_html(hint)  # 💬 hint не спойлерим
