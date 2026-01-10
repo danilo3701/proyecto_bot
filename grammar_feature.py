@@ -347,7 +347,6 @@ def _phase_items(phase: Dict[str, Any]) -> List[Dict[str, Any]]:
             continue
 
     return out
- compiled
 
 
 
