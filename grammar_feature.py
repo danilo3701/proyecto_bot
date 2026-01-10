@@ -2214,7 +2214,7 @@ async def gram_read_nav(cb: CallbackQuery, state: FSMContext) -> None:
     if not frags:
         return  # 💬 нечего листать
 
-    idx = int(st.get("gram_item_idx") or 0)
+    idx =     idx = int(st.get("gram_item_idx") or 0)
 
     if cb.data.endswith("prev"):
         if idx <= 0:
