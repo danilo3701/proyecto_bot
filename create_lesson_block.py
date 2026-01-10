@@ -633,6 +633,120 @@ async def admin_open_topic(cb: CallbackQuery, state: FSMContext):
     await _inline_replace(cb, state, f"✅ Открыта тема: <b>{title}</b>\nЧто сделать?", kb)
     await cb.answer()
 
+@router.callback_query(F.data == "adm:topic_card")
+async def admin_topic_card(cb: CallbackQuery, state: FSMContext):
+    # 💬 возвращаем inline карточку темы с кнопками Просмотр и Редактировать
+    topic_data, topic_path = await _admin_load_topic_from_disk(state)
+    if not topic_data or not topic_path:
+        await cb.answer("Тема не загружена", show_alert=True)
+        return
+
+    st = await state.get_data()
+    tid = st.get(ADMIN_CURRENT_TID_KEY) or ""
+
+    title = str(topic_data.get("visible_title") or topic_data.get("name") or tid).strip()
+
+    kb = _ikb([
+        [("👁 Просмотр", "adm:topic_preview"), ("✏️ Редактировать", "adm:topic_edit")],
+        [("🗑 Удалить тему", f"adm:topic_del:{tid}")],
+        [("⬅️ К списку тем", "adm:topics")],
+        [("🏠 В меню /addtopic", "adm:home")],
+        [("⬅️ Закрыть", "adm:close")],
+    ])
+
+    await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "topic_card"})
+    await _inline_replace(
+        cb,
+        state,
+        f"✅ Открыта тема: <b>{_preview_text(str(title), 80)}</b>\nЧто сделать?",
+        kb
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data == "adm:topic_preview")
+async def admin_topic_preview(cb: CallbackQuery, state: FSMContext):
+    # 💬 показываем предпросмотр темы прямо в inline карточке
+    topic_data, _ = await _admin_load_topic_from_disk(state)
+    if not topic_data:
+        await cb.answer("Тема не загружена", show_alert=True)
+        return
+
+    text_preview = _admin_render_preview_text(topic_data)
+
+    kb = _ikb([
+        [("⬅️ Назад", "adm:topic_card"), ("✏️ Редактировать", "adm:topic_edit")],
+        [("⬅️ К списку тем", "adm:topics")],
+        [("🏠 В меню /addtopic", "adm:home")],
+        [("⬅️ Закрыть", "adm:close")],
+    ])
+
+    await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "topic_preview"})
+    await _inline_replace(cb, state, text_preview, kb)
+    await cb.answer()
+
+
+@router.callback_query(F.data == "adm:topic_edit")
+async def admin_topic_edit(cb: CallbackQuery, state: FSMContext):
+    # 💬 запускаем рабочее редактирование через reply меню (чтобы кнопки внутри темы реагировали)
+    topic_data, topic_path = await _admin_load_topic_from_disk(state)
+    if not topic_data or not topic_path:
+        await cb.answer("Тема не загружена", show_alert=True)
+        return
+
+    await state.update_data(topic=topic_data, topic_path=topic_path)  # 💬 синхронизируем FSM для message хендлеров
+
+    st = await state.get_data()
+    tid = st.get(ADMIN_CURRENT_TID_KEY) or ""
+    title = str(topic_data.get("visible_title") or topic_data.get("name") or tid).strip()
+
+    category_now = (topic_data.get("category") or "").strip().lower()
+
+    if category_now == "gram":
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📖 Теория"), KeyboardButton(text="📝 Практика")],
+                [KeyboardButton(text="🎥 Видео"), KeyboardButton(text="📚 Читать")],
+                [KeyboardButton(text="🚫 Отмена")],
+            ],
+            resize_keyboard=True,
+        )
+        await cb.message.answer(
+            f"✏️ Редактирование грамматики: <b>{_preview_text(str(title), 80)}</b>\nВыберите раздел:",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+        await state.set_state(EditGrammarStates.waiting_section)
+    else:
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➕ Добавить словарь"), KeyboardButton(text="➕ Добавить упражнение")],
+                [KeyboardButton(text="➕ Добавить видео"), KeyboardButton(text="➕ Добавить диалог")],
+                [KeyboardButton(text="➕ Добавить QUIZ"),  KeyboardButton(text="📝 Добавить ТЕКСТ")],
+                [KeyboardButton(text="↩️ Вернуться в Главное меню")],
+            ],
+            resize_keyboard=True,
+        )
+        await cb.message.answer(
+            f"✏️ Режим редактирования: <b>{_preview_text(str(title), 80)}</b>\nЧто вы хотите сделать?",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+        await state.set_state(EditTopicStates.choose_action)
+
+    kb_inline = _ikb([
+        [("⬅️ К карточке темы", "adm:topic_card")],
+        [("⬅️ К списку тем", "adm:topics")],
+        [("⬅️ Закрыть", "adm:close")],
+    ])
+    await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "edit_reply_mode"})
+    await _inline_replace(
+        cb,
+        state,
+        f"✅ Редактирование открыто в меню чата: <b>{_preview_text(str(title), 80)}</b>",
+        kb_inline
+    )
+    await cb.answer()
 
 
 # ===========================
@@ -3541,9 +3655,16 @@ async def handle_edit_action(message: Message, state: FSMContext):
         await message.answer("📝 Введите произвольный текст:", reply_markup=ReplyKeyboardRemove())
         return await state.set_state(EditTopicStates.waiting_text_block)
     if text.startswith("↩️"):
-        # 💬 возврат без падения: send_post_menu принимает (message, state)
-        await send_post_menu(message, state)
+        # 💬 выход из режима редактирования обратно в меню темы
+        data = await state.get_data()
+        category = (data.get("topic") or {}).get("category")
+        keyboard = get_main_menu(category)
+        if keyboard and hasattr(keyboard, "keyboard"):
+            keyboard.keyboard.append([KeyboardButton(text="🗑 Удалить тему")])  # 💬 чтобы админ мог удалить тему из меню
+        await message.answer("Ок. Возвращаемся в меню темы.", reply_markup=keyboard)
+        await state.set_state(NewTopicStates.waiting_first_choice)
         return
+
 
     await message.answer("❗ Пожалуйста, выберите один из пунктов меню.")
 
@@ -3731,6 +3852,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
