@@ -1833,11 +1833,12 @@ async def _edit_grammar_show_list(message: Message, state: FSMContext):
 
     kb = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="➕ Добавить по индексу"), [KeyboardButton(text="🗑 Удалить по индексу")], 
+            [KeyboardButton(text="➕ Добавить по индексу"), KeyboardButton(text="🗑 Удалить по индексу")],
             [KeyboardButton(text="↩️ Назад"), KeyboardButton(text="🚫 Отмена")],
         ],
         resize_keyboard=True
     )
+
 
     await message.answer("\n".join(lines), reply_markup=kb, disable_web_page_preview=True)
     await state.set_state(EditGrammarStates.waiting_delete_index)
@@ -2195,7 +2196,6 @@ async def send_post_menu(message: Message, state: FSMContext):
             # 💬 грамматика (теория) = только текст, фото, пулквизы (без VOC и без ALL IN)
             rows = [
                 [KeyboardButton(text="📝ТЕКСТ"), KeyboardButton(text="🖼FOTO")],
-                [KeyboardButton(text="📥 Пулквизы")],  # 💬 пакетный ввод POLL: 4 поля через |
             ]
 
         else:
@@ -2212,11 +2212,10 @@ async def send_post_menu(message: Message, state: FSMContext):
 
     elif last == "exercise":
         rows = [
-            # 💬 только создание новых упражнений и их текст/фото — без обычных QUIZ и TXT_QUIZ
+            # 💬 практика = только создание упражнений (в GrammarFuture считаем прогресс по ссылкам)
             [KeyboardButton(text="🔄 Создать ещё упражнение")],
-            [KeyboardButton(text="📝ТЕКСТ"),
-             KeyboardButton(text="🖼 Добавить фото")],
         ]
+
 
     elif last == "video":
         rows = [
@@ -2817,7 +2816,7 @@ async def handle_post_action(message: Message, state: FSMContext):
             # 💬 защита: ALL IN только для лексики, в грамматике не даём уходить в этот flow
             await message.answer(
                 "❌ ALL IN доступен только в разделе Лексика.\n"
-                "Для грамматики используй 📝ТЕКСТ, 🖼FOTO или 📥 Пулквизы.",
+                "Для грамматики используй 📝ТЕКСТ или 🖼FOTO.",
                 reply_markup=ReplyKeyboardRemove()
             )
             await send_post_menu(message, state)
@@ -2899,20 +2898,6 @@ async def handle_post_action(message: Message, state: FSMContext):
 
 
 
-
-
-        if category_now == "gram" and text == "📥 Пулквизы":
-            # 💬 грамматика: пакетный ввод POLL (4 поля), сохраняем в phase["vocab"]
-            await message.answer(
-                "📥 Отправь POLL-квизы списком.\n"
-                "Каждая строка = 4 поля через | \n"
-                "ВОПРОС | ПРАВИЛЬНЫЙ | НЕВЕРНЫЙ1 | НЕВЕРНЫЙ2\n"
-                "Правильный ответ всегда поле №2.\n"
-                "Символ | внутри полей запрещён.",
-                reply_markup=ReplyKeyboardRemove()
-            )
-            return await state.set_state(NewTopicStates.waiting_vocab_quiz_bulk)
-
         # — Добавить ТЕКСТ
         if text == "📝ТЕКСТ":
             await message.answer("📝 Введите произвольный текст-блок для словаря:")
@@ -2936,12 +2921,9 @@ async def handle_post_action(message: Message, state: FSMContext):
         if text == "🔄 Создать ещё упражнение":
             await message.answer("Введите НАЗВАНИЕ упражнения:")
             return await state.set_state(NewTopicStates.waiting_ex_title)
-        if text == "📝 Добавить ТЕКСТ":
-            await message.answer("📝 Введите текст для упражнения:")
-            return await state.set_state(NewTopicStates.waiting_ex_text)
-        if text == "🖼 Добавить фото":
-            await message.answer("Введите подпись к фото упражнения или '-' для пропуска:")
-            return await state.set_state(NewTopicStates.waiting_ex_photo_text)
+
+        # 💬 в практике больше нет текст/фото кнопок, чтобы не расходиться с GrammarFuture
+
 
             return await state.set_state(NewTopicStates.waiting_ex_photo_text)
     # ─── БЛОК «ВИДЕО» ───
@@ -2969,7 +2951,8 @@ async def handle_post_action(message: Message, state: FSMContext):
         category_now = ((data.get("topic") or {}).get("category") or "").strip()  # 💬 показываем актуальные кнопки
         if category_now == "gram":
             await message.answer(
-                "❗ Пожалуйста, нажми одну из кнопок: «📝ТЕКСТ», «🖼FOTO», «📥 Пулквизы» или «↩️ Вернуться в Главное меню»."
+                "❗ Пожалуйста, нажми одну из кнопок: «📝ТЕКСТ», «🖼FOTO» или «↩️ Вернуться в Главное меню»."
+
             )
         else:
             await message.answer(
@@ -3961,6 +3944,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
