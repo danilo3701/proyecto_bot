@@ -3429,6 +3429,15 @@ async def get_reading_title(message: Message, state: FSMContext):
 async def handle_reading_action(message: Message, state: FSMContext):
     # 💬 меню действий внутри одного пакета "Чтение"
     action = (message.text or "").strip()
+    data = await state.get_data()
+    topic = data.get("topic") or {}
+    topic_path = data.get("topic_path")
+
+    category_now = (topic.get("category") or "").strip().lower()
+    if category_now.startswith("gram"):
+        category_now = "gram"
+    else:
+        category_now = "lex"
 
     kb = ReplyKeyboardMarkup(
         keyboard=[
@@ -3446,12 +3455,10 @@ async def handle_reading_action(message: Message, state: FSMContext):
             "Символ | внутри полей запрещён\n\n"
             "Пример:\n"
             "Estoy listo. | Я готов. | 💡 listo = готовый\n"
-            "¿Qué tal? | Как дела?\n\n"
-            "Пустые строки игнорируются.",
+            "¿Qué tal? | Как дела?",
             reply_markup=ReplyKeyboardRemove(),
         )
         return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
-
 
     if action == "🖼 Фото":
         await message.answer(
@@ -3461,29 +3468,16 @@ async def handle_reading_action(message: Message, state: FSMContext):
         )
         return await state.set_state(NewTopicStates.waiting_reading_photo_text)
 
-    if action == "✅ Готово":
-        # 💬 завершаем добавление пакета чтения
-        await state.update_data(
-            current_reading_pack_index=None,
-            current_reading_title=None,
-            reading_photo_caption=None,
-        )
-        await message.answer("✅ Пакет чтения сохранён.", reply_markup=get_main_menu())
-        return await state.set_state(NewTopicStates.waiting_first_choice)
-
-    if action == "↩️ Назад":
-        # 💬 отмена: если пакет пустой, удаляем его, чтобы не плодить мусор
-        data = await state.get_data()
-        topic = data.get("topic") or {}
-        topic_path = data.get("topic_path")
-
+    if action in {"✅ Готово", "↩️ Назад"}:
+        # 💬 если пакет пустой и нажали Назад = удаляем его, чтобы не плодить мусор
         try:
             idx = int(data.get("current_reading_pack_index"))
         except Exception:
             idx = -1
 
         if (
-            topic_path
+            action == "↩️ Назад"
+            and topic_path
             and isinstance(topic.get("reading"), list)
             and 0 <= idx < len(topic["reading"])
         ):
@@ -3504,7 +3498,20 @@ async def handle_reading_action(message: Message, state: FSMContext):
             current_reading_title=None,
             reading_photo_caption=None,
         )
-        await message.answer("↩️ Вернулись назад.", reply_markup=get_main_menu())
+
+        # 💬 если это редактирование грамматики = не прыгаем в меню лексики, возвращаемся в список Читать
+        if data.get("edit_gram_section") == "📚 Читать":
+            if action == "✅ Готово":
+                await message.answer("✅ Пакет чтения сохранён.", reply_markup=ReplyKeyboardRemove())
+            else:
+                await message.answer("↩️ Вернулись к списку чтения.", reply_markup=ReplyKeyboardRemove())
+            return await _edit_grammar_show_list(message, state)
+
+        # 💬 иначе = обычный режим = возвращаемся в главное меню темы (с правильной категорией)
+        if action == "✅ Готово":
+            await message.answer("✅ Пакет чтения сохранён.", reply_markup=get_main_menu(category_now))
+        else:
+            await message.answer("↩️ Вернулись назад.", reply_markup=get_main_menu(category_now))
         return await state.set_state(NewTopicStates.waiting_first_choice)
 
     await message.answer("Выбери действие кнопками.", reply_markup=kb)
@@ -3944,6 +3951,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
