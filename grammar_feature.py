@@ -138,6 +138,15 @@ async def _safe_delete_message(bot, chat_id: int, message_id: int) -> None:
     except Exception:
         return
 
+
+def _safe_html(x: Any) -> str:
+    # 💬 безопасно экранируем HTML и приводим к строке (чтобы не падать на None/числах)
+    try:
+        return html.escape(str(x)).strip()
+    except Exception:
+        return ""
+
+
 def _normalize_quiz_options(opts: List[str], correct: int) -> Tuple[List[str], int]:
     # 💬 приводим к 3 вариантам, убираем дубли и фиксируем correct в 0
     clean: List[str] = []
@@ -2102,7 +2111,8 @@ async def gram_read_nav(cb: CallbackQuery, state: FSMContext) -> None:
     if not frags:
         return  # 💬 нечего листать
 
-    idx =     idx = int(st.get("gram_item_idx") or 0)
+    idx = int(st.get("gram_item_idx") or 0)  # 💬 текущий индекс фрагмента
+
 
     if cb.data.endswith("prev"):
         if idx <= 0:
