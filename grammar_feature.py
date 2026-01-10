@@ -116,7 +116,6 @@ class GrammarStates(StatesGroup):
     menu = State()                # 💬 главное меню грамматики внутри темы
     theory_phases = State()        # 💬 список фаз теории
     theory_view = State()          # 💬 показ элементов внутри фазы (текст/фото)
-    theory_poll = State()          # 💬 ждём ответ на PollQuiz внутри теории
 
     practice_intro = State()       # 💬 экран "Начать" практику
     practice_view = State()        # 💬 показ практики (текст/фото)
@@ -301,38 +300,23 @@ def _strike_text(text: str) -> str:
     # 💬 псевдо-зачёркивание для InlineKeyboard (HTML/Markdown в кнопках не работает)
     return "".join(ch + "\u0336" for ch in str(text))
 
-
 def _phase_items(phase: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    💬 копируем логику core get_vocab_list:
-       после каждого link добавляем 6 quiz из quiz_pool,
-       затем докладываем остаток quiz_pool,
-       затем добавляем textquiz_pool в конец
+    Компилируем список показа в Теории:
+
+    - базовые блоки (vocab)
+    - textquiz_pool в конце
+
+    # 💬 квизы (poll/quiz_pack) в Теории отключены = не подмешиваем phase["quiz"]
     """
     base = phase.get("vocab") or []
-    quiz_pool = list(phase.get("quiz_pool") or [])
-    textquiz_pool = list(phase.get("textquiz_pool") or [])
+    textquiz_pool = phase.get("textquiz") or []
 
-    PACK = 6
     compiled: List[Dict[str, Any]] = []
-
-    def take_pack(pool, start, pack=PACK):
-        return pool[start:start + pack], start + min(pack, max(0, len(pool) - start))
-
-    qi = 0
-    for block in base:
-        compiled.append(block)
-        if ("link" in block) or ("url" in block) or (block.get("type") == "link"):
-            if qi < len(quiz_pool):
-                chunk, qi = take_pack(quiz_pool, qi)
-                compiled.extend(chunk)
-
-    while qi < len(quiz_pool):
-        chunk, qi = take_pack(quiz_pool, qi)
-        compiled.extend(chunk)
-
-    compiled.extend(textquiz_pool)
+    compiled += base
+    compiled += textquiz_pool
     return compiled
+
 
 
 def _practice_items(topic: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1323,63 +1307,84 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
 
 
 
-        if t == "photo":
-            file_id = (
-                item.get("file_id")
-                or item.get("photo")
-                or item.get("image")
-                or item.get("file")
-                or item.get("url")
+    if t == "photo":
+        file_id = item.get("photo")
+
+        # 💬 навигация = перестраховка, чтобы kb точно был определён
+        kb = _kb_nav_in_phase(back_to_phases=back_to_phases)
+
+        if not file_id:
+            # 💬 если фото не найдено = не залипаем, показываем текст и даём навигацию
+            msg = await _replace_content(
+                chat_id=chat_id,
+                state=state,
+                send_coro=_bot.send_message(
+                    chat_id=chat_id,
+                    text=header + "\n\n⚠️ Фото не найдено в блоке.",
+                    parse_mode="HTML",
+                    reply_markup=kb,
+                    disable_notification=True,
+                ),
+            )
+            if msg:
+                await state.update_data(gram_last_message_id=msg.message_id)
+            return
+
+        cap_raw = item.get("caption") or item.get("text") or ""
+        cap_text = html.escape(str(cap_raw)).strip()
+
+        # 💬 caption опционален = если пусто, шлём только header
+        cap_full = header + (f"\n\n{cap_text}" if cap_text else "")
+
+        # 💬 перестраховка по длине caption (Telegram лимит) = режем заранее
+        if len(cap_full) > 900:
+            cap_full = cap_full[:900] + "…"
+
+        msg = await _replace_content(
+            chat_id=chat_id,
+            state=state,
+            send_coro=_bot.send_photo(
+                chat_id=chat_id,
+                photo=file_id,
+                caption=cap_full,
+                parse_mode="HTML",
+                reply_markup=kb,
+                disable_notification=True,
+            ),
+        )
+
+        # 💬 если caption сломал отправку = пробуем без caption
+        if not msg and cap_text:
+            msg = await _replace_content(
+                chat_id=chat_id,
+                state=state,
+                send_coro=_bot.send_photo(
+                    chat_id=chat_id,
+                    photo=file_id,
+                    caption=header,
+                    parse_mode="HTML",
+                    reply_markup=kb,
+                    disable_notification=True,
+                ),
             )
 
-            cap_raw = item.get("caption") or item.get("text") or ""
-            cap_body = html.escape(str(cap_raw)).strip()
-            cap = header + (f"\n\n{cap_body}" if cap_body else "")
+        # 💬 если совсем не отправилось = показываем текст вместо залипания
+        if not msg:
+            msg = await _replace_content(
+                chat_id=chat_id,
+                state=state,
+                send_coro=_bot.send_message(
+                    chat_id=chat_id,
+                    text=header + "\n\n⚠️ Не удалось отправить фото. Пропусти блок кнопкой ➡️",
+                    parse_mode="HTML",
+                    reply_markup=kb,
+                    disable_notification=True,
+                ),
+            )
 
-            mt = (item.get("media_type") or "photo").strip().lower()  # 💬 поддержка photo|animation из админки
-
-            if not file_id:
-                msg = await _replace_content(
-                    chat_id,
-                    state,
-                    send_coro=_bot.send_message(
-                        chat_id=chat_id,
-                        text=cap,
-                        parse_mode="HTML",
-                        reply_markup=kb,
-                        disable_notification=True,
-                    ),
-                )  # 💬 корректный вызов _replace_content(chat_id, state, ...)
-
-                msg = await _replace_content(
-                    chat_id,
-                    state,
-                    send_coro=_bot.send_animation(
-                        chat_id=chat_id,
-                        animation=file_id,
-                        caption=cap,
-                        parse_mode="HTML",
-                        reply_markup=kb,
-                        disable_notification=True,
-                    ),
-                )  # 💬 корректный вызов
-                
-                msg = await _replace_content(
-                    chat_id,
-                    state,
-                    send_coro=_bot.send_photo(
-                        chat_id=chat_id,
-                        photo=file_id,
-                        caption=cap,
-                        parse_mode="HTML",
-                        reply_markup=kb,
-                        disable_notification=True,
-                    ),
-                )  # 💬 корректный вызов
-
-
-            await state.update_data(gram_replace_tries=3)  # 💬 возвращаем дефолт после photo
-            return  # 💬 важно: не проваливаемся дальше в poll/link/text
+        if msg:
+            await state.update_data(gram_last_message_id=msg.message_id)
+        return
 
 
 
