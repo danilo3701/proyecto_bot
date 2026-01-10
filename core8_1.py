@@ -108,9 +108,16 @@ def render_short_level_progress(user_id: int) -> str:
         percent = 0
 
     step_num = step_idx + 1  # от 1 до 5
-    # 💬 прогресс-бар как в грамматике: █░ и проценты в конце
-    bar = render_bar(int(percent), length=10)
-    return f"{title}: {step_num} de {STEPS_PER_LEVEL} ⭐️\n{bar} {int(percent)}%"
+    # 💬 прогресс-бар из 20 сегментов (5% за сегмент) + минимум 1 сегмент по умолчанию
+    display_percent = int(percent)
+    if display_percent <= 0:
+        display_percent = 5  # 💬 по дефолту показываем 1 заполненный сегмент (5%)
+    if display_percent > 100:
+        display_percent = 100  # 💬 защита от некорректных значений
+
+    bar = render_bar(display_percent, length=20)
+    return f"{title}: {step_num} de {STEPS_PER_LEVEL} ⭐️\n{bar} {display_percent}%"
+
 
 
 
