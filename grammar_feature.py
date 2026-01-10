@@ -1426,7 +1426,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
         return
 
 
-@router.poll_answer(StateFilter(GrammarStates.practice_poll))  # 💬 в теории poll больше не обрабатываем
+@router.poll_answer(StateFilter(GrammarStates.practice_poll))  # 💬 Теория без poll, оставляем poll только для Практики
 async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext):
 
     # 💬 общий обработчик PollQuiz: реакция + фидбек 1 сек = удаляем poll+фидбек = автопереход дальше
@@ -1652,39 +1652,7 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
         pct = 0.0
     header = f"🧪 <b>Практика</b>\n{_bar(pct)}  {int(pct * 100)}%\n\n"
 
-    if t == "poll":
-        q = str(item.get("question") or "Выбери ответ")
-        opts = item.get("options") or item.get("answers") or []
-        opts = [str(x) for x in opts][:12]
 
-        correct = 0  # 💬 по умолчанию первый
-        if "correct_option_id" in item:
-            try:
-                correct = int(item.get("correct_option_id"))
-            except Exception:
-                correct = 0
-        elif isinstance(item.get("correct"), int):
-            correct = int(item.get("correct"))
-        elif item.get("correct_answer") in opts:
-            correct = opts.index(item.get("correct_answer"))  # 💬 correct_answer = текст правильного варианта
-
-        opts, correct = _normalize_quiz_options(opts, correct)  # 💬 строго 3 варианта, правильный всегда 0
-
-        poll_msg = await _replace_content(
-            chat_id,
-            state,
-            lambda: _bot.send_poll(
-                chat_id=chat_id,
-                question=q,
-                options=opts,
-                type="quiz",
-                correct_option_id=correct,
-                is_anonymous=False,
-            ),
-        )  # 💬 Poll тоже не копится в чате и не роняет хендлер
-
-        if not poll_msg:
-            return  # 💬 защита: poll не отправился, не продолжаем цепочку
 
         _GRAM_POLL_CTX[str(poll_msg.poll.id)] = {
             "chat_id": chat_id,
