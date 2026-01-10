@@ -2144,36 +2144,47 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
 
     # 💬 Подпись экрана уровня + категория, чтобы не путать пользователя
     if category == "lex":
-        cat_title = "📚 ЛЕКСИКА"
+        cat_title = "📚 <b>ЛЕКСИКА</b>"
     elif category == "gram":
-        cat_title = "🧠 ГРАММАТИКА"
+        cat_title = "🧠 <b>ГРАММАТИКА</b>"
     else:
-        cat_title = "📘 Категория"
-        
+        cat_title = "📘 <b>Категория</b>"
+
     level_show = "новичок" if str(level).upper() == "A0" else level  # 💬 A0 показываем как новичок
 
+    # 💬 Прогресс: 20 ячеек (5% за ячейку) + ✅ в начале + смайлик после процентов
+    import re  # 💬 локальный импорт, чтобы не зависеть от верхних импортов
 
-    # 💬 Собираем один текст: 1) строка уровня 2) строка прогресса (без "Explorador...") 3) текст выбора
-    if progress_text:
-        progress_lines = [ln for ln in str(progress_text).splitlines() if ln.strip()]  # 💬 чистим пустые строки
-        bar_line = progress_lines[-1] if progress_lines else ""  # 💬 берём только бар + процент
+    pct = 0
+    try:
+        m = re.search(r"(\d{1,3})\s*%", str(progress_text or ""))
+        if m:
+            pct = int(m.group(1))
+    except Exception:
+        pct = 0
+    pct = max(0, min(int(pct), 100))  # 💬 защита от мусорных значений
 
-        if bar_line:
-            level_screen_text = (
-                f"🧭 Уровень <b>{level_show}</b> · {cat_title}\n"  # 💬 A0 показываем как новичок = НЕ трогаем
-                f"{bar_line}\n\n"
-                f"Выбери тему для этого уровня:"
-            )
-        else:
-            level_screen_text = (
-                f"🧭 Уровень <b>{level_show}</b> · {cat_title}\n\n"  # 💬 прогресс не удалось получить
-                f"Выбери тему для этого уровня:"
-            )
-    else:
-        level_screen_text = (
-            f"🧭 Уровень <b>{level_show}</b> · {cat_title}\n\n"
-            f"Выбери тему для этого уровня:"
-        )
+    mood_steps = [
+        "🗿", "💩", "🐥", "🐒", "🔥",
+        "🦥", "🐝", "🌝", "🍷", "🐙",
+        "🐘", "🦦", "🍻", "🌞", "🧘🏻‍♂️",
+        "🔱", "🎗", "🎖", "🏆", "🏆",
+    ]  # 💬 20 смайликов на шаги 0–95% (по 5%)
+
+    mood_idx = min(int(pct // 5), len(mood_steps) - 1)
+    mood_emoji = mood_steps[mood_idx]
+
+    filled = max(1, min(int(pct * 20 / 100), 20))  # 💬 всегда минимум 1 “закрашенный” квадратик
+    bar = ("█" * filled) + ("░" * (20 - filled))
+    bar_line = f"✅{bar} {pct}% {mood_emoji}"
+
+    # 💬 Итоговый текст экрана: 1) уровень 2) прогресс 3) призыв выбрать тему
+    level_screen_text = (
+        f"🧭 Уровень <b>{level_show}</b> · {cat_title}\n"
+        f"{bar_line}\n\n"
+        f"Выбери тему для этого уровня:"
+    )
+
 
 
     # 💬 Отправляем уровень со списком тем этого уровня (прогресс уже перед словом «Уровень»)
