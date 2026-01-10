@@ -2146,18 +2146,28 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
     level_show = "новичок" if str(level).upper() == "A0" else level  # 💬 A0 показываем как новичок
 
 
-    # 💬 Собираем один текст: сначала короткий прогресс, потом строка с уровнем
+    # 💬 Собираем один текст: 1) строка уровня 2) строка прогресса (без "Explorador...") 3) текст выбора
     if progress_text:
-        level_screen_text = (
-            f"{progress_text}\n\n"
-            f"🧭 Уровень <b>{level_show}</b> · {cat_title}\n\n"  # 💬 выводим новичок вместо A0
-            f"Выбери тему для этого уровня:"
-        )
+        progress_lines = [ln for ln in str(progress_text).splitlines() if ln.strip()]  # 💬 чистим пустые строки
+        bar_line = progress_lines[-1] if progress_lines else ""  # 💬 берём только бар + процент
+
+        if bar_line:
+            level_screen_text = (
+                f"🧭 Уровень <b>{level_show}</b> · {cat_title}\n"  # 💬 A0 показываем как новичок = НЕ трогаем
+                f"{bar_line}\n\n"
+                f"Выбери тему для этого уровня:"
+            )
+        else:
+            level_screen_text = (
+                f"🧭 Уровень <b>{level_show}</b> · {cat_title}\n\n"  # 💬 прогресс не удалось получить
+                f"Выбери тему для этого уровня:"
+            )
     else:
         level_screen_text = (
-            f"🧭 Уровень <b>{level_show}</b> · {cat_title}\n\n"  # 💬 выводим новичок вместо A0
+            f"🧭 Уровень <b>{level_show}</b> · {cat_title}\n\n"
             f"Выбери тему для этого уровня:"
         )
+
 
     # 💬 Отправляем уровень со списком тем этого уровня (прогресс уже перед словом «Уровень»)
     await message.edit_text(
@@ -3157,12 +3167,15 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
     # 💬 В грамматике обычно редактируем это же сообщение (edit_text) = не удаляем его заранее
     is_gram = topics.get(topic_key, {}).get("category") == "gram"
 
-    # 💬 В лексике можно удалять список тем, потому что дальше мы отвечаем новыми сообщениями
-    if not is_gram:
+    # 💬 Удаляем экран со списком тем сразу после выбора (и для грамматики тоже)
+    try:
+        await query.message.delete()
+    except TelegramBadRequest:
         try:
-            await query.message.delete()
+            await query.message.edit_reply_markup(reply_markup=None)  # 💬 fallback: хотя бы снять кнопки
         except TelegramBadRequest:
-            pass  # 💬 сообщение уже удалено или не найдено
+            pass  # 💬 сообщение уже удалено/нельзя редактировать
+
 
     # 💬 Сохраняем выбранную тему в FSM
     await state.update_data(selected_topic=topic_key)
