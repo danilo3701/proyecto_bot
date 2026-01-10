@@ -54,10 +54,17 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     PollAnswer,
+    ReactionTypeEmoji,
 )
+
 from aiogram.exceptions import TelegramBadRequest  # 💬 чтобы не падать, если нельзя удалить/изменить
 
 router = Router()
+# -----------------------------
+# 🧩 runtime caches (PollAnswer)
+# -----------------------------
+_GRAM_POLL_CTX: Dict[str, Dict[str, Any]] = {}  # 💬 poll_id -> ctx для poll_answer
+_GRAM_RENDER_LOCKS: Dict[int, asyncio.Lock] = {}  # 💬 lock на чат, чтобы не было дублей
 
 # -----------------------------
 # 🔧 DI (проброс из core8_1 (76).py)
@@ -1648,6 +1655,55 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
     header = f"🧪 <b>Практика</b>\n{_bar(pct)}  {int(pct * 100)}%\n\n"
 
 
+    if t == "poll":
+        # 💬 PollQuiz в практике: отправляем quiz-полл и ждём PollAnswer
+        q = str(item.get("question") or item.get("q") or "").strip()
+        if not q:
+            q = "Выбери правильный вариант"
+
+        raw_opts = item.get("options") or item.get("answers") or []
+        if not isinstance(raw_opts, list):
+            raw_opts = []
+
+        try:
+            correct_raw = item.get("correct")
+            if correct_raw is None:
+                correct_raw = item.get("correct_option_id")
+            correct = int(correct_raw) if correct_raw is not None else 0
+        except Exception:
+            correct = 0
+
+        opts, correct = _normalize_quiz_options(raw_opts, correct)
+
+        poll_question = f"🧪 Практика {idx + 1}/{total}\n{_bar(pct)}  {int(pct * 100)}%\n\n{q}"
+        if len(poll_question) > 280:
+            poll_question = poll_question[:277] + "..."
+
+        poll_msg = await _replace_content(
+            chat_id,
+            state,
+            lambda: _bot.send_poll(
+                chat_id=chat_id,
+                question=poll_question,
+                options=opts,
+                type="quiz",
+                correct_option_id=int(correct),
+                is_anonymous=False,
+            ),
+        )  # 💬 заменяем экран на poll, чтобы не копить сообщения
+
+        if not poll_msg or not getattr(poll_msg, "poll", None):
+            await _replace_content(
+                chat_id,
+                state,
+                _bot.send_message(
+                    chat_id=chat_id,
+                    text=header + "⚠️ Не удалось отправить квиз.",
+                    reply_markup=_kb_back_to_menu(),
+                    parse_mode="HTML",
+                ),
+            )  # 💬 fallback на текст, чтобы не зависнуть
+            return
 
         _GRAM_POLL_CTX[str(poll_msg.poll.id)] = {
             "chat_id": chat_id,
@@ -1659,8 +1715,6 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
             "opts": opts,
         }  # 💬 сохраняем контекст poll, чтобы PollAnswer не зависел от FSM-ключа
 
-
-
         await state.set_state(GrammarStates.practice_poll)  # 💬 ждём PollAnswer для практики
         await state.update_data(
             gram_poll_id=poll_msg.poll.id,
@@ -1669,9 +1723,9 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
             gram_poll_options=opts,
             gram_poll_section="practice",  # 💬 отмечаем, что это практика
             gram_section="practice",  # 💬 дублируем секцию, чтобы PollAnswer не залипал на пустом gram_poll_section
-
         )
         return
+
 
 
     text = header + str(item.get("text") or "")
