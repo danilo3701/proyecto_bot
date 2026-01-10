@@ -813,12 +813,19 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
     rd_done = (min(rd_done_idx + 1, rd_total) if (rd_total and rd_done_idx >= 0) else 0)
     rd_pct = (rd_done / rd_total) if rd_total else 0.0
 
+    label_width = 8  # 💬 выравниваем по самому длинному слову "Практика"
+    def _lbl(w: str) -> str:
+        # 💬 добиваем пробелы через &nbsp;, чтобы HTML не схлопывал и бары стояли ровно
+        w = str(w)
+        pad = max(0, label_width - len(w))
+        return w + ("&nbsp;" * pad)
+
     text = (
         f"<b>{title}</b>\n\n"
-        f"📖 Теория:  {_bar(theory_pct)}  {int(theory_pct * 100)}%\n"
-        f"🧪 Практика: {_bar(pr_pct)}  {int(pr_pct * 100)}%\n"
-        f"🎬 Видео:    {_bar(vd_pct)}  {int(vd_pct * 100)}%\n"
-        f"📚 Читать:   {_bar(rd_pct)}  {int(rd_pct * 100)}%\n"
+        f"<b><i>📖 {_lbl('Теория')}:&nbsp;{_bar(theory_pct, width=10)}&nbsp;&nbsp;{int(theory_pct * 100)}%</i></b>\n"
+        f"<b><i>🧪 {_lbl('Практика')}:&nbsp;{_bar(pr_pct, width=10)}&nbsp;&nbsp;{int(pr_pct * 100)}%</i></b>\n"
+        f"<b><i>🎬 {_lbl('Видео')}:&nbsp;{_bar(vd_pct, width=10)}&nbsp;&nbsp;{int(vd_pct * 100)}%</i></b>\n"
+        f"<b><i>📚 {_lbl('Читать')}:&nbsp;{_bar(rd_pct, width=10)}&nbsp;&nbsp;{int(rd_pct * 100)}%</i></b>\n"
     )
 
     await state.set_state(GrammarStates.menu)
