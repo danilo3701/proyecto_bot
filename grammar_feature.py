@@ -206,13 +206,19 @@ async def _tg_retry(factory: Callable[[], Any], tries: int = 3, base_delay: floa
             await asyncio.sleep(base_delay * (attempt + 1))
 
 
-def _bar(pct: float, width: int = 10) -> str:
-    # 💬 прогресс бар текстом
+def _bar(pct: float, width: int = 20) -> str:
+    # 💬 прогресс бар текстом = 20 сегментов (5% за сегмент) и минимум 1 сегмент по умолчанию
     if pct < 0:
         pct = 0
     if pct > 1:
         pct = 1
+
     filled = int(round(pct * width))
+    if filled <= 0:
+        filled = 1  # 💬 по дефолту показываем 1 заполненный сегмент (5% при width=20)
+    if filled > width:
+        filled = width
+
     return "█" * filled + "░" * (width - filled)
 
 def _sess_progress_from_state(st: Dict[str, Any]) -> Dict[str, Any]:
