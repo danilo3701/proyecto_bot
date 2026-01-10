@@ -30,6 +30,27 @@ def atomic_save_json(path: str | Path, data: dict) -> bool:
         return False
 
 
+def _insert_or_append(target_list: list, item, insert_index):
+    # 💬 вставляет по 1-based индексу админки, иначе добавляет в конец
+    try:
+        idx = int(insert_index) if insert_index is not None else None
+    except Exception:
+        idx = None
+
+    if idx is None:
+        target_list.append(item)
+        return
+
+    if idx < 1:
+        idx = 1
+
+    pos = idx - 1
+    if pos > len(target_list):
+        pos = len(target_list)
+
+    target_list.insert(pos, item)
+
+
 def get_topics_dir() -> Path:
     # 💬 что делает эта часть: выбираем папку topics в Railway Volume (/data/topics); если нельзя = падаем обратно на локальную
     candidates = [Path("/data/topics"), Path(__file__).parent / "topics", Path("topics")]
@@ -383,6 +404,8 @@ class EditGrammarStates(StatesGroup):
     waiting_section = State()        # 💬 выбор: теория, практика, видео, читать
     waiting_phase = State()          # 💬 выбор фазы теории
     waiting_delete_index = State()   # 💬 ввод индекса для удаления
+    waiting_insert_index = State()  # 💬 ждём индекс, куда вставить новый блок
+
 
 
 class AdminInlineEditStates(StatesGroup):
@@ -1810,11 +1833,12 @@ async def _edit_grammar_show_list(message: Message, state: FSMContext):
 
     kb = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🗑 Удалить по индексу")],
+            [KeyboardButton(text="➕ Добавить по индексу"), [KeyboardButton(text="🗑 Удалить по индексу")], 
             [KeyboardButton(text="↩️ Назад"), KeyboardButton(text="🚫 Отмена")],
         ],
-        resize_keyboard=True,
+        resize_keyboard=True
     )
+
     await message.answer("\n".join(lines), reply_markup=kb, disable_web_page_preview=True)
     await state.set_state(EditGrammarStates.waiting_delete_index)
 
@@ -1823,6 +1847,14 @@ async def _edit_grammar_show_list(message: Message, state: FSMContext):
 async def edit_grammar_delete_index(message: Message, state: FSMContext):
     # 💬 удаляем элемент по индексу и сохраняем JSON
     text = (message.text or "").strip()
+
+    if text in ("➕ Добавить по индексу", "⌨️ Ввести"):
+        await message.answer(
+            "Введите индекс, КУДА вставить (1 = в начало, 2 = перед вторым и т.д.):",
+        )  # 💬 просим позицию вставки
+        await state.set_state(EditGrammarStates.waiting_insert_index)
+        return
+
 
     if text == "🚫 Отмена":
         keyboard = get_main_menu("gram")
@@ -1909,6 +1941,33 @@ async def edit_grammar_delete_index(message: Message, state: FSMContext):
     await _edit_grammar_show_list(message, state)
 
 
+@router.message(EditGrammarStates.waiting_insert_index)
+async def edit_grammar_insert_by_index(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+
+    if text in ("↩️ Назад", "🚫 Отмена"):
+        return await _edit_grammar_show_list(message, state)  # 💬 возвращаемся к списку без изменений
+
+    if not text.isdigit():
+        await message.answer("⚠️ Введите число (индекс), например 1 или 2.")  # 💬 защита от мусорного ввода
+        return
+
+    insert_index = int(text)
+
+    data = await state.get_data()
+    edit_section = (data.get("edit_section") or "").strip()
+
+    # 💬 включаем режим вставки и запоминаем индекс
+    await state.update_data(edit_insert_mode=True, edit_insert_index=insert_index)
+
+    # 💬 выставляем last_block и (для теории) current_phase_id, чтобы переиспользовать CreateLessonBlock-ветки
+    if edit_section == "theory":
+        await state.update_data(last_block="vocab", current_phase_id=data.get("edit_phase_id"))
+    else:
+        await state.update_data(last_block="exercise")
+
+    await send_insert_post_menu(message, state)  # 💬 показываем меню “что вставляем”
+    return
 
 
 
@@ -2177,6 +2236,34 @@ async def send_post_menu(message: Message, state: FSMContext):
 
 
 
+async def send_insert_post_menu(message: Message, state: FSMContext):
+    data = await state.get_data()
+    last_block = data.get("last_block")
+
+    if last_block == "vocab":
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📝ТЕКСТ"), KeyboardButton(text="🖼FOTO")],
+                [KeyboardButton(text="↩️ Назад")],
+            ],
+            resize_keyboard=True
+        )  # 💬 меню вставки для теории (как в грамматике)
+    elif last_block == "exercise":
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="🔄 Создать ещё упражнение")],
+                [KeyboardButton(text="↩️ Назад")],
+            ],
+            resize_keyboard=True
+        )  # 💬 меню вставки для практики
+    else:
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="↩️ Назад")]],
+            resize_keyboard=True
+        )  # 💬 безопасный fallback
+
+    await message.answer("Что вставляем?", reply_markup=kb)
+    await state.set_state(NewTopicStates.waiting_post_action)  # 💬 переиспользуем общий роутер post_action
 
 
 
@@ -2863,6 +2950,11 @@ async def handle_post_action(message: Message, state: FSMContext):
         await state.set_state(NewTopicStates.waiting_video_title)
         return
 
+
+    if data.get("edit_insert_mode") and text == "↩️ Назад":
+        await state.update_data(edit_insert_mode=None, edit_insert_index=None)  # 💬 выходим из режима вставки
+        return await _edit_grammar_show_list(message, state)  # 💬 назад в список редактирования
+
     # ─── Вернуться в Главное меню ───
     if text == "↩️ Вернуться в Главное меню":
         category_now = ((data.get("topic") or {}).get("category") or "").strip()  # 💬 возвращаемся в правильное меню
@@ -2933,7 +3025,10 @@ async def get_ex_link(message: Message, state: FSMContext):
         "title": data["current_ex_title"],
         "link":  link
     }
-    topic.setdefault("exercises", []).append(new_block)
+    ex_list = topic.setdefault("exercises", [])
+    insert_index = data.get("edit_insert_index") if data.get("edit_insert_mode") else None
+    _insert_or_append(ex_list, new_block, insert_index)  # 💬 вставка по индексу или append
+
 
     atomic_save_json(topic_path, topic)  # 💬 сохраняем в volume Railway безопасно (atomic)
 
@@ -2955,7 +3050,10 @@ async def save_ex_text(message: Message, state: FSMContext):
     text = message.text.strip()
     data = await state.get_data()
     topic = data["topic"]
-    topic.setdefault("exercises", []).append({"type": "text", "text": text})
+    ex_list = topic.setdefault("exercises", [])
+    insert_index = data.get("edit_insert_index") if data.get("edit_insert_mode") else None
+    _insert_or_append(ex_list, {"type": "text", "text": text}, insert_index)  # 💬 вставка по индексу или append
+
     with open(data["topic_path"], "w", encoding="utf-8") as f:
         json.dump(topic, f, ensure_ascii=False, indent=2)
     await message.answer("Текст упражнения сохранён.", reply_markup=ReplyKeyboardRemove())
@@ -3045,6 +3143,14 @@ async def save_ex_photo(message: Message, state: FSMContext):
         json.dump(topic, f, ensure_ascii=False, indent=2)
 
     await message.answer("Медиа упражнения сохранено.", reply_markup=ReplyKeyboardRemove())
+    if data.get("edit_insert_mode"):
+        await state.update_data(edit_insert_mode=None, edit_insert_index=None)  # 💬 сбрасываем режим вставки
+        return await _edit_grammar_show_list(message, state)  # 💬 возвращаемся в список редактирования
+
+    if data.get("edit_insert_mode"):
+        await state.update_data(edit_insert_mode=None, edit_insert_index=None)  # 💬 сбрасываем режим вставки
+        return await _edit_grammar_show_list(message, state)  # 💬 назад в список редактирования
+
     await send_post_menu(message, state)
 
 
@@ -3855,6 +3961,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
