@@ -85,6 +85,7 @@ def render_short_level_progress(user_id: int) -> str:
     level_titles = {
         "A1": "🧭 Explorador A1",
         "A2": "🧭 Explorador A2",
+        "A0": "🧭 Уровень новичок",  # 💬 вместо A0 показываем новичок
         "B1": "🚀 Pro B1",
         "B2": "🚀 Pro B2",
         "C1": "🎓 Maestro C1",
@@ -107,22 +108,10 @@ def render_short_level_progress(user_id: int) -> str:
         percent = 0
 
     step_num = step_idx + 1  # от 1 до 5
+    # 💬 прогресс-бар как в грамматике: █░ и проценты в конце
+    bar = render_bar(int(percent), length=10)
+    return f"{title}: {step_num} de {STEPS_PER_LEVEL} ⭐️\n{bar} {int(percent)}%"
 
-    # Прогресс-бар из 10 сегментов по проценту внутри уровня
-    segments = 10
-    if percent <= 0:
-        filled = 0
-    else:
-        filled = percent * segments // 100
-        if filled == 0:
-            filled = 1
-        if filled > segments:
-            filled = segments
-    empty = segments - filled
-
-    bar = "🟩" * filled + "⬜" * empty
-
-    return f"{title}: {step_num} de {STEPS_PER_LEVEL} ⭐️\n{percent}% {bar}"
 
 
 # 💬 минимальная задержка между удалением старого и показом нового квиза
@@ -2080,6 +2069,8 @@ async def level_chosen(callback: CallbackQuery, state: FSMContext):
         return await start_handler(callback.message, state)
 
     level = choice
+    level_show = "новичок" if str(level).upper() == "A0" else level  # 💬 A0 показываем как новичок
+
     await state.update_data(chosen_level=level)
 
     # 💬 После выбора уровня показываем выбор «Лексика / Грамматика» внутри этого уровня
@@ -2094,7 +2085,8 @@ async def level_chosen(callback: CallbackQuery, state: FSMContext):
     ])
 
     text = (
-        f"😎 Уровень <b>{level}</b> выбран!\n"
+        f"Уровень <b>{level_show}</b> выбран!\n"  # 💬 выводим новичок вместо A0
+
         f"Что будем учить на этом уровне?"
     )
 
@@ -2150,17 +2142,20 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
         cat_title = "🧠 ГРАММАТИКА"
     else:
         cat_title = "📘 Категория"
+        
+    level_show = "новичок" if str(level).upper() == "A0" else level  # 💬 A0 показываем как новичок
+
 
     # 💬 Собираем один текст: сначала короткий прогресс, потом строка с уровнем
     if progress_text:
         level_screen_text = (
             f"{progress_text}\n\n"
-            f"🧭 Уровень <b>{level}</b> · {cat_title}\n\n"
+            f"🧭 Уровень <b>{level_show}</b> · {cat_title}\n\n"  # 💬 выводим новичок вместо A0
             f"Выбери тему для этого уровня:"
         )
     else:
         level_screen_text = (
-            f"🧭 Уровень <b>{level}</b> · {cat_title}\n\n"
+            f"🧭 Уровень <b>{level_show}</b> · {cat_title}\n\n"  # 💬 выводим новичок вместо A0
             f"Выбери тему для этого уровня:"
         )
 
