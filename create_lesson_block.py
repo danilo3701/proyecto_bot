@@ -618,6 +618,8 @@ async def admin_open_topic(cb: CallbackQuery, state: FSMContext):
         **{ADMIN_CURRENT_TID_KEY: tid},          # 💬 запоминаем tid, чтобы вернуться к карточке темы
         **{ADMIN_EDIT_VIEW_KEY: "topic_card"},   # 💬 стартовый экран
     )
+    title = str(topic_data.get("visible_title") or topic_data.get("title") or topic_data.get("name") or tid).strip()  # 💬 заголовок темы как в grammar_feature
+
     
     kb = _ikb([
         [("👁 Просмотр", "adm:topic_preview"), ("✏️ Редактировать", "adm:topic_edit")],
@@ -3729,6 +3731,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
