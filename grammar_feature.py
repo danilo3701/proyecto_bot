@@ -1299,6 +1299,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
 
         header = f"📖 <b>{title}</b>\n{_bar(pct)}  {int(pct * 100)}%   {idx + 1}/{total}\n\n"  # 💬 добавили счётчик блока
         await state.update_data(gram_replace_tries=1)  # 💬 в Теории не ретраим send, чтобы не плодить дубли
+        kb = _kb_nav_in_phase(back_to_phases=back_to_phases)  # 💬 единая клавиатура навигации для фазы (fix NameError kb)
 
 
 
