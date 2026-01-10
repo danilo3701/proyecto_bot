@@ -38,8 +38,6 @@ grammar_quiz_fail_phrases = [
     "🤏 Чуть-чуть не то…",
 ]  # 💬 короткие реакции на ошибку
 
-_GRAM_POLL_CTX: Dict[str, Dict[str, Any]] = {}  # 💬 poll_id -> контекст (chat_id/секция/индексы), чтобы PollAnswer работал даже если FSM ключ не совпал
-_GRAM_RENDER_LOCKS: Dict[int, asyncio.Lock] = {}  # 💬 лок на рендер теории, чтобы не было дублей при быстрых кликах
 
 
 import random  # 💬 CTA фразы для link-блоков
