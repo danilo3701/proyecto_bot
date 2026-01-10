@@ -1248,6 +1248,40 @@ async def _mark_seen(uid: str, topic_key: str, section: str, phase_idx: Optional
     _user_progress_save(data)
 
 
+async def _gram_edit_or_replace_text(chat_id: int, state: FSMContext, text: str, kb):  # 💬 edit текста как в подкастах, иначе fallback на replace
+    st = await state.get_data()
+    last_id = st.get("gram_last_message_id")
+    last_kind = st.get("gram_last_message_kind") or "text"
+
+    if last_id and last_kind == "text":
+        try:
+            await _bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=int(last_id),
+                text=text,
+                parse_mode="HTML",
+                reply_markup=kb,
+                disable_web_page_preview=True
+            )
+            return  # 💬 успешно отредактировали, новое сообщение не шлём
+        except Exception:
+            pass  # 💬 если нельзя отредактировать (например, прошлое было photo) = уйдём в fallback
+
+    await _replace_content(  # 💬 fallback: удаляем прошлое и шлём заново
+        chat_id,
+        state,
+        _bot.send_message(
+            chat_id,
+            text,
+            parse_mode="HTML",
+            reply_markup=kb,
+            disable_web_page_preview=True
+        )
+    )
+    await state.update_data(gram_last_message_kind="text")  # 💬 помечаем тип последнего сообщения
+
+
+
 async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, Any]) -> None:
     # 💬 показываем текущий элемент (текст/фото) или шлём poll
     st = await state.get_data()
@@ -1307,220 +1341,83 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
 
 
 
-    if t == "photo":
-        file_id = item.get("photo")
+        # =========================
+        # 📷 PHOTO (единый блок)  # 💬 показываем фото и опциональный caption, иначе fallback
+        # =========================
+        if t == "photo":
+            file_id = item.get("photo") or ""  # 💬 file_id фото
+            cap_user = (item.get("caption") or "").strip()  # 💬 caption опционален
+            cap_full = header if not cap_user else (header + "\n\n" + _safe_html(cap_user))  # 💬 header всегда сверху
 
-        # 💬 навигация = перестраховка, чтобы kb точно был определён
-        kb = _kb_nav_in_phase(back_to_phases=back_to_phases)
-
-        if not file_id:
-            # 💬 если фото не найдено = не залипаем, показываем текст и даём навигацию
-            msg = await _replace_content(
-                chat_id=chat_id,
-                state=state,
-                send_coro=_bot.send_message(
-                    chat_id=chat_id,
-                    text=header + "\n\n⚠️ Фото не найдено в блоке.",
-                    parse_mode="HTML",
-                    reply_markup=kb,
-                    disable_notification=True,
-                ),
-            )
-            if msg:
-                await state.update_data(gram_last_message_id=msg.message_id)
-            return
-
-        cap_raw = item.get("caption") or item.get("text") or ""
-        cap_text = html.escape(str(cap_raw)).strip()
-
-        # 💬 caption опционален = если пусто, шлём только header
-        cap_full = header + (f"\n\n{cap_text}" if cap_text else "")
-
-        # 💬 перестраховка по длине caption (Telegram лимит) = режем заранее
-        if len(cap_full) > 900:
-            cap_full = cap_full[:900] + "…"
-
-        msg = await _replace_content(
-            chat_id=chat_id,
-            state=state,
-            send_coro=_bot.send_photo(
-                chat_id=chat_id,
-                photo=file_id,
-                caption=cap_full,
-                parse_mode="HTML",
-                reply_markup=kb,
-                disable_notification=True,
-            ),
-        )
-
-        # 💬 если caption сломал отправку = пробуем без caption
-        if not msg and cap_text:
-            msg = await _replace_content(
-                chat_id=chat_id,
-                state=state,
-                send_coro=_bot.send_photo(
-                    chat_id=chat_id,
-                    photo=file_id,
-                    caption=header,
-                    parse_mode="HTML",
-                    reply_markup=kb,
-                    disable_notification=True,
-                ),
-            )
-
-        # 💬 если совсем не отправилось = показываем текст вместо залипания
-        if not msg:
-            msg = await _replace_content(
-                chat_id=chat_id,
-                state=state,
-                send_coro=_bot.send_message(
-                    chat_id=chat_id,
-                    text=header + "\n\n⚠️ Не удалось отправить фото. Пропусти блок кнопкой ➡️",
-                    parse_mode="HTML",
-                    reply_markup=kb,
-                    disable_notification=True,
-                ),
-            )
-
-        if msg:
-            await state.update_data(gram_last_message_id=msg.message_id)
-        return
-
-
-
-        if t == "poll":
-            q = str(item.get("question") or "Выбери ответ")
-            opts = item.get("options") or item.get("answers") or []
-            opts = [str(x) for x in opts][:12]
-
-            correct = 0  # 💬 по умолчанию первый
-            if "correct_option_id" in item:
-                try:
-                    correct = int(item.get("correct_option_id"))
-                except Exception:
-                    correct = 0
-            elif isinstance(item.get("correct"), int):
-                correct = int(item.get("correct"))
-            elif item.get("correct_answer") in opts:
-                correct = opts.index(item.get("correct_answer"))  # 💬 correct_answer = текст правильного варианта
-
-            opts, correct = _normalize_quiz_options(opts, correct)  # 💬 строго 3 варианта, правильный всегда 0
-
-            poll_msg = await _replace_content(
-                chat_id,
-                state,
-                lambda: _bot.send_poll(
-                    chat_id=chat_id,
-                    question=q,
-                    options=opts,
-                    type="quiz",
-                    correct_option_id=correct,
-                    is_anonymous=False,
-                ),
-            )  # 💬 Poll тоже не копится в чате и не роняет хендлер
-
-            if not poll_msg:
-                return  # 💬 защита: poll не отправился, не продолжаем цепочку
-
-            _GRAM_POLL_CTX[str(poll_msg.poll.id)] = {
-                "chat_id": chat_id,
-                "section": "theory",
-                "topic_key": topic_key,
-                "phase_idx": phase_idx,
-                "item_idx": idx,
-                "poll_msg_id": poll_msg.message_id,
-                "correct": correct,
-                "opts": opts,
-            }  # 💬 сохраняем контекст poll для теории
-
-            await state.set_state(GrammarStates.theory_poll)  # 💬 ждём PollAnswer для теории
-            await state.update_data(
-                gram_poll_id=poll_msg.poll.id,
-                gram_poll_msg_id=poll_msg.message_id,
-                gram_poll_correct=correct,
-                gram_poll_options=opts,
-                gram_poll_section="theory",  # 💬 отмечаем, что это теория
-                gram_section="theory",  # 💬 дублируем секцию, чтобы PollAnswer не залипал на пустом gram_poll_section
-
-            )
-            await state.update_data(gram_replace_tries=3)  # 💬 возвращаем дефолт после poll
-            return  # 💬 важно: не проваливаемся дальше в link/text
-
-
-        # link  # 💬 показываем ссылку на игру и скрываем URL в CTA, как в vocab
-        if t == "link" or item.get("url") or item.get("link"):
-            url = str(item.get("url") or item.get("link") or "").strip()
-            title = str(item.get("title") or item.get("name") or "Упражнение").strip()
-
-            if not url or not (url.startswith("http://") or url.startswith("https://")):
-                await _replace_content(
-                    chat_id,
-                    state,
-                    _bot.send_message(
-                        chat_id=chat_id,
-                        text=header + "⚠️ Ссылка для упражнения не найдена.",
-                        reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases),  # 💬 не выкидываем из фазы, можно листать дальше
-                        parse_mode="HTML",
-                    ),
-                )
+            if not file_id:
+                # 💬 если по ошибке нет photo id = покажем хотя бы текст
+                await _gram_edit_or_replace_text(chat_id, state, header + "\n\n⚠️ Фото не найдено в блоке.", kb)
                 return
 
-            cta = random.choice(link_cta_phrases) if link_cta_phrases else "Открыть"
-            safe_url = html.escape(url, quote=True)
+            try:
+                msg = await _replace_content(
+                    chat_id,
+                    state,
+                    _bot.send_photo(
+                        chat_id,
+                        file_id,
+                        caption=cap_full,
+                        parse_mode="HTML",
+                        reply_markup=kb,
+                        disable_notification=True
+                    )
+                )
+                await state.update_data(gram_last_message_kind="photo")  # 💬 фиксируем тип
+                return
+            except Exception:
+                # 💬 перестраховка = пробуем без caption (только header)
+                try:
+                    msg = await _replace_content(
+                        chat_id,
+                        state,
+                        _bot.send_photo(
+                            chat_id,
+                            file_id,
+                            caption=header,
+                            parse_mode="HTML",
+                            reply_markup=kb,
+                            disable_notification=True
+                        )
+                    )
+                    await state.update_data(gram_last_message_kind="photo")  # 💬 фиксируем тип
+                    return
+                except Exception:
+                    # 💬 последний fallback = текстом, чтобы не было "залипания" и двойного клика
+                    fallback_txt = header + "\n\n⚠️ Фото не удалось показать."
+                    if cap_user:
+                        fallback_txt += "\n\n" + _safe_html(cap_user)
+                    await _gram_edit_or_replace_text(chat_id, state, fallback_txt, kb)
+                    return
 
-            await _replace_content(
-                chat_id,
-                state,
-                _bot.send_message(
-                    chat_id=chat_id,
-                    text=header + f"🔗 <b>{html.escape(title)}</b>\n👇 <a href=\"{safe_url}\">{html.escape(cta)}</a>",
-                    reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases),  # 💬 не выкидываем из фазы, можно листать дальше
-                    parse_mode="HTML",
-                    disable_web_page_preview=True,
-                ),
-            )
+        # =========================
+        # 🔗 LINK / 🧾 TEXT  # 💬 всё текстовое = edit как в подкастах
+        # =========================
+        if t == "link":
+            url = (item.get("url") or item.get("link") or "").strip()
+            title = (item.get("title") or "Открыть").strip()
+            text = header + "\n\n" + (f"🔗 <a href='{_safe_html(url)}'>{_safe_html(title)}</a>" if url else "⚠️ Ссылка не найдена.")
+            await _gram_edit_or_replace_text(chat_id, state, text, kb)
             return
 
+        # 💬 дефолт = обычный текстовый блок
+        body = (item.get("text") or "").strip()
+        hint = (item.get("hint") or "").strip()
+        text = header
+        if body:
+            text += "\n\n" + _safe_html(body)
+        if hint:
+            text += "\n\n💡 " + _safe_html(hint)  # 💬 hint не спойлерим
 
-        if t == "photo":
-            photo = item.get("photo") or item.get("file_id") or item.get("image") or item.get("url")
-            cap = header + html.escape(str(item.get("caption") or ""))
-            await _replace_content(
-                chat_id,
-                state,
-                _bot.send_photo(chat_id=chat_id, photo=photo, caption=cap, reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases), parse_mode="HTML"),
-            )
-            return
-
-        # text
-        raw_text = str(item.get("text") or "").strip()  # 💬 берём текст теории
-        safe_text = html.escape(raw_text)  # 💬 экранируем HTML, чтобы не ломало разметку
-
-        text = f"{header}<b><i><code>{safe_text}</code></i></b>"  # 💬 весь text = жирный + курсив + код
-
-        await _replace_content(
-            chat_id,
-            state,
-            _bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                reply_markup=_kb_nav_in_phase(back_to_phases=back_to_phases),
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-            ),
-        )
+        await _gram_edit_or_replace_text(chat_id, state, text, kb)
         return
 
 
-    # 💬 safety
-    await _replace_content(
-        chat_id,
-        state,
-        _bot.send_message(chat_id, "⚠️ Не понимаю, что показывать ("),
-    )  # 💬 без спама сообщениями
-
-
-@router.poll_answer(StateFilter(GrammarStates.theory_poll, GrammarStates.practice_poll))  # 💬 ловим poll_answer только внутри грамматики
+@router.poll_answer(StateFilter(GrammarStates.practice_poll))  # 💬 в теории poll больше не обрабатываем
 async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext):
 
     # 💬 общий обработчик PollQuiz: реакция + фидбек 1 сек = удаляем poll+фидбек = автопереход дальше
@@ -1803,20 +1700,6 @@ async def _show_practice_item(chat_id: int, state: FSMContext, topic: Dict[str, 
         )
         return
 
-
-
-    if t == "photo":
-        photo = item.get("photo") or item.get("file_id") or item.get("image") or item.get("url")
-        cap = header + html.escape(str(item.get("caption") or ""))
-        await _replace_content(
-            chat_id,
-            state,
-            _bot.send_photo(chat_id=chat_id, photo=photo, caption=cap, reply_markup=_kb_back_to_menu(), parse_mode="HTML"),
-        )
-        # 💬 авто переход вперёд
-        await asyncio.sleep(0.7)
-        await state.update_data(gram_item_idx=idx + 1)
-        return await _show_practice_item(chat_id, state, topic)
 
     text = header + str(item.get("text") or "")
     await _replace_content(
