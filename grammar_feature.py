@@ -311,20 +311,43 @@ def _strike_text(text: str) -> str:
 
 def _phase_items(phase: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Компилируем список показа в Теории:
-
-    - базовые блоки (vocab)
-    - textquiz_pool в конце
-
-    # 💬 квизы (poll/quiz_pack) в Теории отключены = не подмешиваем phase["quiz"]
+    💬 Теория = ТОЛЬКО текст и фото
+    💬 полностью вырезаем poll/quiz/textquiz/link и любые блоки с question/options
     """
     base = phase.get("vocab") or []
-    textquiz_pool = phase.get("textquiz") or []
 
-    compiled: List[Dict[str, Any]] = []
-    compiled += base
-    compiled += textquiz_pool
-    return compiled
+    out: List[Dict[str, Any]] = []
+
+    for x in (base or []):
+        # 💬 строки нормализуем в dict, иначе _show_current_item упадёт на item.get(...)
+        if isinstance(x, str):
+            s = x.strip()
+            if s:
+                out.append({"type": "text", "text": s})
+            continue
+
+        if not isinstance(x, dict):
+            continue
+
+        t = (x.get("type") or "").strip().lower()
+
+
+
+        # 💬 PHOTO
+        media = x.get("photo") or x.get("file_id") or x.get("image") or x.get("file") or ""
+        if media:
+            out.append(x)
+            continue
+
+        # 💬 TEXT (включая случай когда подпись лежит в caption)
+        txt = (x.get("text") or x.get("caption") or "").strip()
+        hint = (x.get("hint") or "").strip()
+        if txt or hint:
+            out.append({"type": "text", "text": txt, "hint": hint})
+            continue
+
+    return out
+ compiled
 
 
 
@@ -385,8 +408,6 @@ def _item_type(item: Any) -> str:
         return "text"  # 💬 защита от неожиданных типов
 
     t = (item.get("type") or "").strip().lower()
-    if t in ("quiz", "pollquiz", "poll_quiz"):
-        return "poll"  # 💬 совместимость: CreateLessonBlock сохраняет poll-квизы как type=quiz
 
     # 💬 если блок содержит медиа, считаем его фото (бывает, что подпись лежит в text)
     if isinstance(item, dict):
@@ -1175,8 +1196,6 @@ async def gram_phase_open(cb: CallbackQuery, state: FSMContext) -> None:
         gram_section="theory",
         gram_phase_idx=phase_idx,
         gram_item_idx=0,
-        gram_poll_id=None,
-        gram_poll_msg_id=None,
     )
     await _show_current_item(chat_id=cb.from_user.id, state=state, topic=topic)
 
@@ -1406,12 +1425,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
         # =========================
         # 🔗 LINK / 🧾 TEXT  # 💬 всё текстовое = edit как в подкастах
         # =========================
-        if t == "link":
-            url = (item.get("url") or item.get("link") or "").strip()
-            title = (item.get("title") or "Открыть").strip()
-            text = header + "\n\n" + (f"🔗 <a href='{_safe_html(url)}'>{_safe_html(title)}</a>" if url else "⚠️ Ссылка не найдена.")
-            await _gram_edit_or_replace_text(chat_id, state, text, kb)
-            return
+
 
         # 💬 дефолт = обычный текстовый блок
         body = (item.get("text") or "").strip()
@@ -1440,14 +1454,7 @@ async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext):
         return  # 💬 не наш poll_answer
 
     section = str((ctx or {}).get("section") or st.get("gram_poll_section") or st.get("gram_section") or "")
-    if section not in ("theory", "practice"):
-        cur_state = await state.get_state()  # 💬 пытаемся восстановить ветку по текущему state
-        if cur_state and "theory" in cur_state:
-            section = "theory"
-        elif cur_state and "practice" in cur_state:
-            section = "practice"
-        else:
-            section = "theory"  # 💬 дефолт чтобы не залипать
+
 
     chat_id = int((ctx or {}).get("chat_id") or ans.user.id)
 
@@ -1456,17 +1463,11 @@ async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext):
         upd: Dict[str, Any] = {
             "selected_topic": str(ctx.get("topic_key") or st.get("selected_topic") or ""),
         }
-        if section == "theory":
-            upd.update(
-                gram_section="theory",
-                gram_phase_idx=int(ctx.get("phase_idx") or 0),
-                gram_item_idx=int(ctx.get("item_idx") or 0),
-            )
-        else:
-            upd.update(
-                gram_section="practice",
-                gram_item_idx=int(ctx.get("item_idx") or 0),
-            )
+        upd.update(
+            gram_section="practice",
+            gram_item_idx=int(ctx.get("item_idx") or 0),
+        )  # 💬 poll работает только в Практике
+
         await state.update_data(**upd)
         st = await state.get_data()
 
@@ -1530,12 +1531,9 @@ async def gram_poll_answer_router(ans: PollAnswer, state: FSMContext):
 
     topic = _get_topic(str(st.get("selected_topic")))
 
-    if section == "theory":
-        await state.set_state(GrammarStates.theory_view)
-        await _show_current_item(chat_id=chat_id, state=state, topic=topic)
-    else:
-        await state.set_state(GrammarStates.practice_view)
-        await _show_practice_item(chat_id=chat_id, state=state, topic=topic)
+    await state.set_state(GrammarStates.practice_view)  # 💬 poll только практика
+    await _show_practice_item(chat_id=chat_id, state=state, topic=topic)
+
 
 
 # -----------------------------
