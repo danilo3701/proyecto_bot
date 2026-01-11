@@ -1537,8 +1537,12 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
 
         if body_raw:
             if item.get("raw") is not None:
-                # 💬 новый формат: text уже Telegram HTML из CreateLessonBlock, не экранируем
-                text += "\n\n" + body_raw
+                # 💬 совместимость: старые теги (<tg-spoiler>, <blockquote>) приводим к совместимому виду
+                body_ready = body_raw
+                body_ready = body_ready.replace("<tg-spoiler>", '<span class="tg-spoiler">').replace("</tg-spoiler>", "</span>")
+                body_ready = body_ready.replace("<blockquote>", "").replace("</blockquote>", "")  # 💬 quote теперь просто префикс строк
+                text += "\n\n" + body_ready
+
             else:
                 # 💬 старый формат: обычный текст, экранируем без quote-обёртки
                 text += "\n\n" + _safe_html(body_raw)  # 💬 убрали blockquote по дефолту
