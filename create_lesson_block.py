@@ -3236,12 +3236,14 @@ def _convert_gram_short_tags_to_html(raw: str):
         if tag == "i":
             return f"<i>{inner_esc}</i>"
         if tag == "sp":
-            return f"<tg-spoiler>{inner_esc}</tg-spoiler>"
+            # 💬 самый совместимый spoiler для Telegram HTML
+            return f'<span class="tg-spoiler">{inner_esc}</span>'
         if tag == "q":
-            # 💬 делаем quote-блок и префиксим строки символом
+            # 💬 quote только через префикс строк, без <blockquote> (совместимость)
             lines = inner_esc.splitlines()
             prefixed = "\n".join([("› " + ln) if ln.strip() else "" for ln in lines])
-            return f"<blockquote>{prefixed}</blockquote>"
+            return prefixed
+
         return inner_esc  # 💬 сюда не должны попасть
 
     i = 0
@@ -4530,6 +4532,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
