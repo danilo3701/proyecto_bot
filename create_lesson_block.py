@@ -3619,7 +3619,7 @@ async def save_reading_fragments(message: Message, state: FSMContext):
     packs = topic.setdefault("reading", [])
     if not (topic_path and 0 <= pack_index < len(packs)):
         await message.answer(
-            "⚠️ Не найден активный пак чтения. Начни добавление чтения заново.",
+            "⚠️ Не найден активный пак чтения. Начни добавление чтения заново."),
             data = await state.get_data()
             reply_markup=get_main_menu(((data.get("topic") or {}).get("category") or "")),  # 💬 правильное меню по категории
 
@@ -3978,6 +3978,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
