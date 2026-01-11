@@ -4871,7 +4871,22 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
     # 🔄 Сменить тему — тот же хендлер, что и у ReplyKeyboard
     if action == "change_topic":
         await callback.answer()
+
+        # 💬 удаляем текущее меню целиком (текст + кнопки), чтобы не оставался "Прогресс" и "Что делаем дальше?"
+        try:
+            await callback.message.delete()
+        except TelegramBadRequest:
+            # 💬 если удалить нельзя = максимально "очищаем" сообщение и снимаем кнопки
+            try:
+                await callback.message.edit_text("⠀", reply_markup=None)  # 💬 визуально пустой текст
+            except TelegramBadRequest:
+                try:
+                    await callback.message.edit_reply_markup(reply_markup=None)  # 💬 хотя бы убираем кнопки
+                except TelegramBadRequest:
+                    pass
+
         return await change_topic(callback.message, state)
+
 
     # 🙊 Читать диалоги — новая логика
     if action == "read":
