@@ -1956,16 +1956,18 @@ async def edit_grammar_insert_by_index(message: Message, state: FSMContext):
     insert_index = int(text)
 
     data = await state.get_data()
-    edit_section = (data.get("edit_section") or "").strip()
+    section_label = (data.get("edit_gram_section") or "").strip()  # 💬 берём реальный выбранный раздел (📖 Теория и т.д.)
+
 
     # 💬 включаем режим вставки и запоминаем индекс
     await state.update_data(edit_insert_mode=True, edit_insert_index=insert_index)
 
     # 💬 выставляем last_block и (для теории) current_phase_id, чтобы переиспользовать CreateLessonBlock-ветки
-    if edit_section == "theory":
+    if section_label == "📖 Теория":
         await state.update_data(last_block="vocab", current_phase_id=data.get("edit_phase_id"))
     else:
         await state.update_data(last_block="exercise")
+
 
     await send_insert_post_menu(message, state)  # 💬 показываем меню “что вставляем”
     return
@@ -2071,7 +2073,8 @@ async def save_dialog_markdown(message: Message, state: FSMContext):
     # 💬 Обновляем state и возвращаем пользователя в главное меню темы
     await state.update_data(topic=topic, dialog_phase_index=None, last_block="dialog")
 
-    keyboard = get_main_menu()
+    keyboard = get_main_menu((topic.get("category") or (data.get("topic") or {}).get("category")))  # 💬 возвращаем меню по категории темы
+
     total_lines = len(lines)  # 💬 сколько НЕпустых строк пришло
     total_sets = len(blocks)  # 💬 сколько сетов RU+ES сохранено
 
@@ -2770,7 +2773,10 @@ async def get_vocab_link(message: Message, state: FSMContext):
     data            = await state.get_data()
     cp              = data["current_phase_id"]
     topic_data      = data["topic"]
-    topic_data["vocab"][cp-1]["vocab"].append(new_block)
+    insert_index = data.get("edit_insert_index") if data.get("edit_insert_mode") else None  # 💬 индекс вставки (1-based)
+    topic_data["vocab"][cp-1].setdefault("vocab", [])
+    _insert_or_append(topic_data["vocab"][cp-1]["vocab"], new_block, insert_index)  # 💬 вставка по индексу или append
+
 
 
 
@@ -2781,6 +2787,10 @@ async def get_vocab_link(message: Message, state: FSMContext):
     await state.update_data(current_vocab_title=None, last_block="vocab")
 
     await message.answer("Словарь сохранён.", reply_markup=ReplyKeyboardRemove())
+    if data.get("edit_insert_mode"):
+        await state.update_data(edit_insert_mode=None, edit_insert_index=None)  # 💬 завершаем режим вставки
+        return await _edit_grammar_show_list(message, state)  # 💬 возвращаемся в список редактирования
+
     await send_post_menu(message, state)
 
 
@@ -3130,10 +3140,6 @@ async def save_ex_photo(message: Message, state: FSMContext):
         await state.update_data(edit_insert_mode=None, edit_insert_index=None)  # 💬 сбрасываем режим вставки
         return await _edit_grammar_show_list(message, state)  # 💬 возвращаемся в список редактирования
 
-    if data.get("edit_insert_mode"):
-        await state.update_data(edit_insert_mode=None, edit_insert_index=None)  # 💬 сбрасываем режим вставки
-        return await _edit_grammar_show_list(message, state)  # 💬 назад в список редактирования
-
     await send_post_menu(message, state)
 
 
@@ -3166,12 +3172,19 @@ async def save_vocab_text_block(message: Message, state: FSMContext):
     topic = data["topic"]
     # 1) Сохраняем текстовый блок
     new_block = {"type": "text", "text": text}
-    topic["vocab"][cp-1]["vocab"].append(new_block)
+    insert_index = data.get("edit_insert_index") if data.get("edit_insert_mode") else None  # 💬 индекс вставки (1-based)
+    topic["vocab"][cp-1].setdefault("vocab", [])
+    _insert_or_append(topic["vocab"][cp-1]["vocab"], new_block, insert_index)  # 💬 вставка по индексу или append
+
     # 2) Записываем в файл
     with open(data["topic_path"], "w", encoding="utf-8") as f:
         json.dump(topic, f, ensure_ascii=False, indent=2)
     # 3) Сразу возвращаемся в пост-меню без квиза
     await message.answer("Текст словаря сохранён.", reply_markup=ReplyKeyboardRemove())
+    if data.get("edit_insert_mode"):
+        await state.update_data(edit_insert_mode=None, edit_insert_index=None)  # 💬 завершаем режим вставки
+        return await _edit_grammar_show_list(message, state)  # 💬 назад в список редактирования
+
     await send_post_menu(message, state)
 
 
@@ -3298,6 +3311,7 @@ async def receive_vocab_media(message: Message, state: FSMContext):
         entry["text"] = caption  # 💬 сохраняем подпись (если она есть)
 
 
+    
     # 💬 сохраняем медиа-блок в выбранной фазе
     try:
         cp = int(data.get("current_phase_id") or 1)
@@ -3311,7 +3325,9 @@ async def receive_vocab_media(message: Message, state: FSMContext):
         return
 
     topic["vocab"][cp - 1].setdefault("vocab", [])
-    topic["vocab"][cp - 1]["vocab"].append(entry)
+    insert_index = data.get("edit_insert_index") if data.get("edit_insert_mode") else None  # 💬 индекс вставки (1-based)
+    _insert_or_append(topic["vocab"][cp - 1]["vocab"], entry, insert_index)  # 💬 вставка по индексу или append
+
 
     import json
     with open(topic_path, "w", encoding="utf-8") as f:
@@ -3321,6 +3337,10 @@ async def receive_vocab_media(message: Message, state: FSMContext):
 
     # 💬 подтверждаем и возвращаемся в меню поста
     await message.answer("✅ Фото/медиа сохранено.", reply_markup=ReplyKeyboardRemove())
+    if data.get("edit_insert_mode"):
+        await state.update_data(edit_insert_mode=None, edit_insert_index=None)  # 💬 завершаем режим вставки
+        return await _edit_grammar_show_list(message, state)  # 💬 назад в список редактирования
+
     await send_post_menu(message, state)
 
 
@@ -3502,14 +3522,19 @@ async def handle_reading_action(message: Message, state: FSMContext):
         # 💬 если это редактирование грамматики = не прыгаем в меню лексики, возвращаемся в список Читать
         if data.get("edit_gram_section") == "📚 Читать":
             if action == "✅ Готово":
-                await message.answer("✅ Пакет чтения сохранён.", reply_markup=ReplyKeyboardRemove())
+                data = await state.get_data()
+                category_now = ((data.get("topic") or {}).get("category") or "")  # 💬 берём категорию текущей темы
+                await message.answer("✅ Пакет чтения сохранён.", reply_markup=get_main_menu(category_now))
+
             else:
                 await message.answer("↩️ Вернулись к списку чтения.", reply_markup=ReplyKeyboardRemove())
             return await _edit_grammar_show_list(message, state)
 
         # 💬 иначе = обычный режим = возвращаемся в главное меню темы (с правильной категорией)
         if action == "✅ Готово":
-            await message.answer("✅ Пакет чтения сохранён.", reply_markup=get_main_menu(category_now))
+            category_now = ((data.get("topic") or {}).get("category") or "")  # 💬 возвращаемся в меню по категории темы
+            await message.answer("↩️ Вернулись назад.", reply_markup=get_main_menu(category_now))
+
         else:
             await message.answer("↩️ Вернулись назад.", reply_markup=get_main_menu(category_now))
         return await state.set_state(NewTopicStates.waiting_first_choice)
@@ -3595,7 +3620,9 @@ async def save_reading_fragments(message: Message, state: FSMContext):
     if not (topic_path and 0 <= pack_index < len(packs)):
         await message.answer(
             "⚠️ Не найден активный пак чтения. Начни добавление чтения заново.",
-            reply_markup=get_main_menu(),
+            data = await state.get_data()
+            reply_markup=get_main_menu(((data.get("topic") or {}).get("category") or "")),  # 💬 правильное меню по категории
+
         )
         return await state.set_state(NewTopicStates.waiting_first_choice)
 
@@ -3951,6 +3978,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
