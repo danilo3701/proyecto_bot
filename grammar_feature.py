@@ -2056,7 +2056,7 @@ async def _show_video(chat_id: int, state: FSMContext, topic: Dict[str, Any]) ->
 
 
 
-@@router.callback_query(F.data == "gram:video:done")
+@router.callback_query(F.data == "gram:video:done")
 async def gram_video_done(cb: CallbackQuery, state: FSMContext) -> None:
     # 💬 "Посмотрел" = показываем Feedback и offer_continue (как в Практике)
     await cb.answer()
