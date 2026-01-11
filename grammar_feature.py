@@ -55,6 +55,8 @@ from aiogram.types import (
     InlineKeyboardButton,
     PollAnswer,
     ReactionTypeEmoji,
+    InputMediaPhoto,  # 💬 нужно для edit_message_media, чтобы не удалять и не слать заново фото в Теории
+
 )
 
 from aiogram.exceptions import TelegramBadRequest  # 💬 чтобы не падать, если нельзя удалить/изменить
@@ -621,7 +623,10 @@ async def _replace_content(
     if old_id:
         await _safe_delete_message(_bot, chat_id, int(old_id))  # 💬 удаляем старый экран только после успеха
 
-    await state.update_data(gram_content_msg_id=msg.message_id)
+    await state.update_data(
+        gram_content_msg_id=msg.message_id,
+        gram_last_message_id=msg.message_id,  # 💬 чтобы дальше можно было edit_text/edit_media без удаления
+    )
     return msg
 
 
@@ -1330,6 +1335,47 @@ async def _gram_edit_or_replace_text(chat_id: int, state: FSMContext, text: str,
     )
     await state.update_data(gram_last_message_kind="text")  # 💬 помечаем тип последнего сообщения
 
+async def _gram_edit_or_replace_photo(chat_id: int, state: FSMContext, file_id: str, caption: str, kb: InlineKeyboardMarkup) -> None:
+    # 💬 редактируем photo-блок через edit_message_media, чтобы Теория листалась быстро без удаления
+    st = await state.get_data()
+    last_id = st.get("gram_last_message_id")
+    last_kind = st.get("gram_last_message_kind") or "text"
+
+    if last_id and last_kind == "photo":
+        try:
+            media = InputMediaPhoto(
+                media=file_id,
+                caption=caption,
+                parse_mode="HTML",
+            )
+            await _bot.edit_message_media(
+                chat_id=chat_id,
+                message_id=int(last_id),
+                media=media,
+                reply_markup=kb,
+            )
+            return  # 💬 успешно отредактировали фото
+        except Exception:
+            pass  # 💬 fallback ниже
+
+    msg = await _replace_content(
+        chat_id,
+        state,
+        _bot.send_photo(
+            chat_id,
+            file_id,
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=kb,
+            disable_notification=True
+        ),
+    )
+    await state.update_data(
+        gram_last_message_kind="photo",  # 💬 фиксируем тип
+        gram_last_message_id=msg.message_id,  # 💬 фиксируем id для следующих edit
+    )
+
+
 
 
 async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, Any]) -> None:
@@ -1406,38 +1452,18 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                 return
 
             try:
-                msg = await _replace_content(
-                    chat_id,
-                    state,
-                    _bot.send_photo(
-                        chat_id,
-                        file_id,
-                        caption=cap_full,
-                        parse_mode="HTML",
-                        reply_markup=kb,
-                        disable_notification=True
-                    )
-                )
+                await _gram_edit_or_replace_photo(chat_id, state, file_id, cap_full, kb)  # 💬 edit вместо удаления
                 await state.update_data(gram_last_message_kind="photo")  # 💬 фиксируем тип
                 return
             except Exception:
+
                 # 💬 перестраховка = пробуем без caption (только header)
                 try:
-                    msg = await _replace_content(
-                        chat_id,
-                        state,
-                        _bot.send_photo(
-                            chat_id,
-                            file_id,
-                            caption=header,
-                            parse_mode="HTML",
-                            reply_markup=kb,
-                            disable_notification=True
-                        )
-                    )
+                    await _gram_edit_or_replace_photo(chat_id, state, file_id, header, kb)  # 💬 edit вместо удаления
                     await state.update_data(gram_last_message_kind="photo")  # 💬 фиксируем тип
                     return
                 except Exception:
+
                     # 💬 последний fallback = текстом, чтобы не было "залипания" и двойного клика
                     fallback_txt = header + "\n\n⚠️ Фото не удалось показать."
                     if cap_user:
