@@ -559,22 +559,27 @@ def _kb_practice_continue_menu(done, total):
             [InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")]
         ]
     )
-
-
-def _kb_video_controls() -> InlineKeyboardMarkup:
+def _kb_video_continue_menu(done, total):
+    # 💬 клавиатура после Feedback: Продолжить или Меню (как в Практике)
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Посмотрел", callback_data="gram:video:done"),
-                InlineKeyboardButton(text="⏭️ Дальше", callback_data="gram:video:next"),
-            ],
-            [
-                InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu"),
-
-            ],  # 💬 одна кнопка
-
+            [InlineKeyboardButton(text=f"▶️ Продолжить ({done}/{total})", callback_data="gram:video:next")],
+            [InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")],
         ]
     )
+
+
+def _kb_video_controls(video_url: str = "") -> InlineKeyboardMarkup:
+    # 💬 кнопки для Видео: 1) URL-кнопка "Видео" 2) Посмотрел 3) Меню (без "Дальше")
+    rows: List[List[InlineKeyboardButton]] = []
+
+    if video_url:
+        rows.append([InlineKeyboardButton(text="🎬 Видео", url=video_url)])  # 💬 открываем ссылку кнопкой
+
+    rows.append([InlineKeyboardButton(text="✅ Посмотрел", callback_data="gram:video:done")])  # 💬 ведём в offer_continue
+    rows.append([InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")])  # 💬 назад в меню топика
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _kb_read_controls() -> InlineKeyboardMarkup:
@@ -2034,32 +2039,130 @@ async def _show_video(chat_id: int, state: FSMContext, topic: Dict[str, Any]) ->
 
     text = (
         f"🎬 <b>{title}</b>\n"
-        f"{_bar(pct)}  {int(pct * 100)}%\n\n"
-        f"{html.escape(link)}"
-    )
+        f"{_bar(pct)}  {int(pct * 100)}%\n"
+    )  # 💬 ссылку не печатаем текстом, она будет кнопкой
 
     await _replace_content(
         chat_id,
         state,
-        _bot.send_message(chat_id=chat_id, text=text, reply_markup=_kb_video_controls(), parse_mode="HTML", disable_web_page_preview=True),
+        _bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=_kb_video_controls(link),  # 💬 URL-кнопка "Видео"
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        ),
     )
 
 
-@router.callback_query(F.data.in_(["gram:video:done", "gram:video:next"]))
-async def gram_video_controls(cb: CallbackQuery, state: FSMContext) -> None:
+
+@@router.callback_query(F.data == "gram:video:done")
+async def gram_video_done(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 "Посмотрел" = показываем Feedback и offer_continue (как в Практике)
     await cb.answer()
     st = await state.get_data()
     if st.get("gram_section") != "video":
         return
 
-    idx = int(st.get("gram_item_idx") or 0)
+    topic = _get_topic(str(st.get("selected_topic")))
+    vids = _video_items(topic) or []
+    total = len(vids)
 
-    # 💬 "done" и "next" одинаково двигают вперёд
-    idx += 1
-    await state.update_data(gram_item_idx=idx)
+    # 💬 защитимся от пустого списка
+    if total <= 0:
+        await _replace_content(
+            cb.from_user.id,
+            state,
+            _bot.send_message(chat_id=cb.from_user.id, text="Пока нет видео.", reply_markup=_kb_back_to_menu()),
+        )
+        return
+
+    scene = random.choice(feedback_questions)  # 💬 берём один сценарий Feedback
+    buttons = (scene.get("buttons") or [])[:2]
+
+    kb_rows: List[List[InlineKeyboardButton]] = []
+    row: List[InlineKeyboardButton] = []
+    for i, btn_text in enumerate(buttons):
+        row.append(InlineKeyboardButton(text=str(btn_text), callback_data=f"gram:video:fb:{i}"))
+    if row:
+        kb_rows.append(row)
+
+    kb_rows.append([InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")])  # 💬 аварийный выход
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+
+    await state.update_data(gram_video_fb_scene=scene)  # 💬 храним сцену, чтобы потом взять reaction/next
+    await _replace_content(
+        cb.from_user.id,
+        state,
+        _bot.send_message(chat_id=cb.from_user.id, text=str(scene.get("text") or "Как тебе?"), reply_markup=kb, parse_mode="HTML"),
+    )
+
+
+@router.callback_query(F.data.startswith("gram:video:fb:"))
+async def gram_video_feedback(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 ответ на Feedback = реакция + offer_continue (Продолжить/Меню)
+    await cb.answer()
+    st = await state.get_data()
+    if st.get("gram_section") != "video":
+        return
+
+    scene = st.get("gram_video_fb_scene") or {}
+    buttons = (scene.get("buttons") or [])[:2]
+
+    try:
+        idx_btn = int(cb.data.split(":")[-1])
+    except Exception:
+        idx_btn = 0
+
+    chosen_text = str(buttons[idx_btn]) if 0 <= idx_btn < len(buttons) else (str(buttons[0]) if buttons else "")
+    params = (scene.get("replies") or {}).get(chosen_text) or {}
+    reaction = str(params.get("reaction") or "✅ Ок!")  # 💬 короткая реакция
+
+    # 💬 двигаем индекс видео вперёд только после подтверждения "Посмотрел" + Feedback
+    cur_idx = int(st.get("gram_item_idx") or 0)
+    next_idx = cur_idx + 1
+    await state.update_data(gram_item_idx=next_idx)
+
+    topic = _get_topic(str(st.get("selected_topic")))
+    vids = _video_items(topic) or []
+    total = len(vids)
+
+    # 💬 считаем done/total из session_progress
+    st_now = await state.get_data()
+    sp = _sess_progress_from_state(st_now)
+    vd = sp.setdefault("video", {})
+    raw_done = vd.get("done_idx")
+    try:
+        done_idx = int(raw_done) if raw_done is not None else -1
+    except Exception:
+        done_idx = -1
+
+    done = (min(done_idx + 1, total) if (total and done_idx >= 0) else 0)
+
+    txt = f"{reaction}\n\nПродолжаем?"
+    await _replace_content(
+        cb.from_user.id,
+        state,
+        _bot.send_message(
+            chat_id=cb.from_user.id,
+            text=txt,
+            reply_markup=_kb_video_continue_menu(done, total),
+            parse_mode="HTML",
+        ),
+    )
+
+
+@router.callback_query(F.data == "gram:video:next")
+async def gram_video_next(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 "Продолжить" = показать следующий видео-элемент (без авто-прыжка)
+    await cb.answer()
+    st = await state.get_data()
+    if st.get("gram_section") != "video":
+        return
 
     topic = _get_topic(str(st.get("selected_topic")))
     await _show_video(chat_id=cb.from_user.id, state=state, topic=topic)
+
 
 
 # -----------------------------
