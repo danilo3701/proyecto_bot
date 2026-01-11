@@ -3773,7 +3773,7 @@ async def send_edit_menu(chat_id: int, bot: Bot, state: FSMContext):
 # 🎨 Хендлер: выбор действия в режиме редактирования
 @router.message(EditTopicStates.choose_action)
 async def handle_edit_action(message: Message, state: FSMContext):
-    text = message.text.strip()
+    text = (message.text or "").strip()
 
     def _lex_edit_kb() -> ReplyKeyboardMarkup:
         # 💬 единое меню редактирования лексики, чтобы возвращаться сюда после add delete
@@ -3788,11 +3788,155 @@ async def handle_edit_action(message: Message, state: FSMContext):
             resize_keyboard=True,
         )
 
-    @router.message(EditTopicStates.waiting_vocab_phase_delete_index)
+    # 💬 выход из режима редактирования
+    if text in {"↩️ Вернуться в Главное меню", "🚫 Отмена"}:
+        data = await state.get_data()
+        topic = data.get("topic") or {}
+        category_now = ((topic.get("category") or "").strip().lower())
+        await message.answer("С чего начнём?", reply_markup=get_main_menu(category_now))
+        await state.set_state(NewTopicStates.waiting_first_choice)
+        return
+
+    # ----------------------- ЛЕКСИКА: только фазы и списки -----------------------
+
+    # 💬 создать фазу словаря
+    if text == "➕ Новая фаза словаря":
+        await state.update_data(last_block="vocab")  # 💬 чтобы после создания фазы открыть меню добавления блоков
+        await message.answer("Введите НАЗВАНИЕ новой ФАЗЫ:", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(NewTopicStates.waiting_phase_name)  # 💬 переиспользуем create_phase
+        return
+
+    # 💬 удалить фазу словаря
+    if text == "🗑 Удалить фазу словаря":
+        data = await state.get_data()
+        topic = data.get("topic") or {}
+        phases = topic.get("vocab") or []
+        if not phases:
+            await message.answer("⚠️ Список фаз словаря пуст.", reply_markup=_lex_edit_kb())
+            await state.set_state(EditTopicStates.choose_action)
+            return
+
+        buttons = [[KeyboardButton(text=f"{i}. {(p.get('phase_name') or f'Фаза {i}')}")] for i, p in enumerate(phases, 1)]
+        buttons.append([KeyboardButton(text="↩️ Назад")])
+        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+        await message.answer("🗑 Выбери фазу словаря для удаления:", reply_markup=kb)
+        await state.set_state(EditTopicStates.waiting_vocab_phase_delete_index)
+        return
+
+    # 💬 создать фазу диалогов
+    if text in {"➕ Новая фаза диалогов", "➕ Добавить диалог"}:
+        await message.answer("Введите НАЗВАНИЕ новой фазы диалогов:", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(NewDialogStates.waiting_dialog_phase_name)  # 💬 переиспользуем создание фазы диалогов
+        return
+
+    # 💬 удалить фазу диалогов
+    if text == "🗑 Удалить фазу диалогов":
+        data = await state.get_data()
+        topic = data.get("topic") or {}
+        dialogs = topic.get("dialogs") or []
+        if not dialogs:
+            await message.answer("⚠️ Список фаз диалогов пуст.", reply_markup=_lex_edit_kb())
+            await state.set_state(EditTopicStates.choose_action)
+            return
+
+        buttons = [[KeyboardButton(text=f"{i}. {(d.get('phase_name') or f'Фаза {i}')}")] for i, d in enumerate(dialogs, 1)]
+        buttons.append([KeyboardButton(text="↩️ Назад")])
+        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+        await message.answer("🗑 Выбери фазу диалогов для удаления:", reply_markup=kb)
+        await state.set_state(EditTopicStates.waiting_dialog_phase_delete_index)
+        return
+
+    # 💬 добавить видео
+    if text == "➕ Добавить видео":
+        await message.answer("Введите ЗАГОЛОВОК видео:", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(NewTopicStates.waiting_video_title)  # 💬 используем стандартный поток видео
+        return
+
+    # 💬 удалить видео
+    if text == "🗑 Удалить видео":
+        data = await state.get_data()
+        topic = data.get("topic") or {}
+        videos = topic.get("videos") or []
+        if not videos:
+            await message.answer("⚠️ Список видео пуст.", reply_markup=_lex_edit_kb())
+            await state.set_state(EditTopicStates.choose_action)
+            return
+
+        buttons = []
+        for i, v in enumerate(videos, 1):
+            title = (v.get("title") or f"Видео {i}")
+            buttons.append([KeyboardButton(text=f"{i}. {title}")])
+        buttons.append([KeyboardButton(text="↩️ Назад")])
+        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+        await message.answer("🗑 Выбери видео для удаления:", reply_markup=kb)
+        await state.set_state(EditTopicStates.waiting_video_delete_index)
+        return
+
+    # 💬 добавить чтение
+    if text in {"➕ Добавить чтение", "📖 Добавить чтение"}:
+        await state.update_data(last_block="reading")  # 💬 чтобы не путать меню после сохранения
+        await message.answer("Введите ЗАГОЛОВОК пака чтения:", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(NewTopicStates.waiting_reading_title)  # 💬 стандартный поток reading
+        return
+
+    # 💬 удалить пак чтения
+    if text == "🗑 Удалить пак чтения":
+        data = await state.get_data()
+        topic = data.get("topic") or {}
+        packs = topic.get("reading") or []
+        if not packs:
+            await message.answer("⚠️ Список чтения пуст.", reply_markup=_lex_edit_kb())
+            await state.set_state(EditTopicStates.choose_action)
+            return
+
+        buttons = []
+        for i, p in enumerate(packs, 1):
+            title = (p.get("title") or f"Пак {i}")
+            buttons.append([KeyboardButton(text=f"{i}. {title}")])
+        buttons.append([KeyboardButton(text="↩️ Назад")])
+        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+        await message.answer("🗑 Выбери пак чтения для удаления:", reply_markup=kb)
+        await state.set_state(EditTopicStates.waiting_reading_delete_index)
+        return
+
+    # ----------------------- BACKWARD COMPAT = старые кнопки (если где-то ещё всплывут) -----------------------
+    if text == "➕ Добавить словарь":
+        await message.answer("Введите НАЗВАНИЕ словаря:", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(EditTopicStates.waiting_vocab_title)
+        return
+
+    if text == "➕ Добавить упражнение":
+        await message.answer("Введите НАЗВАНИЕ упражнения:", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(EditTopicStates.waiting_ex_title)
+        return
+
+    if text == "➕ Добавить QUIZ":
+        await message.answer("Вставьте QUIZ-блок:", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(EditTopicStates.waiting_quiz_block)
+        return
+
+    if text == "📝 Добавить ТЕКСТ":
+        await message.answer("Вставьте текстовый блок:", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(EditTopicStates.waiting_text_block)
+        return
+
+    # 💬 fallback
+    await message.answer("⚠️ Выберите действие кнопкой.", reply_markup=_lex_edit_kb())
+    await state.set_state(EditTopicStates.choose_action)
+
+
+# --- Хендлеры удаления фаз и блоков ---
+
+@router.message(EditTopicStates.waiting_vocab_phase_delete_index)
 async def edit_delete_vocab_phase(message: Message, state: FSMContext):
     txt = (message.text or "").strip()
     if txt == "↩️ Назад":
-        kb = ReplyKeyboardMarkup(
+        await message.answer("Ок.", reply_markup=ReplyKeyboardRemove())
+        await message.answer("✏️ Режим редактирования. Что вы хотите сделать?", reply_markup=ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Новая фаза словаря"), KeyboardButton(text="🗑 Удалить фазу словаря")],
                 [KeyboardButton(text="➕ Новая фаза диалогов"), KeyboardButton(text="🗑 Удалить фазу диалогов")],
@@ -3801,8 +3945,7 @@ async def edit_delete_vocab_phase(message: Message, state: FSMContext):
                 [KeyboardButton(text="↩️ Вернуться в Главное меню")],
             ],
             resize_keyboard=True,
-        )
-        await message.answer("Ок.", reply_markup=kb)
+        ))
         await state.set_state(EditTopicStates.choose_action)
         return
 
@@ -3822,6 +3965,7 @@ async def edit_delete_vocab_phase(message: Message, state: FSMContext):
         return
 
     removed = phases.pop(idx)
+
     for i, p in enumerate(phases, 1):
         if isinstance(p, dict):
             p["phase_id"] = i  # 💬 перенумерация после удаления
@@ -3842,7 +3986,8 @@ async def edit_delete_vocab_phase(message: Message, state: FSMContext):
         ],
         resize_keyboard=True,
     )
-    await message.answer(f"✅ Фаза удалена: {removed.get('phase_name') if isinstance(removed, dict) else ''}", reply_markup=kb)
+    name = removed.get("phase_name") if isinstance(removed, dict) else ""
+    await message.answer(f"✅ Фаза удалена: {name}", reply_markup=kb)
     await state.set_state(EditTopicStates.choose_action)
 
 
@@ -3850,7 +3995,8 @@ async def edit_delete_vocab_phase(message: Message, state: FSMContext):
 async def edit_delete_dialog_phase(message: Message, state: FSMContext):
     txt = (message.text or "").strip()
     if txt == "↩️ Назад":
-        kb = ReplyKeyboardMarkup(
+        await message.answer("Ок.", reply_markup=ReplyKeyboardRemove())
+        await message.answer("✏️ Режим редактирования. Что вы хотите сделать?", reply_markup=ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Новая фаза словаря"), KeyboardButton(text="🗑 Удалить фазу словаря")],
                 [KeyboardButton(text="➕ Новая фаза диалогов"), KeyboardButton(text="🗑 Удалить фазу диалогов")],
@@ -3859,8 +4005,7 @@ async def edit_delete_dialog_phase(message: Message, state: FSMContext):
                 [KeyboardButton(text="↩️ Вернуться в Главное меню")],
             ],
             resize_keyboard=True,
-        )
-        await message.answer("Ок.", reply_markup=kb)
+        ))
         await state.set_state(EditTopicStates.choose_action)
         return
 
@@ -3880,6 +4025,7 @@ async def edit_delete_dialog_phase(message: Message, state: FSMContext):
         return
 
     removed = dialogs.pop(idx)
+
     for i, d in enumerate(dialogs, 1):
         if isinstance(d, dict):
             d["phase_id"] = i  # 💬 перенумерация после удаления
@@ -3900,7 +4046,8 @@ async def edit_delete_dialog_phase(message: Message, state: FSMContext):
         ],
         resize_keyboard=True,
     )
-    await message.answer(f"✅ Фаза диалогов удалена: {removed.get('phase_name') if isinstance(removed, dict) else ''}", reply_markup=kb)
+    name = removed.get("phase_name") if isinstance(removed, dict) else ""
+    await message.answer(f"✅ Фаза диалогов удалена: {name}", reply_markup=kb)
     await state.set_state(EditTopicStates.choose_action)
 
 
@@ -3908,7 +4055,8 @@ async def edit_delete_dialog_phase(message: Message, state: FSMContext):
 async def edit_delete_video(message: Message, state: FSMContext):
     txt = (message.text or "").strip()
     if txt == "↩️ Назад":
-        kb = ReplyKeyboardMarkup(
+        await message.answer("Ок.", reply_markup=ReplyKeyboardRemove())
+        await message.answer("✏️ Режим редактирования. Что вы хотите сделать?", reply_markup=ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Новая фаза словаря"), KeyboardButton(text="🗑 Удалить фазу словаря")],
                 [KeyboardButton(text="➕ Новая фаза диалогов"), KeyboardButton(text="🗑 Удалить фазу диалогов")],
@@ -3917,8 +4065,7 @@ async def edit_delete_video(message: Message, state: FSMContext):
                 [KeyboardButton(text="↩️ Вернуться в Главное меню")],
             ],
             resize_keyboard=True,
-        )
-        await message.answer("Ок.", reply_markup=kb)
+        ))
         await state.set_state(EditTopicStates.choose_action)
         return
 
@@ -3954,7 +4101,8 @@ async def edit_delete_video(message: Message, state: FSMContext):
         ],
         resize_keyboard=True,
     )
-    await message.answer(f"✅ Видео удалено: {removed.get('title') if isinstance(removed, dict) else ''}", reply_markup=kb)
+    title = removed.get("title") if isinstance(removed, dict) else ""
+    await message.answer(f"✅ Видео удалено: {title}", reply_markup=kb)
     await state.set_state(EditTopicStates.choose_action)
 
 
@@ -3962,7 +4110,8 @@ async def edit_delete_video(message: Message, state: FSMContext):
 async def edit_delete_reading_pack(message: Message, state: FSMContext):
     txt = (message.text or "").strip()
     if txt == "↩️ Назад":
-        kb = ReplyKeyboardMarkup(
+        await message.answer("Ок.", reply_markup=ReplyKeyboardRemove())
+        await message.answer("✏️ Режим редактирования. Что вы хотите сделать?", reply_markup=ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Новая фаза словаря"), KeyboardButton(text="🗑 Удалить фазу словаря")],
                 [KeyboardButton(text="➕ Новая фаза диалогов"), KeyboardButton(text="🗑 Удалить фазу диалогов")],
@@ -3971,8 +4120,7 @@ async def edit_delete_reading_pack(message: Message, state: FSMContext):
                 [KeyboardButton(text="↩️ Вернуться в Главное меню")],
             ],
             resize_keyboard=True,
-        )
-        await message.answer("Ок.", reply_markup=kb)
+        ))
         await state.set_state(EditTopicStates.choose_action)
         return
 
@@ -4008,140 +4156,10 @@ async def edit_delete_reading_pack(message: Message, state: FSMContext):
         ],
         resize_keyboard=True,
     )
-    await message.answer(f"✅ Пак чтения удалён: {removed.get('title') if isinstance(removed, dict) else ''}", reply_markup=kb)
+    title = removed.get("title") if isinstance(removed, dict) else ""
+    await message.answer(f"✅ Пак чтения удалён: {title}", reply_markup=kb)
     await state.set_state(EditTopicStates.choose_action)
 
-    # --- Фазы словаря ---
-    if text == "➕ Новая фаза словаря":
-        await state.update_data(last_block="vocab")  # 💬 нужно для send_post_menu после создания фазы
-        await message.answer("Введите НАЗВАНИЕ новой ФАЗЫ:", reply_markup=ReplyKeyboardRemove())
-        await state.set_state(NewTopicStates.waiting_phase_name)  # 💬 переиспользуем create_phase
-        return
-
-    if text == "🗑 Удалить фазу словаря":
-        data = await state.get_data()
-        topic = data.get("topic") or {}
-        phases = topic.get("vocab") or []
-        if not phases:
-            await message.answer("⚠️ Список фаз словаря пуст.", reply_markup=_lex_edit_kb())
-            await state.set_state(EditTopicStates.choose_action)
-            return
-
-        buttons = [[KeyboardButton(text=f"{i}. {(p.get('phase_name') or f'Фаза {i}')}")] for i, p in enumerate(phases, 1)]
-        buttons.append([KeyboardButton(text="↩️ Назад")])
-        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-        await message.answer("🗑 Выбери фазу словаря для удаления:", reply_markup=kb)
-        await state.set_state(EditTopicStates.waiting_vocab_phase_delete_index)
-        return
-
-    # --- Фазы диалогов ---
-    if text == "➕ Новая фаза диалогов":
-        await message.answer("Введите НАЗВАНИЕ новой фазы диалогов:", reply_markup=ReplyKeyboardRemove())
-        await state.set_state(NewDialogStates.waiting_dialog_phase_name)  # 💬 переиспользуем создание фазы диалогов
-        return
-
-    if text == "🗑 Удалить фазу диалогов":
-        data = await state.get_data()
-        topic = data.get("topic") or {}
-        dialogs = topic.get("dialogs") or []
-        if not dialogs:
-            await message.answer("⚠️ Список фаз диалогов пуст.", reply_markup=_lex_edit_kb())
-            await state.set_state(EditTopicStates.choose_action)
-            return
-
-        buttons = [[KeyboardButton(text=f"{i}. {(d.get('phase_name') or f'Фаза {i}')}")] for i, d in enumerate(dialogs, 1)]
-        buttons.append([KeyboardButton(text="↩️ Назад")])
-        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-        await message.answer("🗑 Выбери фазу диалогов для удаления:", reply_markup=kb)
-        await state.set_state(EditTopicStates.waiting_dialog_phase_delete_index)
-        return
-
-    # --- Видео ---
-    if text == "🗑 Удалить видео":
-        data = await state.get_data()
-        topic = data.get("topic") or {}
-        videos = topic.get("videos") or []
-        if not videos:
-            await message.answer("⚠️ Список видео пуст.", reply_markup=_lex_edit_kb())
-            await state.set_state(EditTopicStates.choose_action)
-            return
-
-        buttons = []
-        for i, v in enumerate(videos, 1):
-            title = (v.get("title") or f"Видео {i}")
-            buttons.append([KeyboardButton(text=f"{i}. {title}")])
-        buttons.append([KeyboardButton(text="↩️ Назад")])
-        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-        await message.answer("🗑 Выбери видео для удаления:", reply_markup=kb)
-        await state.set_state(EditTopicStates.waiting_video_delete_index)
-        return
-
-    # --- Читать ---
-    if text == "➕ Добавить чтение":
-        await state.update_data(last_block="reading")  # 💬 чтобы меню после сохранения было корректным
-        await message.answer("Введите ЗАГОЛОВОК пака чтения:", reply_markup=ReplyKeyboardRemove())
-        await state.set_state(NewTopicStates.waiting_reading_title)  # 💬 переиспользуем создание reading pack
-        return
-
-    if text == "🗑 Удалить пак чтения":
-        data = await state.get_data()
-        topic = data.get("topic") or {}
-        packs = topic.get("reading") or []
-        if not packs:
-            await message.answer("⚠️ Список чтения пуст.", reply_markup=_lex_edit_kb())
-            await state.set_state(EditTopicStates.choose_action)
-            return
-
-        buttons = []
-        for i, p in enumerate(packs, 1):
-            title = (p.get("title") or f"Пак {i}")
-            buttons.append([KeyboardButton(text=f"{i}. {title}")])
-        buttons.append([KeyboardButton(text="↩️ Назад")])
-        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-        await message.answer("🗑 Выбери пак чтения для удаления:", reply_markup=kb)
-        await state.set_state(EditTopicStates.waiting_reading_delete_index)
-        return
-
-    # Каждая кнопка переводит в своё состояние и просит данные
-    if text == "➕ Добавить словарь":
-        await message.answer("Введите ЗАГОЛОВОК словаря:", reply_markup=ReplyKeyboardRemove())
-        return await state.set_state(EditTopicStates.waiting_vocab_title)
-    if text == "➕ Добавить упражнение":
-        await message.answer("Введите НАЗВАНИЕ упражнения:", reply_markup=ReplyKeyboardRemove())
-        return await state.set_state(EditTopicStates.waiting_ex_title)
-    if text == "➕ Добавить видео":
-        await message.answer("Введите ЗАГОЛОВОК видео:", reply_markup=ReplyKeyboardRemove())
-        return await state.set_state(EditTopicStates.waiting_video_title)
-    if text == "➕ Добавить диалог":
-        await message.answer("Введите ЗАГОЛОВОК диалога:", reply_markup=ReplyKeyboardRemove())
-        return await state.set_state(EditTopicStates.waiting_dialog_title)
-    if text == "➕ Добавить QUIZ":
-        await message.answer(
-            "📝 Пришлите quiz в формате:\n"
-            "Вопрос|Правильный|Неправ1|Неправ2|ОбъяснениеПравильного|ОбъяснениеНеправильного",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return await state.set_state(EditTopicStates.waiting_quiz_block)
-    if text == "📝 Добавить ТЕКСТ":
-        await message.answer("📝 Введите произвольный текст:", reply_markup=ReplyKeyboardRemove())
-        return await state.set_state(EditTopicStates.waiting_text_block)
-    if text.startswith("↩️"):
-        # 💬 выход из режима редактирования обратно в меню темы
-        data = await state.get_data()
-        category = (data.get("topic") or {}).get("category")
-        keyboard = get_main_menu(category)
-        if keyboard and hasattr(keyboard, "keyboard"):
-            keyboard.keyboard.append([KeyboardButton(text="🗑 Удалить тему")])  # 💬 чтобы админ мог удалить тему из меню
-        await message.answer("Ок. Возвращаемся в меню темы.", reply_markup=keyboard)
-        await state.set_state(NewTopicStates.waiting_first_choice)
-        return
-
-
-    await message.answer("❗ Пожалуйста, выберите один из пунктов меню.")
 
 
 
@@ -4327,6 +4345,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
