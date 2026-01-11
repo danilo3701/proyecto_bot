@@ -154,6 +154,31 @@ def _safe_html(x: Any) -> str:
         return ""
 
 
+def _unescape_allowed_gram_html(s: Any) -> str:
+    # 💬 разворачиваем только белый список Telegram-HTML тегов, если они пришли экранированными
+    try:
+        out = str(s or "")
+    except Exception:
+        return ""
+
+    if not out:
+        return ""
+
+    for tag in ("u", "s", "b", "i", "blockquote", "tg-spoiler"):
+        out = out.replace(f"&lt;{tag}&gt;", f"<{tag}>")
+        out = out.replace(f"&lt;/{tag}&gt;", f"</{tag}>")
+
+    # 💬 spoiler через span class для совместимости
+    out = out.replace("&lt;span class=&quot;tg-spoiler&quot;&gt;", '<span class="tg-spoiler">')
+    out = out.replace("&lt;/span&gt;", "</span>")
+
+    # 💬 переносы
+    out = out.replace("&lt;br&gt;", "<br>").replace("&lt;br/&gt;", "<br/>").replace("&lt;br /&gt;", "<br />")
+
+    return out
+
+
+
 def _normalize_quiz_options(opts: List[str], correct: int) -> Tuple[List[str], int]:
     # 💬 приводим к 3 вариантам, убираем дубли и фиксируем correct в 0
     clean: List[str] = []
@@ -1539,13 +1564,19 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
             if item.get("raw") is not None:
                 # 💬 совместимость: старые теги (<tg-spoiler>, <blockquote>) приводим к совместимому виду
                 body_ready = body_raw
+                body_ready = _unescape_allowed_gram_html(body_ready)  # 💬 поддержка: теги могли сохраниться экранированными
+
                 body_ready = body_ready.replace("<tg-spoiler>", '<span class="tg-spoiler">').replace("</tg-spoiler>", "</span>")
                 body_ready = body_ready.replace("<blockquote>", "").replace("</blockquote>", "")  # 💬 quote теперь просто префикс строк
                 text += "\n\n" + body_ready
 
             else:
-                # 💬 старый формат: обычный текст, экранируем без quote-обёртки
-                text += "\n\n" + _safe_html(body_raw)  # 💬 убрали blockquote по дефолту
+                # 💬 старый формат: экранируем, но оставляем белый список тегов (<u>, <s>, <tg-spoiler>, <blockquote>)
+                body_ready = _unescape_allowed_gram_html(_safe_html(body_raw))
+                body_ready = body_ready.replace("<tg-spoiler>", '<span class="tg-spoiler">').replace("</tg-spoiler>", "</span>")
+                body_ready = body_ready.replace("<blockquote>", "").replace("</blockquote>", "")  # 💬 quote теперь просто префикс строк
+                text += "\n\n" + body_ready
+
 
         if hint:
             text += "\n\n " + _safe_html(hint)  # 💬 hint не спойлерим
