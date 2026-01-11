@@ -1523,31 +1523,32 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
         # =========================
 
 
+
         # 💬 дефолт = обычный текстовый блок (компакт + форматирование)
         body_raw = (item.get("text") or "").strip()
         hint = (item.get("hint") or "").strip()
-        
+
         # 💬 чистим лишние пустые строки внутри body, чтобы не было "простыней"
         while "\n\n\n" in body_raw:
             body_raw = body_raw.replace("\n\n\n", "\n\n")
-        
+
         text = header
-        
+
         if body_raw:
-            body_html = _safe_html(body_raw)
+            if item.get("raw") is not None:
+                # 💬 новый формат: text уже Telegram HTML из CreateLessonBlock, не экранируем и не оборачиваем в blockquote
+                text += "\n\n" + body_raw
+            else:
+                # 💬 старый формат: обычный текст, экранируем и красиво оформляем
+                body_html = _safe_html(body_raw)
+                body_pretty = f"<blockquote><b><i>{body_html}</i></b></blockquote>"
+                text += "\n\n" + body_pretty
 
-            # 💬 quote-оформление для теории (без дублей текста)
-            body_pretty = f"<blockquote><b><i>{body_html}</i></b></blockquote>"
-
-            text += "\n\n" + body_pretty
-
-        
         if hint:
             text += "\n\n " + _safe_html(hint)  # 💬 hint не спойлерим
-        
+
         await _gram_edit_or_replace_text(chat_id, state, text, kb)
         return
-
 
 
 @router.poll_answer(StateFilter(GrammarStates.practice_poll))  # 💬 Теория без poll, оставляем poll только для Практики
