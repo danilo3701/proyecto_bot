@@ -287,14 +287,23 @@ async def _mark_seen_session(
         if int(item_idx) > done_idx:
             vd["done_idx"] = int(item_idx)  # 💬 max индекс видео в рамках сессии
 
-    elif section == "read":
+    elif section == "read" and phase_idx is not None:
         rd = sp.setdefault("read", {})
-        try:
-            done_idx = int(rd.get("done_idx")) if rd.get("done_idx") is not None else -1
-        except Exception:
-            done_idx = -1
-        if int(item_idx) > done_idx:
-            rd["done_idx"] = int(item_idx)  # 💬 max индекс чтения в рамках сессии
+        ph = rd.setdefault(str(phase_idx), {})
+        seen = ph.setdefault("seen", [])
+        if not isinstance(seen, list):
+            seen = []
+            ph["seen"] = seen
+
+        if 0 <= int(item_idx) < int(total):
+            if int(item_idx) not in seen:
+                seen.append(int(item_idx))
+
+        pct = (len(set(int(x) for x in seen if isinstance(x, int) or str(x).isdigit())) / int(total)) if total else 0.0
+        ph["pct"] = pct
+        if pct >= 0.999999:
+            ph["done"] = True  # 💬 фаза Читать зачёркивается только при 100%
+
 
     await state.update_data(gram_session_progress=sp)
 
@@ -582,13 +591,21 @@ def _kb_read_controls() -> InlineKeyboardMarkup:
     )
 
 
-def _kb_read_packs(packs: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+def _kb_read_packs(
+    packs: List[Dict[str, Any]],
+    phase_pcts: Optional[List[float]] = None
+) -> InlineKeyboardMarkup:
     rows: List[List[InlineKeyboardButton]] = []
 
     for i, p in enumerate(packs or []):
         title = str((p or {}).get("title") or f"Фаза {i + 1}").strip()
         if len(title) > 40:
             title = title[:37] + "..."  # 💬 чтобы кнопки не разъезжались
+
+        # 💬 зачёркиваем фазу Читать строго при 100%, как в Теории
+        if phase_pcts and i < len(phase_pcts) and phase_pcts[i] >= 0.999999:
+            title = _strike_text(title)
+
         rows.append([InlineKeyboardButton(text=title, callback_data=f"gram:read_pack:{i}")])
 
     rows.append([InlineKeyboardButton(text="⬅️ Меню", callback_data="gram:menu")])  # 💬 выход в меню
@@ -808,15 +825,40 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
     vd_done = (min(vd_done_idx + 1, vd_total) if (vd_total and vd_done_idx >= 0) else 0)
     vd_pct = (vd_done / vd_total) if vd_total else 0.0
 
-    # 💬 Читать session
-    reads = _read_fragments(topic)
-    rd_total = len(reads) if reads else 0
-    try:
-        rd_done_idx = int((sp.get("read") or {}).get("done_idx")) if (sp.get("read") or {}).get("done_idx") is not None else -1
-    except Exception:
-        rd_done_idx = -1
-    rd_done = (min(rd_done_idx + 1, rd_total) if (rd_total and rd_done_idx >= 0) else 0)
-    rd_pct = (rd_done / rd_total) if rd_total else 0.0
+    # 💬 Читать session: считаем прогресс по фазам (пакетам), как в Теории
+    packs = _read_packs(topic)
+    rd_total_phases = 0
+    rd_done_phases = 0
+
+    rd_map = (sp.get("read") or {}) if isinstance(sp.get("read"), dict) else {}
+
+    for i, _p in enumerate(packs or []):
+        fr = _read_fragments_from_pack(topic, i)
+        fr = [x for x in (fr or []) if _item_type(x) != "photo"]  # 💬 Читать = только текст
+        total = len(fr)
+        if total <= 0:
+            continue  # 💬 пустую фазу не считаем в прогресс
+        rd_total_phases += 1
+
+        ph = rd_map.get(str(i)) or {}
+        seen = ph.get("seen") or []
+        if not isinstance(seen, list):
+            seen = []
+        uniq_valid = set()
+        for x in seen:
+            try:
+                xi = int(x)
+            except Exception:
+                continue
+            if 0 <= xi < total:
+                uniq_valid.add(xi)
+
+        pct = (len(uniq_valid) / total) if total else 0.0
+        if pct >= 0.999999:
+            rd_done_phases += 1
+
+    rd_pct = (rd_done_phases / rd_total_phases) if rd_total_phases else 0.0
+
 
     def _line(icon: str, pct: float) -> str:
         # 💬 строка прогресса: только эмоджи + бар(10) + проценты, ✅ если 100%
@@ -2030,6 +2072,30 @@ async def gram_read_intro(cb: CallbackQuery, state: FSMContext) -> None:
     topic = _get_topic(str(st.get("selected_topic")))
     packs = _read_packs(topic)
 
+    # 💬 считаем прогресс Читать по фазам, чтобы зачёркивать при 100%
+    sp = _sess_progress_from_state(st)
+    rd = (sp.get("read") or {}) if isinstance(sp.get("read"), dict) else {}
+    phase_pcts: List[float] = []
+    for i, p in enumerate(packs or []):
+        fr = _read_fragments_from_pack(topic, i)
+        fr = [x for x in (fr or []) if _item_type(x) != "photo"]  # 💬 Читать = только текст
+        total = len(fr)
+        ph = rd.get(str(i)) or {}
+        seen = ph.get("seen") or []
+        if not isinstance(seen, list):
+            seen = []
+        uniq_valid = set()
+        for x in seen:
+            try:
+                xi = int(x)
+            except Exception:
+                continue
+            if 0 <= xi < total:
+                uniq_valid.add(xi)
+        pct = (len(uniq_valid) / total) if total else 0.0
+        phase_pcts.append(pct)
+
+
     if not packs:
         await cb.message.answer("Пока нет фаз для Читать.", reply_markup=_kb_back_to_menu())
         return  # 💬 защита от пустого чтения
@@ -2046,7 +2112,8 @@ async def gram_read_intro(cb: CallbackQuery, state: FSMContext) -> None:
         state=state,
         send_coro=cb.message.answer(
             "📚 Выбери фазу Читать:",
-            reply_markup=_kb_read_packs(packs),
+            reply_markup=_kb_read_packs(packs, phase_pcts=phase_pcts),  # 💬 зачёркиваем фазы при 100%
+
         ),
     )  # 💬 список фаз в одном сообщении
 
@@ -2132,7 +2199,7 @@ async def _show_read(chat_id: int, state: FSMContext, topic: Dict[str, Any], mes
     idx = int(st.get("gram_item_idx") or 0)
     idx = max(0, min(len(frags) - 1, idx))  # 💬 как в подкастах, не выходим за пределы
     await state.update_data(gram_item_idx=idx)
-    await _mark_seen_session(state, "read", None, idx, len(frags))  # 💬 фиксируем прогресс чтения в session для меню
+    await _mark_seen_session(state, "read", pack_idx, idx, len(frags))  # 💬 прогресс Читать по фазам в session для меню
 
 
     frag = frags[idx]
