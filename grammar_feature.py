@@ -875,13 +875,14 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
 
     text = (
         f"<b><i>🫴🏼 {title}</i></b>\n\n"
-        f"<pre>"
+        f"<blockquote>"  # 💬 прогресс бар в цитате вместо pre-кода
         f"{_line('📖', theory_pct)}\n"
         f"{_line('🧪', pr_pct)}\n"
         f"{_line('🎬', vd_pct)}\n"
         f"{_line('📚', rd_pct)}"
-        f"</pre>"
+        f"</blockquote>"
     )
+
 
 
 
