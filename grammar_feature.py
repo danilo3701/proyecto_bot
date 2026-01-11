@@ -813,26 +813,24 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
     rd_done = (min(rd_done_idx + 1, rd_total) if (rd_total and rd_done_idx >= 0) else 0)
     rd_pct = (rd_done / rd_total) if rd_total else 0.0
 
-    label_width = 8  # 💬 выравниваем по самому длинному слову "Практика"
-    def _lbl(w: str) -> str:
-        # 💬 добиваем пробелы через &nbsp;, чтобы HTML не схлопывал и бары стояли ровно
-        w = str(w)
-        pad = max(0, label_width - len(w))
-        return w + ("&nbsp;" * pad)
-
-    label_width = len("Практика")  # 💬 фиксируем ширину по самому длинному слову, чтобы двоеточия были ровно
-
-    def _lbl(w: str) -> str:
-        # 💬 добиваем пробелами (НЕ HTML-entity), чтобы не печаталось "&nbsp;" в чате
-        return str(w).ljust(label_width)
+    def _line(icon: str, pct: float) -> str:
+        # 💬 строка прогресса: только эмоджи + бар(10) + проценты, ✅ если 100%
+        p = int(pct * 100)
+        if p > 100:
+            p = 100
+        tick = " ✅" if p >= 100 else ""
+        return f"{icon}  {_bar(pct, width=10)}  {p}%{tick}"
 
     text = (
         f"<b>{title}</b>\n\n"
-        f"<b><i>📖 {_lbl('Теория')}:  {_bar(theory_pct, width=10)}  {int(theory_pct * 100)}%</i></b>\n"
-        f"<b><i>🧪 {_lbl('Практика')}:  {_bar(pr_pct, width=10)}  {int(pr_pct * 100)}%</i></b>\n"
-        f"<b><i>🎬 {_lbl('Видео')}:  {_bar(vd_pct, width=10)}  {int(vd_pct * 100)}%</i></b>\n"
-        f"<b><i>📚 {_lbl('Читать')}:  {_bar(rd_pct, width=10)}  {int(rd_pct * 100)}%</i></b>\n"
+        f"<pre>"
+        f"{_line('📖', theory_pct)}\n"
+        f"{_line('🧪', pr_pct)}\n"
+        f"{_line('🎬', vd_pct)}\n"
+        f"{_line('📚', rd_pct)}"
+        f"</pre>"
     )
+
 
 
     await state.set_state(GrammarStates.menu)
