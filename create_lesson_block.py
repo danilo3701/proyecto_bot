@@ -3313,8 +3313,9 @@ async def ask_vocab_text(message: Message, state: FSMContext):
 async def save_vocab_text_block(message: Message, state: FSMContext):
     text_raw = (message.text or "").strip()
     data = await state.get_data()
-    cp   = data["current_phase_id"]
-    topic = data["topic"]
+    cp   = data.get("current_phase_id")  # 💬 защита: ключ может отсутствовать при сбитом FSM
+    topic = data.get("topic") or {}      # 💬 защита: topic может быть None
+
 
     if not text_raw:
         await message.answer("⚠️ Пришли текст. Пустое сообщение не сохраняю. # 💬 защита")
@@ -3356,7 +3357,7 @@ async def save_vocab_text_block(message: Message, state: FSMContext):
         return await state.set_state(NewTopicStates.waiting_phase_choice)  # 💬 назад к выбору фазы при создании
 
     # 1) Сохраняем текстовый блок
-    new_block = {"type": "text", "text": text}
+    # 💬 new_block уже собран выше (gram: Telegram HTML + raw / lex: plain text)
     insert_index = data.get("edit_insert_index") if data.get("edit_insert_mode") else None  # 💬 индекс вставки (1-based)
     topic["vocab"][cp - 1].setdefault("vocab", [])
     _insert_or_append(topic["vocab"][cp - 1]["vocab"], new_block, insert_index)  # 💬 вставка по индексу или append
@@ -4529,6 +4530,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
