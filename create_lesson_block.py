@@ -2787,12 +2787,37 @@ async def get_vocab_link(message: Message, state: FSMContext):
 
     # Обновляем в памяти и в JSON-файле
     # 💬 сохраняем блок в выбранной фазе
-    data            = await state.get_data()
-    cp              = data["current_phase_id"]
-    topic_data      = data["topic"]
+    data = await state.get_data()
+    cp = data.get("current_phase_id")
+    topic_data = data["topic"]
+
+    if cp is None:
+        phase_idx = data.get("edit_gram_phase_index")
+        if phase_idx is not None:
+            try:
+                cp = int(phase_idx) + 1
+                await state.update_data(current_phase_id=cp)  # 💬 восстанавливаем фазу для вставки в режиме редактирования
+            except Exception:
+                cp = None
+
+    try:
+        cp = int(cp)
+    except Exception:
+        cp = None
+
+    vocab_phases = topic_data.get("vocab") or []
+    if cp is None or cp < 1 or cp > len(vocab_phases):
+        await message.answer("⚠️ Не вижу активную фазу теории. Выбери фазу заново.", reply_markup=ReplyKeyboardRemove())
+        if data.get("edit_gram_section") == "📖 Теория" or data.get("edit_insert_mode"):
+            await state.set_state(EditGrammarStates.waiting_phase)  # 💬 назад к выбору фазы в редактировании
+        else:
+            await state.set_state(NewTopicStates.waiting_phase_choice)  # 💬 назад к выбору фазы при создании
+        return
+
     insert_index = data.get("edit_insert_index") if data.get("edit_insert_mode") else None  # 💬 индекс вставки (1-based)
-    topic_data["vocab"][cp-1].setdefault("vocab", [])
-    _insert_or_append(topic_data["vocab"][cp-1]["vocab"], new_block, insert_index)  # 💬 вставка по индексу или append
+    topic_data["vocab"][cp - 1].setdefault("vocab", [])
+    _insert_or_append(topic_data["vocab"][cp - 1]["vocab"], new_block, insert_index)  # 💬 вставка по индексу или append
+
 
 
 
@@ -3185,13 +3210,36 @@ async def ask_vocab_text(message: Message, state: FSMContext):
 async def save_vocab_text_block(message: Message, state: FSMContext):
     text = message.text.strip()
     data = await state.get_data()
-    cp   = data["current_phase_id"]
-    topic = data["topic"]
+    cp = data.get("current_phase_id")
+    topic = data.get("topic") or {}
+
+    if cp is None:
+        phase_idx = data.get("edit_gram_phase_index")
+        if phase_idx is not None:
+            try:
+                cp = int(phase_idx) + 1
+                await state.update_data(current_phase_id=cp)  # 💬 восстанавливаем фазу для вставки в режиме редактирования
+            except Exception:
+                cp = None
+
+    try:
+        cp = int(cp)
+    except Exception:
+        cp = None
+
+    vocab_phases = topic.get("vocab") or []
+    if cp is None or cp < 1 or cp > len(vocab_phases):
+        await message.answer("⚠️ Не вижу активную фазу теории. Выбери фазу заново.", reply_markup=ReplyKeyboardRemove())
+        if data.get("edit_gram_section") == "📖 Теория" or data.get("edit_insert_mode"):
+            return await state.set_state(EditGrammarStates.waiting_phase)  # 💬 назад к выбору фазы в редактировании
+        return await state.set_state(NewTopicStates.waiting_phase_choice)  # 💬 назад к выбору фазы при создании
+
     # 1) Сохраняем текстовый блок
     new_block = {"type": "text", "text": text}
     insert_index = data.get("edit_insert_index") if data.get("edit_insert_mode") else None  # 💬 индекс вставки (1-based)
-    topic["vocab"][cp-1].setdefault("vocab", [])
-    _insert_or_append(topic["vocab"][cp-1]["vocab"], new_block, insert_index)  # 💬 вставка по индексу или append
+    topic["vocab"][cp - 1].setdefault("vocab", [])
+    _insert_or_append(topic["vocab"][cp - 1]["vocab"], new_block, insert_index)  # 💬 вставка по индексу или append
+
 
     # 2) Записываем в файл
     with open(data["topic_path"], "w", encoding="utf-8") as f:
@@ -3330,15 +3378,29 @@ async def receive_vocab_media(message: Message, state: FSMContext):
 
     
     # 💬 сохраняем медиа-блок в выбранной фазе
+    cp = data.get("current_phase_id")
+    if cp is None:
+        phase_idx = data.get("edit_gram_phase_index")
+        if phase_idx is not None:
+            try:
+                cp = int(phase_idx) + 1
+                await state.update_data(current_phase_id=cp)  # 💬 восстанавливаем фазу для вставки в режиме редактирования
+            except Exception:
+                cp = None
+
     try:
-        cp = int(data.get("current_phase_id") or 1)
+        cp = int(cp)
     except Exception:
-        cp = 1
+        cp = None
+
 
     topic.setdefault("vocab", [])
-    if not (1 <= cp <= len(topic["vocab"])):
+    if cp is None or not (1 <= cp <= len(topic["vocab"])):
         await message.answer("⚠️ Ошибка: фаза не найдена. Выбери фазу заново.")
-        await send_post_menu(message, state)
+        if data.get("edit_gram_section") == "📖 Теория" or data.get("edit_insert_mode"):
+            await state.set_state(EditGrammarStates.waiting_phase)  # 💬 назад к выбору фазы в редактировании
+            return
+        await state.set_state(NewTopicStates.waiting_phase_choice)  # 💬 назад к выбору фазы при создании
         return
 
     topic["vocab"][cp - 1].setdefault("vocab", [])
@@ -3408,6 +3470,7 @@ async def get_video_link(message: Message, state: FSMContext):
     }
 
     # Сохраняем в памяти и сразу в файл
+    topic_data.setdefault("videos", [])  # 💬 защита, если ключа нет в старых темах
     topic_data["videos"].append(new_video)
     with open(topic_path, "w", encoding="utf-8") as f:
         json.dump(topic_data, f, ensure_ascii=False, indent=2)
@@ -4345,6 +4408,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
