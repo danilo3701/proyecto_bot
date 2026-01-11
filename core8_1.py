@@ -4708,7 +4708,10 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
     # Отправляем всем блоком через bot.send_message, чтобы избежать NotMounted
     menu_text = "\n\n".join(parts)
-    await bot.send_message(message.chat.id, menu_text, parse_mode="HTML")
+
+    progress_msg = await bot.send_message(message.chat.id, menu_text, parse_mode="HTML")
+    await state.update_data(last_progress_msg_id=progress_msg.message_id)  # 💬 запоминаем id прогресс-блока для удаления при смене темы
+
 
     # — Кнопки меню с блокировкой потоков по флагу unlocked —
     category = data.get("chosen_category")
@@ -4833,6 +4836,26 @@ async def change_topic(message: Message, state: FSMContext):
     # Сбрасываем все индексы и возвращаемся к выбору категории, но сохраняем done_dialog и xp
     done_dialog = (await state.get_data()).get("done_dialog", 0)
     xp = (await state.get_data()).get("xp", 0)
+    data = await state.get_data()
+    progress_msg_id = data.get("last_progress_msg_id")
+    menu_msg_id = data.get("last_menu_msg_id")
+
+    # 💬 удаляем прогресс-блок и меню «Что делаем дальше?», чтобы не оставались старые кнопки/текст
+    if progress_msg_id:
+        try:
+            await bot.delete_message(message.chat.id, progress_msg_id)
+        except TelegramBadRequest:
+            pass
+
+    if menu_msg_id:
+        try:
+            await bot.delete_message(message.chat.id, menu_msg_id)
+        except TelegramBadRequest:
+            try:
+                await bot.edit_message_reply_markup(message.chat.id, menu_msg_id, reply_markup=None)  # 💬 fallback: хотя бы снять кнопки
+            except TelegramBadRequest:
+                pass
+
     await state.clear()
     # восстанавливаем накопленный прогресс по диалогам и xp
     await state.update_data(done_dialog=done_dialog, xp=xp, level=xp//100)
