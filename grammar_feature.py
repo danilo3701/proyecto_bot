@@ -1617,7 +1617,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                 body_ready = body_ready.replace("<tg-spoiler>", '<span class="tg-spoiler">').replace("</tg-spoiler>", "</span>")
                 body_ready = _convert_chevron_quotes_to_blockquote(body_ready)  # 💬 '›' -> <blockquote> (Telegram QUOTE)
                 body_ready = _wrap_bold_italic(body_ready)  # 💬 всегда жирный + italic
-                text += "\n\n" + body_ready
+                text += "\n" + body_ready
 
             else:
                 # 💬 старый формат: экранируем, но оставляем белый список тегов (<u>, <s>, <tg-spoiler>, <blockquote>)
@@ -1625,7 +1625,7 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                 body_ready = body_ready.replace("<tg-spoiler>", '<span class="tg-spoiler">').replace("</tg-spoiler>", "</span>")
                 body_ready = _convert_chevron_quotes_to_blockquote(body_ready)  # 💬 '›' -> <blockquote> (Telegram QUOTE)
                 body_ready = _wrap_bold_italic(body_ready)  # 💬 всегда жирный + italic
-                text += "\n\n" + body_ready
+                text += "\n" + body_ready
 
 
 
