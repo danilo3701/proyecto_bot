@@ -3199,6 +3199,109 @@ async def save_ex_photo(message: Message, state: FSMContext):
 #------БЛОКИ ДЛЯ "📝 Добавить ТЕКСТ"----------
 
 
+# 💬 короткие теги для грамматики в Теории (конвертим в Telegram HTML и сохраняем сразу в JSON)
+_ALLOWED_GRAM_SHORT_TAGS = {"u", "st", "sp", "q", "b", "i"}  # 💬 b/i на будущее, вложенность всё равно запрещена
+
+
+def _escape_tg_html(s: str) -> str:
+    # 💬 экранируем HTML, чтобы пользовательский ввод не ломал parse_mode="HTML"
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _convert_gram_short_tags_to_html(raw: str):
+    """
+    # 💬 конвертирует [u]/[st]/[sp]/[q] в Telegram HTML
+    # 💬 вложенность запрещена, неизвестные теги запрещены
+    return: (html_text, error_text)
+    """
+    s = (raw or "")
+    out_parts = []
+    plain_buf = []
+    open_tag = None
+    inner_buf = []
+
+    def _flush_plain():
+        if plain_buf:
+            out_parts.append(_escape_tg_html("".join(plain_buf)))
+            plain_buf.clear()
+
+    def _render_tag(tag: str, inner: str) -> str:
+        inner_esc = _escape_tg_html(inner)
+        if tag == "u":
+            return f"<u>{inner_esc}</u>"
+        if tag == "st":
+            return f"<s>{inner_esc}</s>"
+        if tag == "b":
+            return f"<b>{inner_esc}</b>"
+        if tag == "i":
+            return f"<i>{inner_esc}</i>"
+        if tag == "sp":
+            return f"<tg-spoiler>{inner_esc}</tg-spoiler>"
+        if tag == "q":
+            # 💬 делаем quote-блок и префиксим строки символом
+            lines = inner_esc.splitlines()
+            prefixed = "\n".join([("› " + ln) if ln.strip() else "" for ln in lines])
+            return f"<blockquote>{prefixed}</blockquote>"
+        return inner_esc  # 💬 сюда не должны попасть
+
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == "[":
+            j = s.find("]", i + 1)
+            if j != -1:
+                token = s[i:j + 1]
+                is_close = token.startswith("[/")
+                name = token[2:-1] if is_close else token[1:-1]
+
+                if name.isalpha():
+                    tag = name.lower()
+
+                    if tag not in _ALLOWED_GRAM_SHORT_TAGS:
+                        return None, (
+                            "⚠️ Найден неизвестный тег.\n\n"
+                            "Разрешено: [u] [st] [sp] [q]\n"
+                            "Пример:\n"
+                            "[u]underline[/u]\n"
+                            "[sp]spoiler[/sp]\n"
+                            "[q]quote[/q]\n"
+                            "[st]strike[/st]\n\n"
+                            "# 💬 вложенность запрещена"
+                        )
+
+                    if open_tag is None:
+                        if is_close:
+                            return None, "⚠️ Найден закрывающий тег без открывающего. Исправь разметку. # 💬 защита"
+                        _flush_plain()
+                        open_tag = tag
+                        inner_buf = []
+                    else:
+                        # 💬 внутри тега любые другие теги запрещены
+                        if (not is_close) or (tag != open_tag):
+                            return None, "⚠️ Вложенность или несовпадение тегов запрещены. Исправь разметку. # 💬 защита"
+                        # закрываем корректно
+                        out_parts.append(_render_tag(open_tag, "".join(inner_buf)))
+                        open_tag = None
+                        inner_buf = []
+
+                    i = j + 1
+                    continue
+
+        # обычный символ
+        if open_tag is None:
+            plain_buf.append(ch)
+        else:
+            inner_buf.append(ch)
+        i += 1
+
+    if open_tag is not None:
+        return None, "⚠️ Тег не закрыт. Добавь закрывающий [/...] и пришли снова. # 💬 защита"
+
+    _flush_plain()
+    return "".join(out_parts), None
+
+
+
 @router.message(NewTopicStates.waiting_post_action, F.text == "📝ТЕКСТ")
 async def ask_vocab_text(message: Message, state: FSMContext):
     await message.answer("📝 Введите произвольный ТЕКСТ-блок для словаря:")
@@ -3208,10 +3311,28 @@ async def ask_vocab_text(message: Message, state: FSMContext):
 
 @router.message(NewTopicStates.waiting_vocab_text)
 async def save_vocab_text_block(message: Message, state: FSMContext):
-    text = message.text.strip()
+    text_raw = (message.text or "").strip()
     data = await state.get_data()
-    cp = data.get("current_phase_id")
-    topic = data.get("topic") or {}
+    cp   = data["current_phase_id"]
+    topic = data["topic"]
+
+    if not text_raw:
+        await message.answer("⚠️ Пришли текст. Пустое сообщение не сохраняю. # 💬 защита")
+        return
+
+    category_now = ((topic.get("category") or "").strip().lower())
+
+    # 💬 только грамматика, только Теория (в CreateLessonBlock Теория хранится в topic["vocab"][phase]["vocab"])
+    if category_now.startswith("gram"):
+        html_text, err = _convert_gram_short_tags_to_html(text_raw)
+        if err:
+            await message.answer(err)  # 💬 остаёмся в этом же state, чтобы ты прислал исправленный текст
+            return
+        new_block = {"type": "text", "text": html_text, "raw": text_raw}  # 💬 text уже Telegram HTML, raw для редактирования
+    else:
+        # 💬 лексика и прочее сохраняем как раньше
+        new_block = {"type": "text", "text": text_raw}
+
 
     if cp is None:
         phase_idx = data.get("edit_gram_phase_index")
@@ -4408,6 +4529,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
