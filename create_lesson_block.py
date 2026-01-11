@@ -3614,21 +3614,21 @@ async def save_reading_fragments(message: Message, state: FSMContext):
     try:
         pack_index = int(data.get("current_reading_pack_index"))
     except Exception:
-        pack_index = -1
+        pack_index = -1  # 💬 защита, если индекс не сохранён
 
     packs = topic.setdefault("reading", [])
     if not (topic_path and 0 <= pack_index < len(packs)):
         await message.answer(
-            "⚠️ Не найден активный пак чтения. Начни добавление чтения заново."),
-            data = await state.get_data()
-            reply_markup=get_main_menu(((data.get("topic") or {}).get("category") or "")),  # 💬 правильное меню по категории
-
+            "⚠️ Не найден активный пак чтения. Начни добавление чтения заново.",
+            reply_markup=get_main_menu(((topic.get("category") or ""))),  # 💬 правильное меню по категории
         )
-        return await state.set_state(NewTopicStates.waiting_first_choice)
+        await state.set_state(NewTopicStates.waiting_first_choice)  # 💬 возвращаем в старт выбора
+        return
 
     pack = packs[pack_index]
     pack.setdefault("fragments", [])
     pack["fragments"].extend(parsed)  # 💬 сохраняем только валидные структурированные фрагменты
+
 
 
     import json
@@ -3978,6 +3978,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
