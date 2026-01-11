@@ -1964,9 +1964,14 @@ async def edit_grammar_insert_by_index(message: Message, state: FSMContext):
 
     # 💬 выставляем last_block и (для теории) current_phase_id, чтобы переиспользовать CreateLessonBlock-ветки
     if section_label == "📖 Теория":
-        await state.update_data(last_block="vocab", current_phase_id=data.get("edit_phase_id"))
+        phase_idx = data.get("edit_gram_phase_index")  # 💬 берём выбранную фазу теории из FSM (0-based)
+        if phase_idx is None:
+            await message.answer("⚠️ Сначала выбери фазу теории.")  # 💬 защита, чтобы current_phase_id не стал None
+            await state.set_state(EditGrammarStates.waiting_phase)  # 💬 возвращаем на выбор фазы
+            return
+        await state.update_data(last_block="vocab", current_phase_id=int(phase_idx) + 1)  # 💬 переводим в 1-based для CreateLessonBlock
     else:
-        await state.update_data(last_block="exercise")
+        await state.update_data(last_block="exercise")  # 💬 остальные разделы не используют current_phase_id
 
 
     await send_insert_post_menu(message, state)  # 💬 показываем меню “что вставляем”
@@ -3978,6 +3983,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
