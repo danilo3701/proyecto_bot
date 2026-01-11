@@ -3207,6 +3207,26 @@ def _escape_tg_html(s: str) -> str:
     # 💬 экранируем HTML, чтобы пользовательский ввод не ломал parse_mode="HTML"
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+def _unescape_allowed_gram_html(s: str) -> str:
+    # 💬 разворачиваем только белый список Telegram-HTML тегов, если они пришли экранированными
+    out = str(s or "")
+    if not out:
+        return ""
+
+    for tag in ("u", "s", "b", "i", "blockquote", "tg-spoiler"):
+        out = out.replace(f"&lt;{tag}&gt;", f"<{tag}>")
+        out = out.replace(f"&lt;/{tag}&gt;", f"</{tag}>")
+
+    # 💬 spoiler через span class для совместимости
+    out = out.replace("&lt;span class=&quot;tg-spoiler&quot;&gt;", '<span class="tg-spoiler">')
+    out = out.replace("&lt;/span&gt;", "</span>")
+
+    # 💬 переносы
+    out = out.replace("&lt;br&gt;", "<br>").replace("&lt;br/&gt;", "<br/>").replace("&lt;br /&gt;", "<br />")
+
+    return out
+
+
 
 def _convert_gram_short_tags_to_html(raw: str):
     """
@@ -3331,6 +3351,8 @@ async def save_vocab_text_block(message: Message, state: FSMContext):
         if err:
             await message.answer(err)  # 💬 остаёмся в этом же state, чтобы ты прислал исправленный текст
             return
+            
+        html_text = _unescape_allowed_gram_html(html_text)  # 💬 поддержка: Telegram HTML мог быть введён напрямую
         new_block = {"type": "text", "text": html_text, "raw": text_raw}  # 💬 text уже Telegram HTML, raw для редактирования
     else:
         # 💬 лексика и прочее сохраняем как раньше
@@ -4532,6 +4554,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
