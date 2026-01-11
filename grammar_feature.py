@@ -822,7 +822,7 @@ async def open_grammar_topic(message: Message, state: FSMContext) -> None:
         return f"{icon}  {_bar(pct, width=10)}  {p}%{tick}"
 
     text = (
-        f"<b>{title}</b>\n\n"
+        f"<b><i>🫴🏼 {title}</i></b>\n\n"
         f"<pre>"
         f"{_line('📖', theory_pct)}\n"
         f"{_line('🧪', pr_pct)}\n"
