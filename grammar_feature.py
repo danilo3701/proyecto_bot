@@ -177,6 +177,48 @@ def _unescape_allowed_gram_html(s: Any) -> str:
 
     return out
 
+def _wrap_bold_italic(s: Any) -> str:
+    # 💬 всегда делаем жирный + italic для теории (без исключений)
+    out = str(s or "").strip()
+    if not out:
+        return ""
+    if out.startswith("<b><i>") and out.endswith("</i></b>"):
+        return out
+    return f"<b><i>{out}</i></b>"
+
+
+def _convert_chevron_quotes_to_blockquote(s: Any) -> str:
+    # 💬 конвертим строки вида "› ..." в Telegram QUOTE через <blockquote>...</blockquote>
+    text = str(s or "")
+    if not text:
+        return ""
+
+    lines = text.splitlines()
+    out_lines: List[str] = []
+    buf: List[str] = []
+
+    def flush() -> None:
+        nonlocal buf
+        if not buf:
+            return
+        out_lines.append("<blockquote>" + "\n".join(buf).strip() + "</blockquote>")
+        buf = []
+
+    for ln in lines:
+        raw = ln.rstrip("\n")
+        stripped = raw.lstrip()
+        if stripped.startswith("›"):
+            # убираем "›" и возможный пробел
+            q = stripped[1:]
+            if q.startswith(" "):
+                q = q[1:]
+            buf.append(q)
+        else:
+            flush()
+            out_lines.append(raw)
+
+    flush()
+    return "\n".join(out_lines).strip()
 
 
 def _normalize_quiz_options(opts: List[str], correct: int) -> Tuple[List[str], int]:
@@ -1517,7 +1559,13 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
             file_id = item.get("photo") or ""  # 💬 file_id фото
             cap_user = (item.get("caption") or item.get("text") or "").strip()  # 💬 caption опционален (fallback на text)
 
-            cap_full = header if not cap_user else (header + "\n\n" + _safe_html(cap_user))  # 💬 header всегда сверху
+            cap_user_ready = _unescape_allowed_gram_html(_safe_html(cap_user))  # 💬 сохраняем безопасный whitelist тегов
+            cap_user_ready = cap_user_ready.replace("<tg-spoiler>", '<span class="tg-spoiler">').replace("</tg-spoiler>", "</span>")
+            cap_user_ready = _convert_chevron_quotes_to_blockquote(cap_user_ready)  # 💬 '›' -> <blockquote>
+            cap_user_ready = _wrap_bold_italic(cap_user_ready)  # 💬 всегда жирный + italic
+
+            cap_full = header if not cap_user_ready else (header + "\n\n" + cap_user_ready)  # 💬 header всегда сверху
+
 
             if not file_id:
                 # 💬 если по ошибке нет photo id = покажем хотя бы текст
@@ -1567,19 +1615,23 @@ async def _show_current_item(chat_id: int, state: FSMContext, topic: Dict[str, A
                 body_ready = _unescape_allowed_gram_html(body_ready)  # 💬 поддержка: теги могли сохраниться экранированными
 
                 body_ready = body_ready.replace("<tg-spoiler>", '<span class="tg-spoiler">').replace("</tg-spoiler>", "</span>")
-                body_ready = body_ready.replace("<blockquote>", "").replace("</blockquote>", "")  # 💬 quote теперь просто префикс строк
+                body_ready = _convert_chevron_quotes_to_blockquote(body_ready)  # 💬 '›' -> <blockquote> (Telegram QUOTE)
+                body_ready = _wrap_bold_italic(body_ready)  # 💬 всегда жирный + italic
                 text += "\n\n" + body_ready
 
             else:
                 # 💬 старый формат: экранируем, но оставляем белый список тегов (<u>, <s>, <tg-spoiler>, <blockquote>)
                 body_ready = _unescape_allowed_gram_html(_safe_html(body_raw))
                 body_ready = body_ready.replace("<tg-spoiler>", '<span class="tg-spoiler">').replace("</tg-spoiler>", "</span>")
-                body_ready = body_ready.replace("<blockquote>", "").replace("</blockquote>", "")  # 💬 quote теперь просто префикс строк
+                body_ready = _convert_chevron_quotes_to_blockquote(body_ready)  # 💬 '›' -> <blockquote> (Telegram QUOTE)
+                body_ready = _wrap_bold_italic(body_ready)  # 💬 всегда жирный + italic
                 text += "\n\n" + body_ready
 
 
+
         if hint:
-            text += "\n\n " + _safe_html(hint)  # 💬 hint не спойлерим
+            text += "\n\n" + _wrap_bold_italic(_safe_html(hint))  # 💬 hint тоже всегда жирный + italic
+
 
         await _gram_edit_or_replace_text(chat_id, state, text, kb)
         return
