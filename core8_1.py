@@ -298,6 +298,28 @@ bot        = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"
 dp         = Dispatcher(storage=MemoryStorage())  
 
 
+# 💬 фиксим business_connection_id: aiogram ожидает str, иногда прилетает int (chat_id/user_id)
+def _coerce_bcid(kwargs: dict) -> None:
+    bcid = kwargs.get("business_connection_id")
+    if bcid is not None and not isinstance(bcid, str):
+        kwargs["business_connection_id"] = str(bcid)  # 💬 приводим к строке, чтобы не падал Pydantic
+
+def _wrap_bot_method(_bot: Bot, method_name: str) -> None:
+    orig = getattr(_bot, method_name, None)
+    if orig is None:
+        return
+
+    async def wrapped(*args, **kwargs):
+        _coerce_bcid(kwargs)  # 💬 защищаем любые edit_* от int business_connection_id
+        return await orig(*args, **kwargs)
+
+    setattr(_bot, method_name, wrapped)
+
+# 💬 ставим один раз, чтобы не было двойной обёртки при перезагрузках
+if not getattr(bot, "_bcid_fix_installed", False):
+    for _m in ("edit_message_reply_markup", "edit_message_text", "edit_message_caption", "edit_message_media"):
+        _wrap_bot_method(bot, _m)
+    bot._bcid_fix_installed = True  # 💬 маркер установки фикса
 
 
 
