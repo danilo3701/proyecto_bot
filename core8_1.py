@@ -4804,7 +4804,8 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
             # 💬 Строим ряды так, чтобы КАЖДАЯ кнопка была на своей строке (полная ширина)
             rows = [
                 [InlineKeyboardButton(text="📖 Учить слова", callback_data="lex_menu:learn")],
-                [InlineKeyboardButton(text="🙊 Читать", callback_data="lex_menu:read")],
+                [InlineKeyboardButton(text="📝 Переводить", callback_data="lex_menu:read")],  # 💬 переименовали кнопку, callback оставили прежним
+
             ]
             if has_videos:
                 rows.append(
@@ -4819,7 +4820,8 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
             # 💬 Заблокированный вариант — тоже одна кнопка в строке
             rows = [
                 [InlineKeyboardButton(text="📖 Учить слова", callback_data="lex_menu:learn")],
-                [InlineKeyboardButton(text="🔒 Читать", callback_data="lex_menu:locked_read")],
+                [InlineKeyboardButton(text="🔒 Переводить", callback_data="lex_menu:locked_read")],  # 💬 заблокированная версия
+
             ]
             if has_videos:
                 rows.append(
@@ -4915,6 +4917,7 @@ async def change_topic(message: Message, state: FSMContext):
     done_dialog = (await state.get_data()).get("done_dialog", 0)
     xp = (await state.get_data()).get("xp", 0)
     data = await state.get_data()
+    lex_translate_progress = data.get("lex_translate_progress") or {}  # 💬 сохраняем прогресс "Переводить" при смене темы
     progress_msg_id = data.get("last_progress_msg_id")
     menu_msg_id = data.get("last_menu_msg_id")
 
@@ -4936,7 +4939,13 @@ async def change_topic(message: Message, state: FSMContext):
 
     await state.clear()
     # восстанавливаем накопленный прогресс по диалогам и xp
-    await state.update_data(done_dialog=done_dialog, xp=xp, level=xp//100)
+    await state.update_data(
+        done_dialog=done_dialog,
+        xp=xp,
+        level=xp//100,
+        lex_translate_progress=lex_translate_progress,  # 💬 восстанавливаем прогресс "Переводить"
+    )
+
     return await start_handler(message, state)
 
 @dp.callback_query(LessonStates.waiting_lesson_action, F.data.startswith("lex_menu:"))
@@ -4989,7 +4998,7 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
         return await change_topic(callback.message, state)
 
 
-    # 🙊 Читать диалоги — новая логика
+    # 📝 Переводить — reading-паки (как "📚 Читать" в грамматике)
     if action == "read":
         await callback.answer()
     
@@ -5084,6 +5093,233 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
     # Остальное (locked_*) — недоступно, даём тот же отказной стикер
     await callback.answer()
     return await handle_unavailable_buttons(callback.message, state)
+
+
+# ────────────────────────────────────────────────────────────────────
+# 📝 Поток «Переводить» (идентично "📚 Читать" из грамматики, но для лексики)
+# ────────────────────────────────────────────────────────────────────
+
+def _lex_translate_packs(topic: dict) -> list:
+    # 💬 reading-паки лежат в topic["reading"] (CreateLessonBlock уже пишет туда)
+    packs = topic.get("reading") or []
+    return packs if isinstance(packs, list) else []
+
+def _lex_translate_fragments(topic: dict, pack_idx: int) -> list:
+    packs = _lex_translate_packs(topic)
+    if pack_idx < 0 or pack_idx >= len(packs):
+        return []
+    frags = packs[pack_idx].get("fragments") or []
+    return frags if isinstance(frags, list) else []
+
+def _lex_render_translate_fragment(f) -> str:
+    # 💬 формат такой же как в грамматике: ES жирный, RU spoiler, hint
+    if isinstance(f, str):
+        s = (f or "").strip()
+        return html.escape(s) if s else "Пустой фрагмент"
+
+    if not isinstance(f, dict):
+        return "Пустой фрагмент"
+
+    es_txt = html.escape(str(f.get("es") or "").strip())
+    ru_txt = html.escape(str(f.get("ru") or "").strip())
+    hint_txt = html.escape(str(f.get("hint") or "").strip())
+
+    lines = []
+    if es_txt:
+        lines.append(f"<b>🇪🇸 {es_txt}</b>")
+    if ru_txt:
+        lines.append(f"<i>🔹 <tg-spoiler>{ru_txt}</tg-spoiler></i>")
+    if hint_txt:
+        lines.append(f"<b><i>💡 {hint_txt}</i></b>")
+
+    return "\n".join(lines).strip() or "Пустой фрагмент"
+
+def _lex_kb_translate_packs(topic: dict, st: dict) -> InlineKeyboardMarkup:
+    # 💬 интро экран: список фаз (паков) + выход в меню
+    packs = _lex_translate_packs(topic)
+    prog = st.get("lex_translate_progress") or {}
+    rows = []
+
+    for i, p in enumerate(packs):
+        title = str(p.get("title") or f"Фаза {i+1}")
+        ph = prog.get(str(i)) or {}
+        if isinstance(ph, dict) and ph.get("done"):
+            title = f"<s>{html.escape(title)}</s>"  # 💬 зачёркиваем при 100%
+            btn_text = title
+            # InlineKeyboardButton не поддерживает HTML в тексте кнопки, поэтому делаем ✅
+            btn_text = f"✅ {str(p.get('title') or f'Фаза {i+1}')}"
+        else:
+            btn_text = str(p.get("title") or f"Фаза {i+1}")
+
+        rows.append([InlineKeyboardButton(text=btn_text, callback_data=f"lex_tr:pack:{i}")])
+
+    rows.append([InlineKeyboardButton(text="⬅️ Меню", callback_data="lex_tr:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def _lex_kb_translate_controls() -> InlineKeyboardMarkup:
+    # 💬 стрелки + кнопка назад к интро
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⬅️", callback_data="lex_tr:prev"),
+                InlineKeyboardButton(text="➡️", callback_data="lex_tr:next"),
+            ],
+            [
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="lex_tr:back"),
+            ],
+        ]
+    )
+
+async def _lex_mark_translate_seen(state: FSMContext, pack_idx: int, item_idx: int, total: int) -> None:
+    # 💬 отмечаем просмотр фрагмента и готовность пака при 100%
+    st = await state.get_data()
+    prog = st.get("lex_translate_progress") or {}
+    if not isinstance(prog, dict):
+        prog = {}
+
+    ph = prog.setdefault(str(pack_idx), {})
+    if not isinstance(ph, dict):
+        ph = {}
+        prog[str(pack_idx)] = ph
+
+    seen = ph.setdefault("seen", [])
+    if not isinstance(seen, list):
+        seen = []
+        ph["seen"] = seen
+
+    if 0 <= int(item_idx) < int(total):
+        if int(item_idx) not in seen:
+            seen.append(int(item_idx))
+
+    pct = (len(set(seen)) / int(total)) if total else 0.0
+    ph["pct"] = pct
+    if pct >= 0.999999:
+        ph["done"] = True  # 💬 done только при 100%
+
+    await state.update_data(lex_translate_progress=prog)
+
+async def lex_translate_intro(message: Message, state: FSMContext) -> None:
+    # 💬 показываем список фаз "Переводить"
+    data = await state.get_data()
+    topic_key = data.get("selected_topic")
+    if not topic_key:
+        return await start_handler(message, state)
+
+    topic = topics.get(topic_key, {})
+    packs = _lex_translate_packs(topic)
+    if not packs:
+        await message.answer("📝 Пока нет фаз для «Переводить».")
+        return await lesson_menu_handler(message, state)
+
+    st = await state.get_data()
+    await state.update_data(lex_section="translate_intro")  # 💬 чтобы навигация не конфликтовала
+    await message.answer(
+        "📝 Выбери фазу «Переводить»:",
+        reply_markup=_lex_kb_translate_packs(topic, st),
+    )
+
+@dp.callback_query(LessonStates.waiting_lesson_action, F.data.startswith("lex_tr:pack:"))
+@track_handler
+async def lex_translate_open_pack(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    st = await state.get_data()
+    topic_key = st.get("selected_topic")
+    if not topic_key:
+        return await start_handler(cb.message, state)
+
+    try:
+        pack_idx = int(cb.data.split(":")[-1])
+    except Exception:
+        return
+
+    topic = topics.get(topic_key, {})
+    frags = _lex_translate_fragments(topic, pack_idx)
+    if not frags:
+        return await cb.message.edit_text(
+            "📝 В этой фазе нет фрагментов.",
+            reply_markup=_lex_kb_translate_packs(topic, st),
+        )
+
+    await state.update_data(
+        lex_section="translate_view",
+        lex_tr_pack_idx=pack_idx,
+        lex_tr_item_idx=0,
+    )  # 💬 фиксируем выбранный пак и индекс
+
+    text = _lex_render_translate_fragment(frags[0])
+    await _lex_mark_translate_seen(state, pack_idx, 0, len(frags))
+    await cb.message.edit_text(text, reply_markup=_lex_kb_translate_controls(), parse_mode="HTML")
+
+@dp.callback_query(LessonStates.waiting_lesson_action, F.data == "lex_tr:back")
+@track_handler
+async def lex_translate_back_to_intro(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    st = await state.get_data()
+    topic_key = st.get("selected_topic")
+    if not topic_key:
+        return await start_handler(cb.message, state)
+
+    topic = topics.get(topic_key, {})
+    await state.update_data(lex_section="translate_intro")  # 💬 возвращаемся на интро
+    await cb.message.edit_text(
+        "📝 Выбери фазу «Переводить»:",
+        reply_markup=_lex_kb_translate_packs(topic, st),
+    )
+
+@dp.callback_query(LessonStates.waiting_lesson_action, F.data.in_(["lex_tr:prev", "lex_tr:next"]))
+@track_handler
+async def lex_translate_nav(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    st = await state.get_data()
+    if st.get("lex_section") != "translate_view":
+        return
+
+    topic_key = st.get("selected_topic")
+    if not topic_key:
+        return await start_handler(cb.message, state)
+
+    topic = topics.get(topic_key, {})
+    pack_idx = int(st.get("lex_tr_pack_idx") or 0)
+    frags = _lex_translate_fragments(topic, pack_idx)
+
+    if not frags:
+        return await lex_translate_back_to_intro(cb, state)
+
+    idx = int(st.get("lex_tr_item_idx") or 0)
+
+    if cb.data.endswith("prev"):
+        if idx <= 0:
+            await cb.answer("Это начало", show_alert=False)
+            return
+        idx -= 1
+    else:
+        # 💬 если конец — возвращаем на интро экран (по твоему ТЗ)
+        if idx >= len(frags) - 1:
+            await _lex_mark_translate_seen(state, pack_idx, idx, len(frags))  # 💬 добиваем прогресс
+            await state.update_data(lex_section="translate_intro")
+            st2 = await state.get_data()
+            return await cb.message.edit_text(
+                "📝 Выбери фазу «Переводить»:",
+                reply_markup=_lex_kb_translate_packs(topic, st2),
+            )
+        idx += 1
+
+    await state.update_data(lex_tr_item_idx=idx)
+    await _lex_mark_translate_seen(state, pack_idx, idx, len(frags))
+    text = _lex_render_translate_fragment(frags[idx])
+    await cb.message.edit_text(text, reply_markup=_lex_kb_translate_controls(), parse_mode="HTML")
+
+@dp.callback_query(LessonStates.waiting_lesson_action, F.data == "lex_tr:menu")
+@track_handler
+async def lex_translate_to_menu(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    # 💬 убираем кнопки у текущего сообщения, чтобы не залипало
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await state.update_data(lex_section=None)  # 💬 выходим из потока "Переводить"
+    return await lesson_menu_handler(cb.message, state)
 
 
 
