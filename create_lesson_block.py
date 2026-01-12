@@ -1283,15 +1283,11 @@ async def get_topic_name(message: Message, state: FSMContext):
     }
     
     # 💾 Сохраняем в файл (уже в Volume)
-    atomic_save_json(filename, topic)  # 💬 сохраняем в volume Railway безопасно (atomic)
+    atomic_save_json(filename, topic)  # 💬 сet_topic_nameохраняем в volume Railway безопасно (atomic)
 
     
     # 💬 Обновляем состояние
     await state.update_data(topic=topic, topic_path=filename)
-    
-    topics_dir = "/data/topics"
-    os.makedirs(topics_dir, exist_ok=True)
-    filename = os.path.join(topics_dir, f"{clean_name}.json")  # 💬 сохраняем topic_path только в Railway Volume
 
 
     # 💬 Запрос описания темы
@@ -4574,6 +4570,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
