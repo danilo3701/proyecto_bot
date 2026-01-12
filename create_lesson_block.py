@@ -1283,11 +1283,15 @@ async def get_topic_name(message: Message, state: FSMContext):
     }
     
     # 💾 Сохраняем в файл (уже в Volume)
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(topic, f, ensure_ascii=False, indent=2)
+    atomic_save_json(filename, topic)  # 💬 сохраняем в volume Railway безопасно (atomic)
+
     
     # 💬 Обновляем состояние
     await state.update_data(topic=topic, topic_path=filename)
+    
+    topics_dir = "/data/topics"
+    os.makedirs(topics_dir, exist_ok=True)
+    filename = os.path.join(topics_dir, f"{clean_name}.json")  # 💬 сохраняем topic_path только в Railway Volume
 
 
     # 💬 Запрос описания темы
@@ -1319,8 +1323,8 @@ async def get_topic_description(message: Message, state: FSMContext):
 
     # 💾 Сохраняем в файл
     filename = data.get("topic_path")
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(new_topic, f, ensure_ascii=False, indent=2)
+    atomic_save_json(filename, new_topic)  # 💬 сохраняем в volume Railway безопасно (atomic)
+
     await state.update_data(topic=new_topic)
 
     # ⌨️ Главное меню
@@ -3096,8 +3100,8 @@ async def save_ex_text(message: Message, state: FSMContext):
     insert_index = data.get("edit_insert_index") if data.get("edit_insert_mode") else None
     _insert_or_append(ex_list, {"type": "text", "text": text}, insert_index)  # 💬 вставка по индексу или append
 
-    with open(data["topic_path"], "w", encoding="utf-8") as f:
-        json.dump(topic, f, ensure_ascii=False, indent=2)
+    atomic_save_json(data["topic_path"], topic)  # 💬 сохраняем в volume Railway безопасно (atomic)
+
     await message.answer("Текст упражнения сохранён.", reply_markup=ReplyKeyboardRemove())
     await send_post_menu(message, state)
 
@@ -3395,8 +3399,8 @@ async def save_vocab_text_block(message: Message, state: FSMContext):
 
 
     # 2) Записываем в файл
-    with open(data["topic_path"], "w", encoding="utf-8") as f:
-        json.dump(topic, f, ensure_ascii=False, indent=2)
+    atomic_save_json(data["topic_path"], topic)  # 💬 сохраняем в volume Railway безопасно (atomic)
+
     # 3) Сразу возвращаемся в пост-меню без квиза
     await message.answer("Текст словаря сохранён.", reply_markup=ReplyKeyboardRemove())
     if data.get("edit_insert_mode"):
@@ -4570,6 +4574,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
