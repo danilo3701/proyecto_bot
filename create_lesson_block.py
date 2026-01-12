@@ -1185,6 +1185,18 @@ async def get_level_for_topic(message: Message, state: FSMContext):
     # Нормализация: кнопка с эмодзи -> чистое значение уровня
     level = LEVEL_FROM_BUTTON.get(raw, raw)
 
+    if level == "A0":
+        data_tmp = await state.get_data()
+        category_tmp = (data_tmp.get("topic") or {}).get("category")
+
+        if category_tmp == "gram":
+            await message.answer(
+                "⚠️ Для грамматики уровень «Новичок» не используется.\n"
+                "Выбери Начальный, Средний или Продвинутый."
+            )
+            return  # 💬 блокируем создание грамматики на A0
+
+
     if level not in ALLOWED_LEVELS:
         await message.answer("❗ Выбери корректный уровень из кнопок ниже.")
         return
