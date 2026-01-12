@@ -312,16 +312,12 @@ def load_topics_from_volume() -> dict:
     return loaded
 
 
-topics = load_topics_from_volume()  # 💬 грузим темы только из Volume
+topics = topics = load_topics_from_volume()  # 💬 грузим темы только из Railway Volume (/data/topics)
 
-
-
-sync_topics_volume_to_local()  # 💬 подтягиваем темы из Volume перед чтением
-
-# ——— Загружаем уроки ——————————————————————————————————————————
-topics = load_topics()
+# 💬 что делает эта часть: topics уже взяли из Volume, локальные ./topics и GitHub не используем
 set_grammar_topics_ref(topics)  # 💬 передаём topics в модуль грамматики
-set_topics_ref(topics)  # 💬 передаём topics в модуль "Битва" без круговых импортов
+set_topics_ref(topics)          # 💬 передаём topics в модуль "Битва" без круговых импортов
+
 
 
 
