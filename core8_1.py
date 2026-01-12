@@ -201,7 +201,6 @@ from aiogram.fsm.storage.memory import MemoryStorage    # Хранение FSM �
 from create_lesson_block import router as create_topic_router  # Роутер админского flow создания тем
 
 # ——— Загрузка тем ——————————————————————————————————————————————
-from topics.loader import load_topics                    # Функция чтения всех JSON-файлов с уроками
 from create_lesson_block import load_ads_data  # 💬 Функция загрузки рекламы из ads_data.json
 
 from battle_feature import router as battle_router, set_topics_ref, start_battle_from_lex_menu, set_battle_links, cancel_battle_if_running  # 💬 модуль "Битва"
@@ -834,22 +833,8 @@ def migrate_runtime_files_to_volume():
             with open("user_data.json", "rb") as src, open(USER_DATA_PATH, "wb") as dst:
                 dst.write(src.read())
 
-        # --- TOPICS sync ---
-        volume_topics_dir = "/data/topics"
-        local_topics_dir = "topics"
-
-        os.makedirs(volume_topics_dir, exist_ok=True)
-        os.makedirs(local_topics_dir, exist_ok=True)
-
-        # 1) если в Volume нет файла, но он есть локально = копируем в Volume
-        for fname in os.listdir(local_topics_dir):
-            if not fname.endswith(".json"):
-                continue
-            src = os.path.join(local_topics_dir, fname)
-            dst = os.path.join(volume_topics_dir, fname)
-            if os.path.exists(src) and not os.path.exists(dst):
-                with open(src, "rb") as s, open(dst, "wb") as d:
-                    d.write(s.read())
+        # 💬 гарантируем наличие папки тем в Railway Volume; GitHub ./topics не трогаем
+        os.makedirs("/data/topics", exist_ok=True)
 
         # 2) если в локале нет файла, но он есть в Volume = копируем в локал
         # 💬 что делает эта часть: даже если load_topics() читает ./topics, он увидит темы из Volume
@@ -1840,13 +1825,12 @@ async def start_handler(message: Message, state: FSMContext):
     await cancel_battle_if_running(bot, message.chat.id, message.from_user.id)  # 💬 если шла битва = останавливаем её на /start
 
     await state.clear()
-
-    sync_topics_volume_to_local()  # 💬 подтягиваем новые темы из /data/topics перед перезагрузкой topics
-
+    
     global topics
-    topics = load_topics()  # 💬 перезагружаем JSON темы
-    set_topics_ref(topics)  # 💬 обновляем topics для "Битвы"
-    set_grammar_topics_ref(topics)  # 💬 обновляем topics для "Грамматики"
+    topics = load_topics_from_railway()  # 💬 перезагружаем темы ТОЛЬКО из /data/topics
+    set_topics_ref(topics)               # 💬 обновляем topics для "Битвы"
+    set_grammar_topics_ref(topics)       # 💬 обновляем topics для "Грамматики"
+
 
 
     # 💬 Убираем старую Reply-клавиатуру и отправляем нормальное приветствие
