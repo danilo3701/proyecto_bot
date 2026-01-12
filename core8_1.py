@@ -199,7 +199,6 @@ from aiogram.fsm.storage.memory import MemoryStorage    # Хранение FSM �
 
 # ——— Роутеры админки ————————————————————————————————————————————
 from create_lesson_block import router as create_topic_router  # Роутер админского flow создания тем
-from edit_topic_flow     import router as edit_topic_router   # Роутер админского flow редактирования
 
 # ——— Загрузка тем ——————————————————————————————————————————————
 from topics.loader import load_topics                    # Функция чтения всех JSON-файлов с уроками
