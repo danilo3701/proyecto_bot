@@ -8471,6 +8471,7 @@ async def handle_feedback_difficulty_vocab(message: Message, state: FSMContext):
     next_idx = data.get("vocab_index", 0) + 1
     vocab_list = get_vocab_list(await state.get_data())  # 💬 берём сессионную лексику (после скрытия фраз)
 
+'''
     if next_idx < len(vocab_list) and vocab_list[next_idx].get("type") == "quiz":
         # 🎭 небольшой префейс перед квизом
         prefix = random.choice(["👮‍♂️","👮‍♀️","🚓"])           # 💬 что делает эта часть: эмодзи-префейс
@@ -8479,7 +8480,7 @@ async def handle_feedback_difficulty_vocab(message: Message, state: FSMContext):
         await smart_reply(message, phrase, reply_markup=ReplyKeyboardRemove())
         await state.update_data(vocab_index=next_idx)
         return await send_one_vocab(message, state)
-
+'''
     # 💬 что делает эта часть: возвращаем правильный отступ, чтобы не ломался блок after else
 
     data = await state.get_data()
@@ -9531,6 +9532,7 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
         vocab_list = get_vocab_list(data)
         next_idx = data.get("vocab_index", 0) + 1
 
+'''
         # ➕ Сначала пробуем найти ближайший обычный quiz (чтобы не запускать textquiz раньше времени)
         if next_idx < len(vocab_list):
             nt = vocab_list[next_idx].get("type")
@@ -9549,7 +9551,7 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
                 await state.update_data(vocab_index=next_idx)
                 return await send_one_vocab(cb.message, state)
         # иначе — рисуем inline-offer_continue как сейчас
-
+'''
 
         # иначе — inline-offer_continue
         oc = random.choice(scenarios["offer_continue"])
