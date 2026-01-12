@@ -5461,6 +5461,41 @@ async def send_one_vocab(message: Message, state: FSMContext):
             chat_id = message.chat.id if hasattr(message, "chat") else message.id
             return await send_failed_vocab(chat_id, state)
 
+        # 💬 что делает эта часть: если это ALL IN (lex_mode_active) и раунды ещё не закончились = собираем следующий раунд, а не выходим в меню
+        if data.get("lex_mode_active"):
+            current_round = int(data.get("lex_round", 0) or 0)
+            total_rounds = int(data.get("lex_round_total", 0) or 0)
+
+            if total_rounds and current_round < (total_rounds - 1):
+                next_round = current_round + 1
+                await _lex_prepare_round_session(state, round_idx=next_round)
+
+                data_after = await state.get_data()
+                if not data_after.get("lex_session_vocab_list"):
+                    # 💬 что делает эта часть: если следующий раунд пустой = завершаем без зацикливания
+                    chat_id_local = message.chat.id if hasattr(message, "chat") else message.id
+                    await send_and_auto_delete_text(
+                        bot, chat_id_local,
+                        "⚠️ Следующий раунд пустой. Проверь ALL IN: у каждой фразы должны быть polls и textquiz.",
+                        delay=3
+                    )
+                    await state.update_data(lex_mode_active=False, lex_session_vocab_list=[])
+                    return await lesson_menu_handler(message, state)
+
+                chat_id_local = message.chat.id if hasattr(message, "chat") else message.id
+                total = data_after.get("lex_round_total", total_rounds)
+                asyncio.create_task(
+                    send_and_auto_delete_text(
+                        bot, chat_id_local,
+                        f"Раунд {next_round + 1} из {total}",
+                        delay=2
+                    )
+                )  # 💬 показываем короткий заголовок раунда без блокировки
+
+                await state.set_state(LessonStates.showing_vocab)
+                return await send_one_vocab(message, state)
+
+
         # 2. Если ошибок нет — финализируем
         chat_id = message.chat.id if hasattr(message, "chat") else message.id
         
