@@ -857,16 +857,45 @@ def migrate_runtime_files_to_volume():
         # 💬 гарантируем наличие папки тем в Railway Volume; GitHub ./topics не трогаем
         os.makedirs("/data/topics", exist_ok=True)
 
-        # 2) если в локале нет файла, но он есть в Volume = копируем в локал
-        # 💬 что делает эта часть: даже если load_topics() читает ./topics, он увидит темы из Volume
-        for fname in os.listdir(volume_topics_dir):
-            if not fname.endswith(".json"):
-                continue
-            src = os.path.join(volume_topics_dir, fname)
-            dst = os.path.join(local_topics_dir, fname)
-            if os.path.exists(src) and not os.path.exists(dst):
-                with open(src, "rb") as s, open(dst, "wb") as d:
-                    d.write(s.read())
+        # 💬 синхронизируем темы строго из Railway Volume в локальную ./topics, чтобы load_topics() их видел
+        volume_topics_dir = "/data/topics"
+        local_topics_dir = "topics"
+
+        os.makedirs(volume_topics_dir, exist_ok=True)
+        os.makedirs(local_topics_dir, exist_ok=True)
+
+        # 💬 безопасно: если в Volume пока пусто, не трогаем локальные темы
+        volume_files = [f for f in os.listdir(volume_topics_dir) if f.endswith(".json")]
+        if volume_files:
+            # 💬 убираем локальные json которых нет в Volume, чтобы не подмешивались GitHub темы
+            try:
+                local_files = [f for f in os.listdir(local_topics_dir) if f.endswith(".json")]
+                volume_set = set(volume_files)
+                for fname in local_files:
+                    if fname not in volume_set:
+                        try:
+                            os.remove(os.path.join(local_topics_dir, fname))
+                        except OSError:
+                            pass
+            except Exception:
+                logging.exception("migrate_runtime_files_to_volume: local topics cleanup failed")
+
+            # 💬 копируем из Volume в локал, обновляем если в Volume версия новее
+            for fname in volume_files:
+                src = os.path.join(volume_topics_dir, fname)
+                dst = os.path.join(local_topics_dir, fname)
+
+                need_copy = not os.path.exists(dst)
+                if not need_copy:
+                    try:
+                        need_copy = os.path.getmtime(src) > os.path.getmtime(dst)
+                    except OSError:
+                        need_copy = True
+
+                if need_copy:
+                    with open(src, "rb") as s, open(dst, "wb") as d:
+                        d.write(s.read())  # 💬 локальный кэш темы становится копией Railway Volume
+
 
     except Exception:
         logging.exception("migrate_runtime_files_to_volume failed")
