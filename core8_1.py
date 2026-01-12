@@ -9001,9 +9001,10 @@ async def handle_dialog_phase_choice(callback: CallbackQuery, state: FSMContext)
     intro_text = (
         f"🙊 Ок, читаем диалоги по фазе:\n"
         f"<b>{phase_title}</b>\n\n"
-        f"Переводи в голове и честно жми "
-        f"✅ если ок, или ❌ если было тяжело."
-    )
+        "Переведи в голове на испанский\n"
+        "Если получилось, жми ✅\n"
+        "Если нет ❌ и фрагмент повториться"
+    )  # 💬 новая короткая инструкция
 
     # 💬 Отправляем интро и ставим авто-удаление на 10 секунд
     intro_msg = await smart_reply(callback.message, intro_text, parse_mode="HTML")
@@ -9020,11 +9021,20 @@ async def handle_dialog_phase_choice(callback: CallbackQuery, state: FSMContext)
     # 💬 Между интро и первым диалогом оставляем постоянный маркер «Читаем…»
     await smart_reply(callback.message, "Читаем...", parse_mode="HTML")
 
+    await state.update_data(
+        dialog_msg_id=marker_msg.message_id,
+        dialog_msg_chat_id=marker_msg.chat.id,
+    )  # 💬 сохраняем сообщение-контейнер, чтобы дальше только редактировать его
+
+    # 💬 Сообщение-контейнер: дальше будем только редактировать его (без delete + без новых сообщений)
+    marker_msg = await smart_reply(callback.message, "Читаем...", parse_mode="HTML")
+    await state.update_data(
+        dialog_msg_id=marker_msg.message_id,
+        dialog_msg_chat_id=marker_msg.chat.id,
+    )  # 💬 запоминаем, какое сообщение редактируем
+
     await state.set_state(LessonStates.showing_dialog)
-    return await send_one_dialog_block(callback.message, state)
-
-
-
+    return await send_one_dialog_block(marker_msg, state)
 
 
 
@@ -9079,12 +9089,17 @@ async def send_one_dialog_block(message: Message, state: FSMContext):
 
         html = re.sub(r"\[\[(.+?)\]\]", r'<span class="tg-spoiler">\1</span>', ln)
 
+        # 💬 ставим стрелку прямо перед спойлером (перед ES строкой это будет выглядеть как "➜ [spoiler]")
+        if '<span class="tg-spoiler">' in html:
+            html = html.replace('<span class="tg-spoiler">', '➜ <span class="tg-spoiler">', 1)
+
         # 💬 текст внутри спойлера делаем жирным (курсив даст общий <i> ниже)
         html = re.sub(
             r'<span class="tg-spoiler">(.*?)</span>',
             r'<span class="tg-spoiler"><b>\1</b></span>',
             html
         )
+
 
         rendered_lines.append(html)
 
@@ -9108,7 +9123,24 @@ async def send_one_dialog_block(message: Message, state: FSMContext):
         dialog_current_mode=mode,
     )
 
-    await smart_reply(message, text, reply_markup=kb, parse_mode="HTML")
+    chat_id = data.get("dialog_msg_chat_id") or message.chat.id
+    msg_id = data.get("dialog_msg_id") or message.message_id
+
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=msg_id,
+            text=text,
+            reply_markup=kb,
+            parse_mode="HTML",
+        )  # 💬 редактируем одно и то же сообщение, без удаления и без новых сообщений
+    except Exception:
+        new_msg = await smart_reply(message, text, reply_markup=kb, parse_mode="HTML")
+        await state.update_data(
+            dialog_msg_id=new_msg.message_id,
+            dialog_msg_chat_id=new_msg.chat.id,
+        )  # 💬 fallback если edit невозможен
+
 
 
 @dp.callback_query(
@@ -9163,14 +9195,18 @@ async def handle_dialog_selfcheck(callback: CallbackQuery, state: FSMContext):
         dialog_failed=failed,
     )
 
-    await callback.answer()
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
+    # 💬 если вдруг id контейнера ещё не записан (старые сессии) = запомним текущее сообщение
+    if not data.get("dialog_msg_id"):
+        await state.update_data(
+            dialog_msg_id=callback.message.message_id,
+            dialog_msg_chat_id=callback.message.chat.id,
+        )  # 💬 чтобы дальше работал edit_message_text
 
-    # 💬 Переходим к следующему блоку (или завершаем фазу)
+    await callback.answer()  # 💬 гасим loading быстро, без delete
+
+    # 💬 Переходим к следующему блоку (или завершаем фазу) через редактирование
     return await send_one_dialog_block(callback.message, state)
+
 
 # ——————— Конец «🙊Читать диалог» ———————
 
