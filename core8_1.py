@@ -9072,9 +9072,24 @@ async def send_one_dialog_block(message: Message, state: FSMContext):
     rendered_lines = []
     for ln in lines:
         ln = ln.replace("\\n", "\n")
+
         html = re.sub(r"\[\[(.+?)\]\]", r'<span class="tg-spoiler">\1</span>', ln)
+
+        # 💬 текст внутри спойлера делаем жирным (курсив даст общий <i> ниже)
+        html = re.sub(
+            r'<span class="tg-spoiler">(.*?)</span>',
+            r'<span class="tg-spoiler"><b>\1</b></span>',
+            html
+        )
+
         rendered_lines.append(html)
+
     text = "\n".join(rendered_lines)
+
+    # 💬 вся карточка "Читать" = курсив, а внутри спойлера будет жирный+курсив
+    if not text.startswith("<i>"):
+        text = f"<i>{text}</i>"
+
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[[
