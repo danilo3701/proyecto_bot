@@ -281,7 +281,6 @@ dp         = Dispatcher(storage=MemoryStorage())
 
 
 # ——— Подключаем админские роутеры ————————————————————————————————
-dp.include_router(edit_topic_router)
 dp.include_router(battle_router)  # 💬 подключаем хендлеры "Битвы"
 dp.include_router(bonuses_router)  # 💬 подключаем хендлеры «Бонусы»
 dp.include_router(podcasts_router)  # 💬 подключаем модуль "Подкасты"
