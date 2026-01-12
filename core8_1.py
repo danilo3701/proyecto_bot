@@ -378,39 +378,37 @@ def track_handler(func):
 
         # 💬 аналитика: последний хендлер + (если есть) тема и state из FSM
         try:
-            if not added:
+            if added:
                 # 💬 если middleware уже записал контекст = не дублируем запись
-                raise Exception("skip duplicate analytics")  # 💬 мягкий пропуск, чтобы не плодить записи
+                user_id = None
 
-            user_id = None
+                # 💬 пытаемся вытащить пользователя из args/kwargs
+                for v in list(kwargs.values()) + list(args):
+                    if getattr(v, "from_user", None):
+                        user_id = str(v.from_user.id)
+                        break
 
+                if user_id:
+                    st = kwargs.get("state")
+                    topic_key = None
+                    state_name = None
+                    if st:
+                        try:
+                            st_data = await st.get_data()
+                            topic_key = st_data.get("selected_topic")
+                            state_name = await st.get_state()
+                        except Exception:
+                            pass
 
-            # пытаемся вытащить пользователя из args/kwargs
-            for v in list(kwargs.values()) + list(args):
-                if getattr(v, "from_user", None):
-                    user_id = str(v.from_user.id)
-                    break
-
-            if user_id:
-                st = kwargs.get("state")
-                topic_key = None
-                state_name = None
-                if st:
-                    try:
-                        st_data = await st.get_data()
-                        topic_key = st_data.get("selected_topic")
-                        state_name = await st.get_state()
-                    except Exception:
-                        pass
-
-                analytics_set_last_context(
-                    user_id=user_id,
-                    handler_name=func.__name__,
-                    topic_key=topic_key,
-                    state_name=state_name
-                )
+                    analytics_set_last_context(
+                        user_id=user_id,
+                        handler_name=func.__name__,
+                        topic_key=topic_key,
+                        state_name=state_name
+                    )  # 💬 пишем last context только один раз
         except Exception:
-            logging.exception("track_handler: analytics last context failed")
+            logging.exception("track_handler: analytics last context failed")  # 💬 логируем только реальные сбои
+
 
         # 💬 убираем лишний аргумент 'dispatcher'
         kwargs.pop('dispatcher', None)
