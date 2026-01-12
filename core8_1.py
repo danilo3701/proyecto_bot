@@ -2045,12 +2045,13 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
     # 📚 УЧИТЬСЯ — показываем выбор уровня (категорию выберем позже внутри уровня)
     if action == "learn":
         inline_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="😇 Новичку", callback_data="level:A0"),
-             InlineKeyboardButton(text="🌱 A1-A2",  callback_data="level:A1-A2")],
-            [InlineKeyboardButton(text="🔥 B1-B2",   callback_data="level:B1-B2"),
-             InlineKeyboardButton(text="🧠 C1",      callback_data="level:C1")],
-            [InlineKeyboardButton(text="⬅️ Назад",   callback_data="level:back")]
-        ])
+            [InlineKeyboardButton(text="🐥 Новичок",     callback_data="level:A0"),
+             InlineKeyboardButton(text="😤 Начальный",    callback_data="level:A1-A2")],
+            [InlineKeyboardButton(text="😼 Средний",      callback_data="level:B1-B2"),
+             InlineKeyboardButton(text="🤓 Продвинутый",  callback_data="level:C1")],
+            [InlineKeyboardButton(text="⬅️ Назад",        callback_data="level:back")]
+        ])  # 💬 человеко-читаемые названия уровней без A1/B2
+
 
         # 💬 вместо новой реплай-клавы — редактируем то же сообщение с инлайном
         # 💬 фраза про уровень берётся рандомно из набора
@@ -2070,13 +2071,22 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
         category = "lex" if action == "lex" else "gram"
         await state.update_data(chosen_category=category)
 
-        inline_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="😇 Новичку", callback_data="level:A0"),
-             InlineKeyboardButton(text="🌱 A1-A2",  callback_data="level:A1-A2")],
-            [InlineKeyboardButton(text="🔥 B1-B2",   callback_data="level:B1-B2"),
-             InlineKeyboardButton(text="🧠 C1",      callback_data="level:C1")],
-            [InlineKeyboardButton(text="⬅️ Назад",   callback_data="level:back")]
-        ])
+        if category == "gram":
+            inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🍺 Начальный",    callback_data="level:A1-A2"),
+                 InlineKeyboardButton(text="🌻 Средний",      callback_data="level:B1-B2")],
+                [InlineKeyboardButton(text="🧠 Продвинутый",  callback_data="level:C1")],
+                [InlineKeyboardButton(text="⬅️ Назад",        callback_data="level:back")]
+            ])  # 💬 грамматика без A0
+        else:
+            inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🐥 Новичок",     callback_data="level:A0"),
+                 InlineKeyboardButton(text="😤 Начальный",    callback_data="level:A1-A2")],
+                [InlineKeyboardButton(text="😼 Средний",      callback_data="level:B1-B2"),
+                 InlineKeyboardButton(text="🤓 Продвинутый",  callback_data="level:C1")],
+                [InlineKeyboardButton(text="⬅️ Назад",        callback_data="level:back")]
+            ])  # 💬 человеко-читаемые названия уровней без A1/B2
+
 
         # 💬 вместо новой реплай-клавы — редактируем то же сообщение с инлайном
         # 💬 фраза про уровень берётся рандомно из набора
@@ -2109,7 +2119,14 @@ async def level_chosen(callback: CallbackQuery, state: FSMContext):
         return await start_handler(callback.message, state)
 
     level = choice
-    level_show = "новичок" if str(level).upper() == "A0" else level  # 💬 A0 показываем как новичок
+    _LEVEL_LABELS = {
+        "A0": "Новичок",
+        "A1-A2": "Начальный",
+        "B1-B2": "Средний",
+        "C1": "Продвинутый",
+    }  # 💬 отображаемые названия уровней
+    level_show = _LEVEL_LABELS.get(str(level).upper(), str(level))
+
 
     await state.update_data(chosen_level=level)
 
@@ -2245,18 +2262,13 @@ async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
     # Если по какой-то причине уровень не сохранён — возвращаемся к выбору уровня
     if not level:
         inline_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="😇 Новичку", callback_data="level:A0"),
-                InlineKeyboardButton(text="🌱 A1-A2",  callback_data="level:A1-A2"),
-            ],
-            [
-                InlineKeyboardButton(text="🔥 B1-B2",   callback_data="level:B1-B2"),
-                InlineKeyboardButton(text="🧠 C1",      callback_data="level:C1"),
-            ],
-            [
-                InlineKeyboardButton(text="⬅️ Назад",   callback_data="level:back"),
-            ],
-        ])
+            [InlineKeyboardButton(text="🐥 Новичок",      callback_data="level:A0"),
+             InlineKeyboardButton(text="😤 Начальный",    callback_data="level:A1-A2")],
+            [InlineKeyboardButton(text="😼 Средний",      callback_data="level:B1-B2"),
+             InlineKeyboardButton(text="🤓 Продвинутый",  callback_data="level:C1")],
+            [InlineKeyboardButton(text="⬅️ Назад",        callback_data="level:back")]
+        ])  # 💬 человеко-читаемые уровни, лексика
+
         intro_text = random.choice(difficulty_intro_phrases) if difficulty_intro_phrases else \
             "😜 Отличный выбор! А теперь давай определимся с уровнем сложности:"
 
@@ -2305,6 +2317,10 @@ async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
         
     elif action == "gram":
         await state.update_data(chosen_category="gram")  # 💬 фиксируем категорию грамматики
+        if str(level).upper() == "A0":
+            level = "A1-A2"  # 💬 грамматика начинается с начального, A0 пропускаем
+            await state.update_data(chosen_level=level)  # 💬 чтобы темы/назад работали без рассинхрона
+
         await show_topics_for_category_level(callback, state, category="gram", level=level)  # 💬 показываем темы грамматики
         await callback.answer()  # 💬 закрываем loading
         return
@@ -3403,18 +3419,13 @@ async def topic_back_to_level(callback: CallbackQuery, state: FSMContext):
     """
     # 💬 Собираем клавиатуру уровней так же, как при выборе категории
     inline_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="😇 Новичку", callback_data="level:A0"),
-            InlineKeyboardButton(text="🌱 A1-A2",  callback_data="level:A1-A2"),
-        ],
-        [
-            InlineKeyboardButton(text="🔥 B1-B2",   callback_data="level:B1-B2"),
-            InlineKeyboardButton(text="🧠 C1",      callback_data="level:C1"),
-        ],
-        [
-            InlineKeyboardButton(text="⬅️ Назад",   callback_data="level:back"),
-        ],
-    ])
+        [InlineKeyboardButton(text="🐥 Новичок",      callback_data="level:A0"),
+         InlineKeyboardButton(text="😤 Начальный",    callback_data="level:A1-A2")],
+        [InlineKeyboardButton(text="😼 Средний",      callback_data="level:B1-B2"),
+         InlineKeyboardButton(text="🤓 Продвинутый",  callback_data="level:C1")],
+        [InlineKeyboardButton(text="⬅️ Назад",        callback_data="level:back")]
+    ])  # 💬 возврат к выбору уровня
+
 
     # 💬 Тот же текст, что и при первом показе уровней
     intro_text = random.choice(difficulty_intro_phrases) if difficulty_intro_phrases else \
