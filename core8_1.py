@@ -7747,6 +7747,10 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
             await state.update_data(vocab_index=next_idx)
             return await send_one_vocab(message, state)
         else:
+            if data.get("lex_mode_active"):
+                await state.update_data(vocab_index=idx + 1)  # 💬 ALL IN: сдвигаем индекс за textquiz, чтобы send_one_vocab собрал следующий раунд
+                return await send_one_vocab(message, state)
+
             # 💬 мини-сессия textquiz закончилась → обычный offer_continue
             oc_scene = random.choice(scenarios["offer_continue"])
             
