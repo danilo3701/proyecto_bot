@@ -198,10 +198,37 @@ from aiogram.fsm.context import FSMContext              # FSM: доступ к s
 from aiogram.fsm.storage.memory import MemoryStorage    # Хранение FSM в памяти
 
 # ——— Роутеры админки ————————————————————————————————————————————
-from create_lesson_block import router as create_topic_router  # Роутер админского flow создания тем
+from create_lesson_block import router as create_topic_router  # 💬 админский flow тем (всё редактирование тут)
 
-# ——— Загрузка тем ——————————————————————————————————————————————
-from create_lesson_block import load_ads_data  # 💬 Функция загрузки рекламы из ads_data.json
+# ——— Загрузка тем (ТОЛЬКО Railway Volume: /data/topics) ———————————
+from pathlib import Path  # 💬 путь к Volume
+
+def get_topics_dir() -> Path:
+    return Path(os.getenv("TOPICS_DIR", "/data/topics"))  # 💬 берём темы из Railway Volume
+
+def load_topics_from_volume() -> dict:
+    topics_dir = get_topics_dir()
+    topics_dir.mkdir(parents=True, exist_ok=True)  # 💬 гарантируем папку /data/topics
+    loaded = {}
+    for p in topics_dir.glob("*.json"):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f) or {}
+        except Exception:
+            continue
+        key = data.get("title") or p.stem  # 💬 ключ темы
+        loaded[key] = data
+    return loaded
+
+def load_topics_from_railway() -> dict:
+    return load_topics_from_volume()  # 💬 совместимость со старым названием
+
+def load_topics() -> dict:
+    return load_topics_from_volume()  # 💬 совместимость с create_lesson_block (reload)
+    
+def sync_topics_volume_to_local() -> None:
+    return None  # 💬 GitHub/Local sync отключён, чтобы не было NameError
+
 
 from battle_feature import router as battle_router, set_topics_ref, start_battle_from_lex_menu, set_battle_links, cancel_battle_if_running  # 💬 модуль "Битва"
 from bonuses_feature import (
@@ -286,6 +313,9 @@ dp.include_router(bonuses_router)  # 💬 подключаем хендлеры 
 dp.include_router(podcasts_router)  # 💬 подключаем модуль "Подкасты"
 dp.include_router(create_topic_router)
 dp.include_router(grammar_router)  # 💬 подключаем грамматику
+
+# ——— Загружаем уроки (ТОЛЬКО /data/topics) ———————————————————————
+topics = load_topics_from_volume()  # 💬 стартовая загрузка тем из Railway Volume
 
 
 def load_topics_from_volume() -> dict:
