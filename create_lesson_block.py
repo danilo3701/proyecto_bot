@@ -1497,8 +1497,15 @@ async def handle_main_menu(message: Message, state: FSMContext):
 
     # ----------------------- Добавить чтение -----------------------
     if text == "📖 Добавить чтение":
-        await state.update_data(last_block="reading")  # 💬 что делает эта часть: помечаем текущий раздел
-        await message.answer("Введите ЗАГОЛОВОК чтения:", reply_markup=ReplyKeyboardRemove())
+        await state.update_data(last_block="reading")  # 💬 помечаем текущий раздел
+
+        data = await state.get_data()
+        topic = data.get("topic") or {}
+        category_now = ((topic.get("category") or "").strip().lower())
+        category_now = "gram" if category_now.startswith("gram") else "lex"  # 💬 нормализуем категорию
+
+        prompt = "📚 Впишите название фазы чтения:" if category_now == "gram" else "Введите ЗАГОЛОВОК чтения:"  # 💬 в грамматике заголовок = фаза
+        await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
         return await state.set_state(NewTopicStates.waiting_reading_title)
 
 
@@ -4087,9 +4094,18 @@ async def handle_edit_action(message: Message, state: FSMContext):
     # 💬 добавить чтение
     if text in {"➕ Добавить чтение", "📖 Добавить чтение"}:
         await state.update_data(last_block="reading")  # 💬 чтобы не путать меню после сохранения
-        await message.answer("Введите ЗАГОЛОВОК пака чтения:", reply_markup=ReplyKeyboardRemove())
+
+        data = await state.get_data()
+        topic = data.get("topic") or {}
+        category_now = ((topic.get("category") or "").strip().lower())
+        category_now = "gram" if category_now.startswith("gram") else "lex"  # 💬 нормализуем категорию
+
+        prompt = "📚 Впишите название фазы чтения:" if category_now == "gram" else "Введите ЗАГОЛОВОК пака чтения:"  # 💬 в грамматике заголовок = фаза
+        await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
+
         await state.set_state(NewTopicStates.waiting_reading_title)  # 💬 стандартный поток reading
         return
+
 
     # 💬 удалить пак чтения
     if text == "🗑 Удалить пак чтения":
@@ -4554,6 +4570,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
