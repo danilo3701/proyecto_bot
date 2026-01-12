@@ -4965,10 +4965,12 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
         # 🎲 Рандомный стикер при старте «Читать» из инлайн-меню (и авто-удаление)
         try:
             sticker_id = random.choice(READ_STICKERS)  # 💬 берём один из списка
-            await send_and_auto_delete_sticker(callback.bot, callback.message.chat.id, sticker_id)  # 💬 показываем и удаляем
-            await asyncio.sleep(AUTO_DELETE_STICKER_DELAY_S)  # 💬 ждём удаления, чтобы не мешал диалогам
+            asyncio.create_task(
+                send_and_auto_delete_sticker(callback.bot, callback.message.chat.id, sticker_id)
+            )  # 💬 отправляем и удаляем стикер фоном, не блокируя выдачу фаз
         except Exception:
             pass
+
         # 💬 Запуск потока чтения диалогов из инлайн-меню
         return await start_dialog_reading(callback.message, state)
 
@@ -5093,10 +5095,12 @@ async def handle_read_dialogs_button(message: Message, state: FSMContext):
     # 🎲 Рандомный стикер при старте «Читать» (и авто-удаление)
     try:
         sticker_id = random.choice(READ_STICKERS)  # 💬 берём один из списка
-        await send_and_auto_delete_sticker(bot, message.chat.id, sticker_id)  # 💬 показываем и удаляем
-        await asyncio.sleep(AUTO_DELETE_STICKER_DELAY_S)  # 💬 ждём удаления, чтобы не мешал диалогам
+        asyncio.create_task(
+            send_and_auto_delete_sticker(bot, message.chat.id, sticker_id)
+        )  # 💬 отправляем и удаляем стикер фоном, не блокируя выдачу фаз
     except Exception:
         pass
+
 
     # 💬 Запускаем поток чтения диалогов
     return await start_dialog_reading(message, state)
