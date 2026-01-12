@@ -289,36 +289,32 @@ dp.include_router(create_topic_router)
 dp.include_router(grammar_router)  # 💬 подключаем грамматику
 
 
-# 💬 что делает эта часть: копируем темы из Railway Volume (/data/topics) в локальную ./topics,
-# чтобы load_topics() увидел новые темы без redeploy
-def sync_topics_volume_to_local():
-    volume_topics_dir = "/data/topics"
-    local_topics_dir = "topics"
-    try:
-        os.makedirs(volume_topics_dir, exist_ok=True)
-        os.makedirs(local_topics_dir, exist_ok=True)
+def load_topics_from_volume() -> dict:
+    # 💬 что делает эта часть: читаем темы только из Railway Volume (/data/topics), без копирования в ./topics и без GitHub
+    topics_dir = "/data/topics"
+    os.makedirs(topics_dir, exist_ok=True)
 
-        for fname in os.listdir(volume_topics_dir):
-            if not fname.endswith(".json"):
-                continue
-            src = os.path.join(volume_topics_dir, fname)
-            dst = os.path.join(local_topics_dir, fname)
-            if not os.path.exists(src):
-                continue
+    loaded = {}
+    for fn in os.listdir(topics_dir):
+        if not fn.lower().endswith(".json"):
+            continue
 
-            need_copy = not os.path.exists(dst)
-            if not need_copy:
-                try:
-                    need_copy = os.path.getmtime(src) > os.path.getmtime(dst)
-                except OSError:
-                    need_copy = True
+        path = os.path.join(topics_dir, fn)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
 
-            if need_copy:
-                with open(src, "rb") as s, open(dst, "wb") as d:
-                    d.write(s.read())  # 💬 обновляем локальную тему, если в Volume версия новее
+            key = (data or {}).get("title") or os.path.splitext(fn)[0]
+            if key:
+                loaded[key] = data
+        except Exception as e:
+            logging.exception("load_topics_from_volume: failed %s: %s", path, e)
 
-    except Exception:
-        logging.exception("sync_topics_volume_to_local failed")
+    return loaded
+
+
+topics = load_topics_from_volume()  # 💬 грузим темы только из Volume
+
 
 
 sync_topics_volume_to_local()  # 💬 подтягиваем темы из Volume перед чтением
