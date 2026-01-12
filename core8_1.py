@@ -4761,6 +4761,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     await state.update_data(last_progress_msg_id=progress_msg.message_id)  # 💬 запоминаем id прогресс-блока для удаления при смене темы
 
 
+
     # — Кнопки меню с блокировкой потоков по флагу unlocked —
     category = data.get("chosen_category")
 
@@ -4962,6 +4963,29 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
     # 🙊 Читать диалоги — новая логика
     if action == "read":
         await callback.answer()
+    
+        data = await state.get_data()
+        last_menu_msg_id = data.get("last_menu_msg_id")
+        last_progress_msg_id = data.get("last_progress_msg_id")
+    
+        if last_menu_msg_id:
+            try:
+                await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=last_menu_msg_id)
+            except Exception:
+                pass
+    
+        if last_progress_msg_id:
+            try:
+                await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=last_progress_msg_id)
+            except Exception:
+                pass
+    
+        await state.update_data(
+            menu_hidden=True,
+            last_menu_msg_id=None,
+            last_progress_msg_id=None,
+        )  # 💬 убираем меню и прогресс до показа стикера
+    
         # 🎲 Рандомный стикер при старте «Читать» из инлайн-меню (и авто-удаление)
         try:
             sticker_id = random.choice(READ_STICKERS)  # 💬 берём один из списка
@@ -4970,8 +4994,7 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
             )  # 💬 отправляем и удаляем стикер фоном, не блокируя выдачу фаз
         except Exception:
             pass
-
-        # 💬 Запуск потока чтения диалогов из инлайн-меню
+    
         return await start_dialog_reading(callback.message, state)
 
     # 🎬 Смотреть видео — показываем ссылку в слове + галочка «готово»
@@ -5079,8 +5102,20 @@ async def handle_read_dialogs_button(message: Message, state: FSMContext):
                 await bot.delete_message(chat_id=message.chat.id, message_id=last_menu_msg_id)
             except Exception:
                 pass
-        # 💬 Помечаем меню как скрытое и очищаем id
-        await state.update_data(menu_hidden=True, last_menu_msg_id=None)
+    
+        last_progress_msg_id = data.get("last_progress_msg_id")
+        if last_progress_msg_id:
+            try:
+                await bot.delete_message(chat_id=message.chat.id, message_id=last_progress_msg_id)
+            except Exception:
+                pass
+    
+        await state.update_data(
+            menu_hidden=True,
+            last_menu_msg_id=None,
+            last_progress_msg_id=None,
+        )  # 💬 прячем и меню с кнопками, и главный прогресс-блок
+
 
     # 💬 Дополнительно убираем ReplyKeyboard и клик пользователя
     try:
@@ -8942,6 +8977,15 @@ async def start_dialog_reading(message: Message, state: FSMContext):
             pass
         # 💬 меню убрали, больше его не существует
         await state.update_data(last_menu_msg_id=None)
+
+        last_progress_msg_id = data.get("last_progress_msg_id")
+        if last_progress_msg_id:
+            try:
+                await bot.delete_message(chat_id=message.chat.id, message_id=last_progress_msg_id)
+            except Exception:
+                pass
+            await state.update_data(last_progress_msg_id=None)  # 💬 прогресс-блок убрали, чтобы не висел при старте чтения
+
 
     # 💬 отправляем краткую «пустышку», чтобы убрать Reply-клавиатуру
     try:
