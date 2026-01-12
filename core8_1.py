@@ -1882,19 +1882,23 @@ async def start_handler(message: Message, state: FSMContext):
 
 
     # 💬 Убираем старую Reply-клавиатуру и отправляем нормальное приветствие
-    await smart_reply(
+    hello_msg = await smart_reply(
         message,
-        hello_msg = await smart_reply(message, "Holaaa...", reply_markup=ReplyKeyboardRemove())  # 💬 приветствие, которое удалим позже
-        
-        async def _delete_hello_later(chat_id: int, msg_id: int, delay: float = 30.0):
-            await asyncio.sleep(delay)
-            try:
-                await bot.delete_message(chat_id=chat_id, message_id=msg_id)
-            except Exception:
-                pass
-        
-        if hello_msg:
-            asyncio.create_task(_delete_hello_later(hello_msg.chat.id, hello_msg.message_id))  # 💬 авто-удаление через 1 минуту
+        "Holaaa...",
+        reply_markup=ReplyKeyboardRemove()
+    )  # 💬 приветствие, которое удалим позже
+
+    async def _delete_hello_later(chat_id: int, msg_id: int, delay: float = 30.0):
+        await asyncio.sleep(delay)
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except Exception:
+            pass
+
+    if hello_msg:
+        asyncio.create_task(
+            _delete_hello_later(hello_msg.chat.id, hello_msg.message_id)
+        )  # 💬 авто-удаление приветствия через 30 секунд
 
 
 
