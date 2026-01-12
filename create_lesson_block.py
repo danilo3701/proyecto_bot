@@ -442,7 +442,7 @@ def get_main_menu(category: str | None = None) -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="📚 словарь"), KeyboardButton(text="✏️ Добавить упражнение")],
             [KeyboardButton(text="🎥 Добавить видео"),    KeyboardButton(text="💬 Добавить диалог")],
-            [KeyboardButton(text="📖 Добавить чтение")],
+            [KeyboardButton(text="📝 Добавить перевод")],  # 💬 для лексики теперь название "Переводить"
             [KeyboardButton(text="👁 Просмотреть"),       KeyboardButton(text="✏️ Редактировать")]
         ],
         resize_keyboard=True
@@ -4630,6 +4630,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
