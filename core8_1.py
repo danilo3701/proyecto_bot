@@ -1884,9 +1884,18 @@ async def start_handler(message: Message, state: FSMContext):
     # 💬 Убираем старую Reply-клавиатуру и отправляем нормальное приветствие
     await smart_reply(
         message,
-        "Holaaa...",  # 💬 НЕ пустой текст, чтобы не ловить BadRequest: text must be non-empty
-        reply_markup=ReplyKeyboardRemove()
-    )
+        hello_msg = await smart_reply(message, "Holaaa...", reply_markup=ReplyKeyboardRemove())  # 💬 приветствие, которое удалим позже
+        
+        async def _delete_hello_later(chat_id: int, msg_id: int, delay: float = 30.0):
+            await asyncio.sleep(delay)
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            except Exception:
+                pass
+        
+        if hello_msg:
+            asyncio.create_task(_delete_hello_later(hello_msg.chat.id, hello_msg.message_id))  # 💬 авто-удаление через 1 минуту
+
 
 
 
@@ -2922,10 +2931,12 @@ async def show_leaderboard(message: Message, state: FSMContext):
             pass
 
     # 💬 убираем ReplyKeyboard (старые кнопки меню), и даём интро перед рейтингом
-    await message.answer(
-        "А теперь посмотрим, где ты среди толпы... 👀",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    intro_msg = await message.answer("А теперь посмотрим, где ты среди толпы... 👀")  # 💬 интро рейтинга отдельным сообщением
+    await state.update_data(
+        leaderboard_intro_msg_id=intro_msg.message_id,
+        leaderboard_intro_chat_id=intro_msg.chat.id,
+    )  # 💬 сохраняем id, чтобы удалить при выходе из рейтинга
+
 
 
     menu_kb = InlineKeyboardMarkup(
@@ -3170,6 +3181,20 @@ async def stats_export_handler(message: Message, state: FSMContext):
 @dp.callback_query(lambda c: c.data == "back_to_menu")
 async def inline_back_to_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()  # 💬 убираем "часики" сразу, даже если дальше будет delete/edit
+
+    data = await state.get_data()
+
+    intro_id = data.get("leaderboard_intro_msg_id")
+    intro_chat_id = data.get("leaderboard_intro_chat_id")
+    if intro_id and intro_chat_id:
+        try:
+            await callback.bot.delete_message(chat_id=intro_chat_id, message_id=intro_id)
+        except Exception:
+            pass
+        await state.update_data(
+            leaderboard_intro_msg_id=None,
+            leaderboard_intro_chat_id=None,
+        )  # 💬 чистим сохранённое интро рейтинга при выходе в меню
 
     # 💬 TelegramBadRequest тут обычно из-за delete: message can't be deleted / message to delete not found
     try:
