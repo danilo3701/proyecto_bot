@@ -9018,14 +9018,6 @@ async def handle_dialog_phase_choice(callback: CallbackQuery, state: FSMContext)
 
     asyncio.create_task(_delete_intro_later(intro_msg.chat.id, intro_msg.message_id))
 
-    # 💬 Между интро и первым диалогом оставляем постоянный маркер «Читаем…»
-    await smart_reply(callback.message, "Читаем...", parse_mode="HTML")
-
-    await state.update_data(
-        dialog_msg_id=marker_msg.message_id,
-        dialog_msg_chat_id=marker_msg.chat.id,
-    )  # 💬 сохраняем сообщение-контейнер, чтобы дальше только редактировать его
-
     # 💬 Сообщение-контейнер: дальше будем только редактировать его (без delete + без новых сообщений)
     marker_msg = await smart_reply(callback.message, "Читаем...", parse_mode="HTML")
     await state.update_data(
