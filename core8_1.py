@@ -5666,6 +5666,60 @@ async def send_one_vocab(message: Message, state: FSMContext):
         return await bot.send_message(chat_id, scene["text"], reply_markup=inline_kb)  # 💬 отправляем кнопки
 
 
+# ➕ ВСТАВЬ вот это после строки:
+# return await bot.send_message(chat_id, scene["text"], reply_markup=inline_kb)  # 💬 отправляем кнопки
+# и перед строкой:
+# @track_handler
+# 💬 что делает эта часть: добавляем безопасную загрузку рекламы из Railway (/data),
+# чтобы не падать с NameError и молча пропускать рекламу, если она отключена/пустая.
+
+ADS_DATA_PATH = "/data/ads_data.json"
+ADS_DATA_BACKUP_PATH = "/data/ads_data_backup.json"
+
+def load_ads_data() -> list:
+    # 💬 что делает эта часть: читает ads_data.json из Railway, возвращает [] если файла нет/он пустой/битый
+    import os
+    import json
+
+    candidates = [ADS_DATA_PATH, "ads_data.json"]  # 💬 fallback на локальный путь, если /data недоступен
+    for path in candidates:
+        try:
+            if not os.path.exists(path):
+                continue
+            with open(path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+
+            # 💬 поддерживаем оба формата: список или {"ads": [...]}
+            if isinstance(raw, dict):
+                ads = raw.get("ads", [])
+            elif isinstance(raw, list):
+                ads = raw
+            else:
+                ads = []
+
+            # 💬 фильтруем битые элементы, чтобы send_ad_block не падал по KeyError
+            clean = []
+            for a in ads:
+                if isinstance(a, dict) and a.get("channel_id") and a.get("message_id"):
+                    clean.append(a)
+            return clean
+        except Exception:
+            # 💬 не валим весь бот из-за рекламы
+            return []
+
+    return []
+
+def save_ads_data(ads: list) -> None:
+    # 💬 что делает эта часть: сохраняет рекламу в /data (Railway) в простом и безопасном формате
+    import json
+    try:
+        with open(ADS_DATA_PATH, "w", encoding="utf-8") as f:
+            json.dump({"ads": ads or []}, f, ensure_ascii=False, indent=2)
+    except Exception:
+        # 💬 если /data недоступен, просто не сохраняем (не критично для ученического флоу)
+        pass
+
+
 @track_handler
 async def send_ad_block(message: Message, state: FSMContext):
     ads = load_ads_data()
