@@ -2521,17 +2521,17 @@ def _parse_allin_block(text: str):
 
             # 💬 новый формат внутри [POLL]
             if section == "POLL":
-                # 💬 [POLL] поддержка 4 полей и совместимость со старым форматом из 5 полей
+                # 💬 фикс зависания: всегда двигаем индекс строки, иначе бесконечный цикл
                 parts = [p.strip() for p in line.split("|")]
                 if len(parts) < 4:
                     errors.append(f"PHRASE #{total_blocks}: строка [POLL] мало полей")
+                    i += 1
                     continue
 
                 q = parts[0]
-                correct = parts[1]  # 💬 правильный всегда первый после |
-                wrongs = parts[2:4]  # 💬 только 2 ошибки = всего 3 варианта
-
-                extra_correct = parts[4] if len(parts) >= 5 else ""  # 💬 старый формат: режем лишнее, но можем сохранить как пояснение
+                correct = parts[1]          # 💬 правильный всегда первый после |
+                wrongs = parts[2:4]         # 💬 только 2 ошибки = всего 3 варианта
+                extra_correct = parts[4] if len(parts) >= 5 else ""  # 💬 старый формат: лишнее как пояснение
 
                 polls.append({
                     "type": "quiz",
@@ -2540,7 +2540,9 @@ def _parse_allin_block(text: str):
                     "correct_answer": correct,
                     "explanation_correct": extra_correct,
                 })
+                i += 1
                 continue
+
 
 
 
@@ -4582,6 +4584,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
