@@ -1460,9 +1460,14 @@ async def handle_main_menu(message: Message, state: FSMContext):
         data   = await state.get_data()
         phases = data["topic"]["vocab"]  # список фаз
         if not phases:
-            # нет фаз — сразу создаём
-            await message.answer("Введите НАЗВАНИЕ новой ФАЗЫ:")
-            await state.set_state(NewTopicStates.waiting_phase_name)
+            new_phase = await _create_vocab_phase_auto(state)  # 💬 создаём пак автоматически
+            await message.answer(
+                f"Создан: {new_phase['phase_name']}",
+                reply_markup=ReplyKeyboardRemove()
+            )  # 💬 пропускаем ввод названия
+            await send_post_menu(message, state)  # 💬 сразу показываем кнопки добавления словаря
+            return
+
         else:
             # строим кнопки из KeyboardButton
             buttons = [
@@ -2308,6 +2313,34 @@ async def send_insert_post_menu(message: Message, state: FSMContext):
 
 # === БЛОК “СЛОВАРЬ” ===
 # Создание Потока "Учить слова"
+async def _create_vocab_phase_auto(state: FSMContext) -> dict:
+    data = await state.get_data()
+    topic = data.get("topic") or {}
+    phases = topic.setdefault("vocab", [])
+
+    phase_id = len(phases) + 1
+    phase_name = f"📦 Пак слов {phase_id}"  # 💬 авто-название пака без ввода
+
+    category_now = ((topic.get("category") or "").strip().lower())
+    category_now = "gram" if category_now.startswith("gram") else "lex"  # 💬 нормализуем категорию
+
+    new_phase = {
+        "phase_id": phase_id,
+        "phase_name": phase_name,
+        "vocab": []  # 💬 в грамматике тут храним text/photo/quiz_pool
+    }
+
+    if category_now == "lex":
+        new_phase["phrases"] = []  # 💬 phrases нужны только для лексики, в грамматике не используем
+
+    phases.append(new_phase)
+
+    topic_path = data.get("topic_path")
+    if topic_path:
+        atomic_save_json(topic_path, topic)  # 💬 сохраняем фазу сразу в JSON, чтобы не было рассинхрона
+
+    await state.update_data(topic=topic, current_phase_id=new_phase["phase_id"])
+    return new_phase
 
 
 @router.message(NewTopicStates.waiting_phase_name)
@@ -2357,9 +2390,15 @@ async def choose_phase(message: Message, state: FSMContext):
     text = message.text.strip()
     # — Создать новую фазу
     if text == "➕ Новая фаза":
-        # 💬 убрать старую клавиатуру и спросить имя фазы
-        await message.answer("Введите НАЗВАНИЕ новой ФАЗЫ:", reply_markup=ReplyKeyboardRemove())
-        return await state.set_state(NewTopicStates.waiting_phase_name)
+        new_phase = await _create_vocab_phase_auto(state)  # 💬 создаём пак автоматически
+        await message.answer(
+            f"Создан: {new_phase['phase_name']}",
+            reply_markup=ReplyKeyboardRemove()
+        )  # 💬 пропускаем ввод названия
+        await state.update_data(last_block="vocab")  # 💬 фиксируем блок словаря
+        await send_post_menu(message, state)         # 💬 сразу показываем кнопки добавления словаря
+        return
+
 
     # — Выбрать существующую фазу по номеру
     #    ожидаем формат "1. Фразовые глаголы"
@@ -2948,12 +2987,14 @@ async def handle_post_action(message: Message, state: FSMContext):
 
             # 💬 всегда даём выбор фазы, чтобы можно было перейти на 2-ю, 3-ю и т.д.
             if not phases:
+                new_phase = await _create_vocab_phase_auto(state)  # 💬 создаём пак автоматически
                 await message.answer(
-                    "Введите НАЗВАНИЕ новой ФАЗЫ:",
+                    f"Создан: {new_phase['phase_name']}",
                     reply_markup=ReplyKeyboardRemove()
-                )
-                await state.set_state(NewTopicStates.waiting_phase_name)
+                )  # 💬 пропускаем ввод названия
+                await send_post_menu(message, state)  # 💬 сразу показываем кнопки словаря
                 return
+
 
             buttons = [
                 [KeyboardButton(text=f"{p['phase_id']}. {p['phase_name']}")]
@@ -4032,9 +4073,14 @@ async def handle_edit_action(message: Message, state: FSMContext):
     # 💬 создать фазу словаря
     if text == "➕ Новая фаза словаря":
         await state.update_data(last_block="vocab")  # 💬 чтобы после создания фазы открыть меню добавления блоков
-        await message.answer("Введите НАЗВАНИЕ новой ФАЗЫ:", reply_markup=ReplyKeyboardRemove())
-        await state.set_state(NewTopicStates.waiting_phase_name)  # 💬 переиспользуем create_phase
+        new_phase = await _create_vocab_phase_auto(state)  # 💬 создаём пак автоматически
+        await message.answer(
+            f"Создан: {new_phase['phase_name']}",
+            reply_markup=ReplyKeyboardRemove()
+        )  # 💬 пропускаем ввод названия
+        await send_post_menu(message, state)  # 💬 сразу показываем кнопки словаря
         return
+
 
     # 💬 удалить фазу словаря
     if text == "🗑 Удалить фазу словаря":
@@ -4584,6 +4630,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
