@@ -2007,6 +2007,9 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
     await register_or_update_user(callback.message)
 
     action = callback.data.split(":", 1)[1]
+    # 💬 совместимость: если где-то остались старые кнопки с lex_menu:read (старый «Переводить»)
+    if action == "read_legacy":
+        action = "translate"
 
 
 
@@ -4780,6 +4783,27 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     parts.append(f"🏆 <b>Сейчас опыта: {topic_xp} XP</b> 🌟")
 
 
+    # 💬 звёзды по фазам = если фаза пройдена на 100%
+    try:
+        topic_key = data.get("selected_topic")
+        topic_info = topics.get(topic_key, {}) if topic_key else {}
+        phases = topic_info.get("phases") or []  # 💬 фазы темы (если есть)
+        progress_all = data.get("lex_translate_progress") or {}  # 💬 прогресс «Переводить/Читать» по фазам
+        progress_by_phase = progress_all.get(topic_key, {}) if isinstance(progress_all, dict) else {}
+
+        if phases and isinstance(progress_by_phase, dict):
+            done_cnt = 0
+            for i, ph in enumerate(phases, 1):
+                pid = str(ph.get("phase_id") or ph.get("id") or i)
+                if progress_by_phase.get(pid) in (True, 1, 100, "100", "done", "✅"):
+                    done_cnt += 1
+
+            stars = ("⭐" * done_cnt) + ("☆" * (len(phases) - done_cnt))
+            parts.append(f"⭐ <b>Фазы:</b> {stars}  {done_cnt}/{len(phases)}")  # 💬 индикатор выполнения фаз
+    except Exception:
+        pass  # 💬 если структура темы без фаз = не ломаем меню
+
+
 
 
 
@@ -4804,9 +4828,10 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
             # 💬 Строим ряды так, чтобы КАЖДАЯ кнопка была на своей строке (полная ширина)
             rows = [
                 [InlineKeyboardButton(text="📖 Учить слова", callback_data="lex_menu:learn")],
-                [InlineKeyboardButton(text="📝 Переводить", callback_data="lex_menu:read")],  # 💬 переименовали кнопку, callback оставили прежним
-
+                [InlineKeyboardButton(text="📝 Переводить", callback_data="lex_menu:translate")],  # 💬 отдельный callback под «Переводить»
+                [InlineKeyboardButton(text="📖 Читать", callback_data="lex_menu:read")],  # 💬 новый поток «Читать» (отдельно от «Переводить»)
             ]
+
             if has_videos:
                 rows.append(
                     [InlineKeyboardButton(text="🎬 Видео", callback_data="lex_menu:video")]
@@ -4820,9 +4845,10 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
             # 💬 Заблокированный вариант — тоже одна кнопка в строке
             rows = [
                 [InlineKeyboardButton(text="📖 Учить слова", callback_data="lex_menu:learn")],
-                [InlineKeyboardButton(text="🔒 Переводить", callback_data="lex_menu:locked_read")],  # 💬 заблокированная версия
-
+                [InlineKeyboardButton(text="🔒 Переводить", callback_data="lex_menu:locked_translate")],  # 💬 заблокирован «Переводить»
+                [InlineKeyboardButton(text="🔒 Читать", callback_data="lex_menu:locked_read")],  # 💬 заблокирован «Читать»
             ]
+
             if has_videos:
                 rows.append(
                     [InlineKeyboardButton(text="🔒 Видео", callback_data="lex_menu:locked_video")]
@@ -4959,11 +4985,13 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
     """
     💬 Инлайн-меню для раздела «Лексика»:
         • lex_menu:learn        → поток «Учить слова»
-        • lex_menu:read         → поток «Читать диалоги» (самопроверка)
+        • lex_menu:translate    → поток «Переводить» (твой текущий reading-пак)
+        • lex_menu:read         → поток «Читать» (отдельно от «Переводить»)
         • lex_menu:video        → поток «Смотреть видео»
         • lex_menu:change_topic → вернуться к выбору темы
         • lex_menu:locked_*     → заблокированные кнопки (отказной стикер)
     """
+
     action = callback.data.split(":", 1)[1]
 
     # 🔒 Заблокированные кнопки «Читать» / «Видео» из инлайн-меню
@@ -4998,9 +5026,10 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
         return await change_topic(callback.message, state)
 
 
-    # 📝 Переводить — reading-паки (как "📚 Читать" в грамматике)
-    if action == "read":
-        await callback.answer()
+    # 📝 Переводить — твой текущий reading-пак
+    if action == "translate":
+        await callback.answer()  # 💬 снимаем «часики»
+
     
         data = await state.get_data()
         last_menu_msg_id = data.get("last_menu_msg_id")
@@ -5034,6 +5063,14 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
             pass
     
         return await start_dialog_reading(callback.message, state)
+
+    # 📖 Читать — пока переиспользуем тот же вход, но помечаем режим
+    if action == "read":
+        await callback.answer()  # 💬 снимаем «часики»
+        await state.update_data(lex_read_mode_active=True)  # 💬 отличаем «Читать» от «Переводить»
+        # 💬 временно используем тот же запуск, что и «Переводить», пока админка/ключи не разведены
+        action = "translate"
+
 
     # 🎬 Смотреть видео — показываем ссылку в слове + галочка «готово»
     if action == "video":
