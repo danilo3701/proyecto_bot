@@ -2282,19 +2282,25 @@ async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
 
     # 🔙 Назад → возвращаемся к выбору уровня
     if action == "back":
-        inline_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="😇 Новичку", callback_data="level:A0"),
-                InlineKeyboardButton(text="🌱 A1-A2",  callback_data="level:A1-A2"),
-            ],
-            [
-                InlineKeyboardButton(text="🔥 B1-B2",   callback_data="level:B1-B2"),
-                InlineKeyboardButton(text="🧠 C1",      callback_data="level:C1"),
-            ],
-            [
-                InlineKeyboardButton(text="⬅️ Назад",   callback_data="level:back"),
-            ],
-        ])
+        data = await state.get_data()
+        category = data.get("chosen_category")  # 💬 грамматика не показывает "Новичок"
+
+        if category == "gram":
+            inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🍺 Начальный",   callback_data="level:A1-A2"),
+                 InlineKeyboardButton(text="🌻 Средний",     callback_data="level:B1-B2")],
+                [InlineKeyboardButton(text="🧠 Продвинутый", callback_data="level:C1")],
+                [InlineKeyboardButton(text="⬅️ Назад",       callback_data="level:back")]
+            ])  # 💬 выбор уровня для грамматики без буквенных уровней
+        else:
+            inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🐥 Новичок",     callback_data="level:A0"),
+                 InlineKeyboardButton(text="😤 Начальный",   callback_data="level:A1-A2")],
+                [InlineKeyboardButton(text="😼 Средний",     callback_data="level:B1-B2"),
+                 InlineKeyboardButton(text="🤓 Продвинутый", callback_data="level:C1")],
+                [InlineKeyboardButton(text="⬅️ Назад",       callback_data="level:back")]
+            ])  # 💬 выбор уровня для лексики без буквенных уровней
+
         intro_text = random.choice(difficulty_intro_phrases) if difficulty_intro_phrases else \
             "😜 Отличный выбор! А теперь давай определимся с уровнем сложности:"
 
