@@ -5020,16 +5020,21 @@ async def change_topic(message: Message, state: FSMContext):
     # 💬 удаляем прогресс-блок и меню «Что делаем дальше?», чтобы не оставались старые кнопки/текст
     if progress_msg_id:
         try:
-            await bot.delete_message(message.chat.id, progress_msg_id)
+            await bot.delete_message(chat_id=message.chat.id, message_id=progress_msg_id)  # 💬 kwargs, чтобы не путать параметры
         except TelegramBadRequest:
             pass
 
     if menu_msg_id:
         try:
-            await bot.delete_message(message.chat.id, menu_msg_id)
+            await bot.delete_message(chat_id=message.chat.id, message_id=menu_msg_id)  # 💬 kwargs, чтобы не путать параметры
         except TelegramBadRequest:
             try:
-                await bot.edit_message_reply_markup(message.chat.id, menu_msg_id, reply_markup=None)  # 💬 fallback: хотя бы снять кнопки
+                await bot.edit_message_reply_markup(
+                    chat_id=message.chat.id,
+                    message_id=menu_msg_id,
+                    reply_markup=None,
+                )  # 💬 fallback: снять кнопки (kwargs, чтобы не уехать в business_connection_id)
+
             except TelegramBadRequest:
                 pass
 
