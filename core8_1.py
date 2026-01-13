@@ -6750,6 +6750,30 @@ async def handle_vocab_phrase_select(message: Message, state: FSMContext):
 
     idx = int(txt)
     data = await state.get_data()
+
+    # 💬 при первом выборе цифры прячем главное меню и прогресс, чтобы не висели сверху
+    if not data.get("menu_hidden"):
+        last_menu_msg_id = data.get("last_menu_msg_id")
+        last_progress_msg_id = data.get("last_progress_msg_id")
+
+        if last_menu_msg_id:
+            try:
+                await bot.delete_message(message.chat.id, last_menu_msg_id)
+            except Exception:
+                pass
+
+        if last_progress_msg_id:
+            try:
+                await bot.delete_message(message.chat.id, last_progress_msg_id)
+            except Exception:
+                pass
+
+        await state.update_data(
+            menu_hidden=True,
+            last_menu_msg_id=None,
+            last_progress_msg_id=None
+        )
+
     phrases = data.get("lex_active_phrases") or []
 
     # если фраз нет = просто чистим ввод
