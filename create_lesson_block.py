@@ -3859,18 +3859,28 @@ async def handle_reading_action(message: Message, state: FSMContext):
         resize_keyboard=True,
     )
 
-    if action == "🧩 Ассет блоки":
-        await message.answer(
-            f"Отправь ассет блоки для {pack_label} текстом.\n"
-            "Формат каждой строки: ES | RU | hint (опц.)\n"
-            "Минимум 2 поля: ES | RU\n"
-            "Символ | внутри полей запрещён\n\n"
-            "Пример:\n"
-            "Estoy listo. | Я готов. | 💡 listo = готовый\n"
-            "¿Qué tal? | Как дела?",
-            reply_markup=ReplyKeyboardRemove(),
-        )
-        return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
+        if pack_key == "translate":
+            await message.answer(
+                f"Отправь ассет блоки для {pack_label} парами строк.\n"
+                "Пример:\n"
+                "Мы уже у кассы, я хочу <b>платить картой</b>\n"
+                "[[👩: bueno mira oye <b>pagar con tarjeta</b>, digo no, espera]]\n\n"
+                "Да, vale, но сначала я хочу <b>купить хлеб</b>\n"
+                "[[🧑: pues venga vale <b>comprar pan</b>, pero oye, rápido]]",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+        else:
+            await message.answer(
+                f"Отправь ассет блоки для {pack_label} текстом.\n"
+                "Формат каждой строки: ES | RU | hint (опц.)\n"
+                "Пример:\n"
+                "Estoy listo. | Я готов. | 💡 listo = готовый\n"
+                "¿Qué tal? | Как дела?",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+
+        return await state.set_state(NewTopicStates.waiting_reading_fragments_text)  # 💬 ждём ассет блоки
+
 
     if action == "🖼 Фото":
         await message.answer(
@@ -3967,42 +3977,97 @@ async def save_reading_fragments(message: Message, state: FSMContext):
         )
         return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
 
+    data_pre = await state.get_data()
+    pack_key_pre = data_pre.get("current_reading_pack_key") or ("translate" if data_pre.get("last_block") == "translate" else "reading")  # 💬 определяем режим пакета
+
     parsed: list = []
     bad_idx: list = []
 
-    for i, ln in enumerate(lines_in, start=1):
-        parts = [p.strip() for p in ln.split("|")]
-        # 💬 допускаем только 2 или 3 поля: ES | RU | hint(опц.)
-        if len(parts) < 2 or len(parts) > 3:
-            bad_idx.append(i)
-            continue
+    if pack_key_pre == "translate":
+        # 💬 формат "перевод" = пары строк: RU-строка + ES-реплика [[...]]
+        if len(lines_in) < 2 or (len(lines_in) % 2) != 0:
+            await message.answer(
+                "⛔ Формат неверный. Для «перевода» нужны пары строк: RU-строка + ES-строка.\n"
+                "Пример:\n"
+                "Я хочу <b>платить картой</b>|pagar=платить\n"
+                "[[👩: bueno mira <b>pagar con tarjeta</b>, digo no, espera]]",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+            return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
 
-        es = parts[0]
-        ru = parts[1]
-        hint = parts[2] if len(parts) == 3 else ""
+        pair_num = 0
+        i = 0
+        while i < len(lines_in):
+            pair_num += 1
+            ru_raw = lines_in[i].strip()
+            es_raw = lines_in[i + 1].strip()
 
-        if not es or not ru:
-            bad_idx.append(i)
-            continue
+            if not ru_raw or not es_raw:
+                bad_idx.append(pair_num)
+                i += 2
+                continue
 
-        parsed.append({
-            "type": "text",   # 💬 чтобы грамматика показывала как текстовый фрагмент
-            "es": es,
-            "ru": ru,
-            "hint": hint,
-        })
+            # 💬 подсказка только в RU-строке после |
+            ru_text = ru_raw
+            hint_txt = ""
+            if "|" in ru_raw:
+                left, right = ru_raw.split("|", 1)
+                ru_text = left.strip()
+                hint_raw = right.strip()
+                if hint_raw and hint_raw != "-":
+                    hint_txt = f"💡 {hint_raw}"  # 💬 хинт опционален, поддерживаем key=value
 
-    if bad_idx:
-        await message.answer(
-            "⛔ Формат неверный. Исправь и пришли заново.\n"
-            f"Проблемные строки: {', '.join(map(str, bad_idx))}\n\n"
-            "Формат: ES | RU | hint (опц.)\n"
-            "Пример:\n"
-            "Estoy listo. | Я готов. | 💡 listo = готовый\n"
-            "¿Qué tal? | Как дела?",
-            reply_markup=ReplyKeyboardRemove(),
-        )
-        return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
+            parsed.append({
+                "type": "text",  # 💬 сохраняем совместимость рендера
+                "ru": ru_text,
+                "es": es_raw,
+                "hint": hint_txt,
+            })
+            i += 2
+
+        if bad_idx:
+            await message.answer(
+                "⛔ Формат неверный. Проверь пары (RU+ES).\n"
+                f"Проблемные пары: {', '.join(map(str, bad_idx))}",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+            return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
+
+    else:
+        # 💬 формат "чтение" = ES | RU | hint(опц.)
+        for i, ln in enumerate(lines_in, start=1):
+            parts = [p.strip() for p in ln.split("|")]
+            if len(parts) < 2 or len(parts) > 3:
+                bad_idx.append(i)
+                continue
+
+            es = parts[0]
+            ru = parts[1]
+            hint = parts[2] if len(parts) == 3 else ""
+
+            if not es or not ru:
+                bad_idx.append(i)
+                continue
+
+            parsed.append({
+                "type": "text",   # 💬 чтобы показывалось как текстовый фрагмент
+                "es": es,
+                "ru": ru,
+                "hint": hint,
+            })
+
+        if bad_idx:
+            await message.answer(
+                "⛔ Формат неверный. Исправь и пришли заново.\n"
+                f"Проблемные строки: {', '.join(map(str, bad_idx))}\n\n"
+                "Формат: ES | RU | hint (опц.)\n"
+                "Пример:\n"
+                "Estoy listo. | Я готов. | 💡 listo = готовый\n"
+                "¿Qué tal? | Как дела?",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+            return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
+
 
     data = await state.get_data()
     topic = data.get("topic") or {}
@@ -4743,6 +4808,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
