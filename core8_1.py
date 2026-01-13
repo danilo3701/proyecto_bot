@@ -1256,7 +1256,11 @@ async def add_xp(user_id: int, topic: str, amount: int, action: str = None):
 
     # 3. words_learned сегодня + лимит
     if action == "words_learned":
+        
         limit = user.get("words_daily_limit", 10)
+        learned = int((user.get("stats", {}) or {}).get("words_learned", 0) or 0)  # 💬 всего выучено слов (общий счётчик)
+        parts.append(f"🍪 Слов выучено: {learned}")  # 💬 показываем всегда, без плюса
+
         if user.get("words_learned_today", 0) < limit:
             user["words_learned_today"] = user.get("words_learned_today", 0) + 1
 
@@ -4795,8 +4799,6 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     done_read = sum(1 for i in range(len(reading_packs)) if isinstance(rd_topic.get(str(i)), dict) and rd_topic.get(str(i), {}).get("done"))
     done_translate = sum(1 for i in range(len(translate_packs)) if isinstance(tr_topic.get(str(i)), dict) and tr_topic.get(str(i), {}).get("done"))
     
-    read_stars = ("⭐" * done_read) + ("☆" * (len(reading_packs) - done_read))
-    translate_stars = ("⭐" * done_translate) + ("☆" * (len(translate_packs) - done_translate))
     
 
     # 4) Подробный прогресс по разделам
@@ -4820,7 +4822,8 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         if p > 100:
             p = 100
         tick = " ✅" if p >= 100 else ""
-        return f"{icon}  {_bar(pct, width=10)}  {p}%{tick}"
+        return f"<b>{icon}  {_bar(pct, width=10)}  {p}%{tick}</b>"  # 💬 жирным вся строка прогресса (и цифры тоже)
+
 
     vocab_pct = (completed_phases / total_phases) if total_phases else 0.0
     tr_total = len(translate_packs)
