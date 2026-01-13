@@ -9779,13 +9779,13 @@ async def start_dialog_reading(message: Message, state: FSMContext):
         return await start_handler(message, state)
 
     topic = topics.get(topic_key, {})
-    dialog_phases = topic.get("dialogs", [])
+    dialog_phases = topic.get("translate", []) or topic.get("dialogs", [])  # 💬 сначала новый ключ translate, видим старый dialogs как fallback
 
     if not dialog_phases:
-        await smart_reply(message, "Пока в этой теме нет диалогов 🙈", parse_mode="HTML")
+        await smart_reply(message, "Пока в этой теме нет переводов 🙈", parse_mode="HTML")  # 💬 UI для кнопки «Переводить»
         return await lesson_menu_handler(message, state)
 
-    # 3️⃣ Показываем выбор фазы диалогов (даже если она одна)
+    # 3️⃣ Показываем выбор фазы перевода (даже если она одна)
     buttons = [
         [InlineKeyboardButton(
             text=phase.get("phase_name", f"Фаза {phase.get('phase_id')}"),
@@ -9797,10 +9797,11 @@ async def start_dialog_reading(message: Message, state: FSMContext):
 
     await smart_reply(
         message,
-        "Выбери фазу диалогов:",
+        "Выбери фазу перевода:",
         reply_markup=kb,
         parse_mode="HTML",
     )
+
     await state.set_state(LessonStates.waiting_dialog_phase)
 
 
@@ -9824,16 +9825,17 @@ async def handle_dialog_phase_choice(callback: CallbackQuery, state: FSMContext)
         return
 
     topic = topics.get(topic_key, {})
-    dialog_phases = topic.get("dialogs", [])
+    dialog_phases = topic.get("translate", []) or topic.get("dialogs", [])  # 💬 сначала новый ключ translate, видим старый dialogs как fallback
     phase = next((p for p in dialog_phases if p.get("phase_id") == phase_id), None)
     if not phase:
-        await callback.answer("Не нашёл такую фазу диалогов 😕", show_alert=True)
+        await callback.answer("Не нашёл такую фазу перевода 😕", show_alert=True)  # 💬 UI под «Переводить»
         return
 
     blocks = [b for b in phase.get("blocks", []) if b.get("lines")]
     if not blocks:
-        await callback.answer("В этой фазе пока нет блоков диалога 🙈", show_alert=True)
+        await callback.answer("В этой фазе пока нет блоков перевода 🙈", show_alert=True)  # 💬 UI под «Переводить»
         return
+
 
     await state.update_data(
         dialog_phase_id=phase_id,
