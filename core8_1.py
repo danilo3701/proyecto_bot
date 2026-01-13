@@ -8065,8 +8065,21 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
             )  # 💬 остаёмся в redo
             return await send_one_vocab(_fake_msg(), state)
         else:
-            # 💬 сет закрыт — пробуем показать 0–2 textquiz, затем offer_continue
-            pending = await _select_pending_textquiz_for_set(state)
+            pending = await _select_pending_textquiz_for_set(state, limit=1)  # 💬 1 textquiz после 4–5 poll квизов
+            
+            if pending:
+                # 💬 есть textquiz (ошибки и/или новые) → запускаем мини-сессию
+                next_idx = pending[0]
+                await state.update_data(
+                    vocab_index=next_idx,
+                    pending_textquiz=pending,
+                    last_main_quiz_index=idx,  # 💬 якорь: откуда продолжать poll-сеты после textquiz
+                    redo_stack=redo,
+                    redo_active=False,
+                    current_poll_id=None
+                )
+                return await send_one_vocab(_fake_msg(), state)
+
 
             if pending:
                 # 💬 есть textquiz (ошибки и/или новые) → запускаем мини-сессию
@@ -8180,6 +8193,45 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         from scenarios_estiloso8_1 import exercise_stickers
         sticker_id = random.choice(exercise_stickers)
         await send_and_auto_delete_sticker(bot, message.chat.id, sticker_id)
+
+
+    # 💬 4) Очередь textquiz: не дублируем сразу, при ошибке кидаем в конец ВСЕГО пула
+    data = await state.get_data()
+    idx = data.get("vocab_index", 0)
+
+    pending = list(data.get("pending_textquiz") or [])
+    redo_text = list(data.get("redo_stack_text") or [])
+
+    # 💬 текущий textquiz больше не повторяем в этой мини-сессии
+    pending = [i for i in pending if i != idx]
+
+    if is_correct:
+        # 💬 если верно = полностью убираем из очереди повторов
+        redo_text = [i for i in redo_text if i != idx]
+    else:
+        # 💬 если неверно = добавляем в хвост очереди повторов без дублей
+        if idx not in redo_text:
+            redo_text.append(idx)
+
+    # 💬 следующий textquiz: сначала pending, потом redo_stack_text
+    if pending:
+        next_idx = pending[0]
+    elif redo_text:
+        next_idx = redo_text.pop(0)
+    else:
+        # 💬 мини-сессия textquiz закончилась = возвращаемся в основной поток
+        next_idx = data.get("resume_vocab_index")
+        if next_idx is None:
+            next_idx = idx + 1  # 💬 безопасный fallback
+
+    await state.update_data(
+        vocab_index=next_idx,
+        pending_textquiz=pending,
+        redo_stack_text=redo_text,
+        current_poll_id=None
+    )  # 💬 сохраняем очереди и продолжаем без возврата в меню
+
+    return await send_one_vocab(message, state)
 
 
 
@@ -9211,25 +9263,39 @@ async def handle_offer_continue_vocab(message: Message, state: FSMContext):
             )
             return await send_one_vocab(message, state)
 
-# --- 2️⃣ если quiz больше нет — пробуем запустить мини-сессию textquiz ---
-        # 💬 Если мы тут — значит обычные квизы кончились. Запускаем пакет по 6 штук (limit=6).
-        pending = await _select_pending_textquiz_for_set(state, limit=6)
+        # --- 2️⃣ если quiz больше нет — пробуем запустить мини-сессию textquiz ---
+        # 💬 Если мы тут = обычные квизы кончились. Запускаем остаток textquiz пачкой, без возврата в меню раньше времени
+        pending = await _select_pending_textquiz_for_set(state, limit=6)  # 💬 добираем хвост textquiz
 
         if pending:
             next_idx = pending[0]
+
+            # 💬 запоминаем, куда вернуться после мини-сессии textquiz
+            data_now = await state.get_data()
+            resume_idx = data_now.get("vocab_index", 0) + 1  # 💬 следующий блок после закрытия quiz-сета
+
             await state.update_data(
+                resume_vocab_index=resume_idx,  # 💬 возврат в основной поток после textquiz
                 vocab_index=next_idx,
                 pending_textquiz=pending,
-                redo_stack=[],
+                redo_stack=data_now.get("redo_stack") or [],
                 redo_active=False,
-                refusal_count=0
+                refusal_count=0,
+                last_main_quiz_index=None
             )
             return await send_one_vocab(message, state)
 
+
         # --- 3️⃣ если нет ни quiz, ни textquiz — финал урока ---
-        # 💬 Удален дубликат кода, теперь выход только один раз
+        # 💬 финальный выход один раз, без дублей
         await smart_reply(message, "🔥 Красавчик, на этом всё! Возвращаемся в меню ✌️")
-        await state.update_data(redo_stack=[], redo_active=False, refusal_count=0)
+        await state.update_data(
+            redo_stack=[],
+            redo_active=False,
+            refusal_count=0,
+            pending_textquiz=[],
+            last_main_quiz_index=None
+        )
         return await lesson_menu_handler(message, state)
 
 
