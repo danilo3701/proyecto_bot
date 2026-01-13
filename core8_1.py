@@ -7310,6 +7310,9 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
         return
 
     data = await state.get_data()
+    streak = int(data.get("vocab_timeout_streak", 0) or 0) + 1
+    await state.update_data(vocab_timeout_streak=streak)  # 💬 считаем серию тайм-аутов подряд
+
     if data.get("current_poll_id") != poll_id:
         return  # 💬 квиз уже обработан или это не текущий poll
 
@@ -7709,6 +7712,8 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
     # 2) Отменяем таймаут
     await state.update_data(current_poll_id=None)
+    await state.update_data(vocab_timeout_streak=0)  # 💬 любой ответ сбрасывает серию тайм-аутов
+
 
     # 3) Правильность и начисление XP
     idx = data.get("vocab_index", 0)
@@ -7739,7 +7744,8 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
 
 
-    delta = random.randint(28, 37) if is_correct else -10
+    delta = 30 if is_correct else -10  # 💬 фиксированные значения для vocab quiz
+
     await award_xp(delta, state)
 
     # 💬 Уникальный прогресс poll-квизов: redo не накручивает прогресс повторно
@@ -7872,9 +7878,6 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
         await _delete_vocab_quiz_progress_message(chat_id, state)  # 💬 удаляем прогресс вместе с poll
     except Exception:
         pass
-
-    if fb:
-
 
 
 
