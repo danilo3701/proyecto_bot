@@ -3859,6 +3859,8 @@ async def handle_reading_action(message: Message, state: FSMContext):
         resize_keyboard=True,
     )
 
+    if action == "🧩 Ассет блоки":
+        # 💬 режим "перевод" = пары строк: RU-строка + ES-реплика [[...]]
         if pack_key == "translate":
             await message.answer(
                 f"Отправь ассет блоки для {pack_label} парами строк.\n"
@@ -3873,6 +3875,8 @@ async def handle_reading_action(message: Message, state: FSMContext):
             await message.answer(
                 f"Отправь ассет блоки для {pack_label} текстом.\n"
                 "Формат каждой строки: ES | RU | hint (опц.)\n"
+                "Минимум 2 поля: ES | RU\n"
+                "Символ | внутри полей запрещён\n\n"
                 "Пример:\n"
                 "Estoy listo. | Я готов. | 💡 listo = готовый\n"
                 "¿Qué tal? | Как дела?",
@@ -3880,7 +3884,6 @@ async def handle_reading_action(message: Message, state: FSMContext):
             )
 
         return await state.set_state(NewTopicStates.waiting_reading_fragments_text)  # 💬 ждём ассет блоки
-
 
     if action == "🖼 Фото":
         await message.answer(
@@ -4808,6 +4811,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
