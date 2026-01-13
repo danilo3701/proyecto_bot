@@ -8682,7 +8682,8 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
                 redo_active_text=True,
             )
             # ВАЖНО: vocab_index не меняем — остаёмся на этом же idx
-            return await send_one_vocab(message, state)
+            return await _show_offer_continue_after_textquiz(message, state, target_idx=idx)  # 💬 перебивка перед повтором
+
 
     # 7) Линейный проход (redo_active_text == False): сначала проходим сет, потом пересдачи
     if next_linear is not None:
@@ -8692,7 +8693,8 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
             redo_stack_text=redo_t,
             redo_active_text=False,
         )
-        return await send_one_vocab(message, state)
+        return await _show_offer_continue_after_textquiz(message, state, target_idx=next_linear)  # 💬 перебивка перед следующим textquiz
+
     else:
         # дошли до конца линейки в сете
         if redo_t:
@@ -8703,7 +8705,8 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
                 redo_stack_text=redo_t,
                 redo_active_text=True,
             )
-            return await send_one_vocab(message, state)
+            return await _show_offer_continue_after_textquiz(message, state, target_idx=nxt)  # 💬 перебивка перед пересдачей
+
         else:
             # сет textquiz завершён — теперь offer_continue
             oc_scene = random.choice(scenarios["offer_continue"])
@@ -10177,6 +10180,46 @@ async def handle_subscription_invalid_input(message: Message, state: FSMContext)
 
 
 
+async def _show_offer_continue_after_textquiz(message: Message, state: FSMContext, target_idx: int):
+    data = await state.get_data()
+
+    # 💬 что делает эта часть: удаляем вопрос textquiz и ответ пользователя перед offer_continue
+    prompt_id = data.get("vocab_textquiz_prompt_id") or data.get("last_prompt_id")
+    to_delete = [prompt_id, getattr(message, "message_id", None)]
+    for mid in to_delete:
+        if not mid:
+            continue
+        try:
+            await bot.delete_message(message.chat.id, mid)
+        except TelegramBadRequest:
+            pass
+
+    oc_scene = random.choice(scenarios["offer_continue"])
+
+    # 💬 что делает эта часть: на всякий случай убираем ReplyKeyboard, чтобы не висела
+    try:
+        rm = await bot.send_message(message.chat.id, "\u00AD", reply_markup=ReplyKeyboardRemove())
+        await _safe_delete_message(message.chat.id, rm.message_id)
+    except Exception:
+        pass
+
+    # 💬 что делает эта часть: показываем offer_continue только через inline-кнопки
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
+        for btn in oc_scene["buttons"]
+    ]])
+
+    await state.update_data(
+        current_stage="offer_continue",
+        current_scene=oc_scene,
+        last_oc_msg_id=None,                 # 💬 запишем после отправки, чтобы cb удалял всё корректно
+        offer_continue_target_idx=target_idx # 💬 куда прыгнуть после “Продолжить”
+    )
+    await state.set_state(LessonStates.showing_vocab)
+
+    oc_msg = await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+    await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 cb_scenario_vocab удалит это сообщение
+    return
 
 
 
@@ -10328,6 +10371,17 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
         # 3) Убираем inline-кнопки
         try:
             await cb.message.edit_reply_markup()
+        # 💬 что делает эта часть: если textquiz поставил точный target_idx, то "Продолжить" прыгает туда без инкремента
+        target_idx = data.get("offer_continue_target_idx")
+        if next_stage == "next_item" and target_idx is not None:
+            vocab_list = get_vocab_list(data)
+            if 0 <= target_idx < len(vocab_list):
+                await state.update_data(vocab_index=target_idx, offer_continue_target_idx=None)
+                return await send_one_vocab(cb.message, state)
+
+            # 💬 что делает эта часть: target сломан/вышел за границы = просто чистим и падаем в обычную логику ниже
+            await state.update_data(offer_continue_target_idx=None)
+
         except TelegramBadRequest:
             pass
 
