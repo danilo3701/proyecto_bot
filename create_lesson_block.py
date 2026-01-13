@@ -2744,6 +2744,12 @@ async def import_vocab_allin_bulk(message: Message, state: FSMContext):
         )
         return await send_post_menu(message, state)
 
+    if data.get("allin_force_new_phase"):
+        await state.update_data(allin_force_new_phase=False)  # 💬 сбрасываем флаг, чтобы не создавать фазы повторно
+        await _create_vocab_phase_auto(state)  # 💬 каждый ALL IN = новая фаза (пак)
+        data = await state.get_data()  # 💬 обновляем topic/current_phase_id после автосоздания фазы
+
+
     topic_data = data["topic"]
     topic_path = data["topic_path"]
     cp = data.get("current_phase_id")
@@ -3042,6 +3048,7 @@ async def handle_post_action(message: Message, state: FSMContext):
 
 
         if text == "🧩 ALL IN":
+            await state.update_data(allin_force_new_phase=True)  # 💬 для ALL IN создаём новую фазу именно на следующей вставке текста
             cp = data.get("current_phase_id")
             if not cp:
                 await message.answer("⚠️ Сначала выбери фазу через 📘VOC.")  # 💬 защита от вставки без выбранной фазы
@@ -4811,6 +4818,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
