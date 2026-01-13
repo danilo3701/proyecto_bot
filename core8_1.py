@@ -4649,9 +4649,8 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         total_quizzes=total_quizzes,  # 💬 сохраняем для прогресса по квизам
     )
 
-    # 💬 Разблокировано, если глобальный XP по теме >= порога
-    unlocked = topic_xp >= xp_threshold
-    await state.update_data(unlocked=unlocked)
+    # 💬 Разблокирование считаем ниже по прогрессу «Учить слова» (фазы)
+    unlocked = data.get("unlocked", False)
 
 
     # 💬 Для отображения
@@ -4672,6 +4671,11 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         if per_phase.get(ph["phase_id"], 0)
            >= len([b for b in ph.get("vocab", []) if "link" in b or "url" in b])
     )
+    # 💬 70% фаз словаря пройдено = разблокируем остальные разделы
+    vocab_unlock_percent = (completed_phases / total_phases * 100) if total_phases else 100
+    unlocked = vocab_unlock_percent >= 70
+    await state.update_data(unlocked=unlocked)
+
     stars = "⭐" * completed_phases + "☆" * (total_phases - completed_phases)
 
 
@@ -4855,8 +4859,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     # 3) Если ещё не разблокировано — строка «Набери минимум display_threshold»
     if not unlocked:
         parts.append(
-            # 💬 просим добрать минимальный XP по этой теме (без сокращения «мин.»)
-            f"🔒 <b>Набери минимум {display_threshold} XP 🌟</b>"
+            "🔒 <b>Набери минимум 70% 📖</b>\n"
         )
 
   
@@ -8204,15 +8207,27 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         .get(topic_key, 0)
     )
 
-    MIN_TEXTQUIZ_FOR_UNLOCK = 6
 
-    if (
-        not data2.get("unlocked")
-        and topic_xp >= threshold
-        and data2.get("textquiz_correct", 0) >= MIN_TEXTQUIZ_FOR_UNLOCK
-    ):
-        await state.update_data(unlocked=True)
+    data2 = await state.get_data()
+    
+    # 💬 Разблокирование по прогрессу «Учить слова» (70% фаз)
+    phases = topics.get(data2.get("selected_topic", ""), {}).get("vocab", [])
+    total_phases = len(phases)
+    per_phase = data2.get("vocab_done_per_phase", {})
+    
+    completed_phases = 0
+    for ph in phases:
+        phase_id = ph.get("phase_id")
+        need_quizzes = len([b for b in ph.get("vocab", []) if b.get("type") in ("quiz", "textquiz")])
+        done_here = per_phase.get(phase_id, 0)
+        if need_quizzes > 0 and done_here >= need_quizzes:
+            completed_phases += 1
+    
+    vocab_unlock_percent = (completed_phases / total_phases * 100) if total_phases else 100
+    if not data2.get("unlocked", False) and vocab_unlock_percent >= 70:
+        await state.update_data(unlocked=True)  # 💬 фиксируем разблокировку
         await message.answer("🔐 <b>Блоки разблокированы! 🎉</b>", parse_mode="HTML")
+
 
 
     # 💬 4) Дополнительный фидбэк: печенька или правильный ответ
