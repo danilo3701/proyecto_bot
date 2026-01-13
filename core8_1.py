@@ -4752,9 +4752,6 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
     # 1) Общий прогресс
     # 💬 Сначала текст с процентом, ниже — визуальный бар
-    parts.append(
-        f"📊 <b>Прогресс:</b> {percent:.0f}% {medal}\n{bar2}"
-    )
 
 
     # — Мотивационная цитата по прогрессу —
