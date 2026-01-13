@@ -3322,6 +3322,22 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
                     pass  # 💬 если id битый/сообщение уже исчезло = просто игнорируем
 
 
+    old_topic = (await state.get_data()).get("selected_topic")
+    if old_topic and old_topic != topic_key:
+        await state.update_data(
+            completed_phases=0,
+            total_phases=0,
+            current_stage=None,
+            vocab_index=0,
+            ex_index=0,
+            video_index=0,
+            vocab_done=0,
+            ex_done=0,
+            done_dialog=0,
+            redo_stack=[],
+            pending_textquiz=None,
+            lex_mode_active=False,
+        )  # 💬 сбрасываем прогресс, чтобы новый топик не наследовал 100%
 
     # 💬 Сохраняем выбранную тему в FSM
     await state.update_data(selected_topic=topic_key)
