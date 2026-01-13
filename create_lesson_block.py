@@ -3780,7 +3780,8 @@ async def get_reading_title(message: Message, state: FSMContext):
         "fragments": [],
         "assets": []  # 💬 ассеты внутри конкретного пака
     })
-    pack_index = len(topic[pack_key]) - 1  # 💬 индекс именно в выбранном ключе
+        pack_index = len(topic[pack_key]) - 1  # 💬 индекс именно в выбранном ключе
+
 
     with open(topic_path, "w", encoding="utf-8") as f:
         json.dump(topic, f, ensure_ascii=False, indent=2)
@@ -4703,6 +4704,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
