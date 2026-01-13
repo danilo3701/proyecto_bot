@@ -10374,6 +10374,9 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
         # 3) Убираем inline-кнопки
         try:
             await cb.message.edit_reply_markup()
+        except TelegramBadRequest:
+            pass
+
         # 💬 что делает эта часть: если textquiz поставил точный target_idx, то "Продолжить" прыгает туда без инкремента
         target_idx = data.get("offer_continue_target_idx")
         if next_stage == "next_item" and target_idx is not None:
@@ -10385,8 +10388,6 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
             # 💬 что делает эта часть: target сломан/вышел за границы = просто чистим и падаем в обычную логику ниже
             await state.update_data(offer_continue_target_idx=None)
 
-        except TelegramBadRequest:
-            pass
 
         # 💬 удаляем сообщение offer_continue целиком: текст, реакцию, кнопки
         try:
