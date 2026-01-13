@@ -1454,6 +1454,19 @@ async def handle_main_menu(message: Message, state: FSMContext):
         elif text == "📚 Читать":
             text = "📖 Добавить чтение"
 
+    # ----------------------- Добавить чтение -----------------------
+    if text in ("➕ Добавить чтение", "📖 Читать", "📖 читать"):
+        await state.update_data(last_block="reading")  # 💬 помечаем режим "Читать", дальше общий FSM сохранит в topic["reading"]
+        await message.answer(
+            "📖 Впишите название фазы чтения:\n\n"
+            "Примеры:\n"
+            "Читать = Кухня\n"
+            "Читать = Еда в кафе\n\n"
+            "Потом пришлёшь фрагменты (каждый фрагмент отдельно)."
+        )  # 💬 отдельная инструкция для чтения, чтобы не путалось с переводом
+        return await state.set_state(NewTopicStates.waiting_reading_title)  # 💬 общий state, различаем по last_block
+
+    
     # ----------------------- Добавить перевод -----------------------
     if text == "📝 Добавить перевод":
         await state.update_data(last_block="translate")  # 💬 что делает эта часть: помечаем режим «Переводить»
@@ -4722,6 +4735,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
