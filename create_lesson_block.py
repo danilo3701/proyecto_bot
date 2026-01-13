@@ -437,16 +437,16 @@ def get_main_menu(category: str | None = None) -> ReplyKeyboardMarkup:
             ],
             resize_keyboard=True
         )
-
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📚 словарь"), KeyboardButton(text="✏️ Добавить упражнение")],
-            [KeyboardButton(text="🎥 Добавить видео"),    KeyboardButton(text="💬 Добавить диалог")],
-            [KeyboardButton(text="📝 Добавить перевод")],  # 💬 для лексики теперь название "Переводить"
-            [KeyboardButton(text="👁 Просмотреть"),       KeyboardButton(text="✏️ Редактировать")]
-        ],
-        resize_keyboard=True
-    )
+            keyboard=[
+                [KeyboardButton(text="📚 словарь"), KeyboardButton(text="✏️ Добавить упражнение")],
+                [KeyboardButton(text="🎥 Добавить видео")],
+                [KeyboardButton(text="📖 Добавить чтение"), KeyboardButton(text="📝 Добавить перевод")],  # 💬 два разных режима
+                [KeyboardButton(text="👁 Просмотреть"),       KeyboardButton(text="✏️ Редактировать")]
+            ],
+            resize_keyboard=True
+        )
+
 
 
 
@@ -1326,6 +1326,7 @@ async def get_topic_description(message: Message, state: FSMContext):
         "videos":        topic.get("videos", []),
         "dialogs":       topic.get("dialogs", []),
         "reading":       topic.get("reading", []),  # 💬 что делает эта часть: не теряем пакеты чтения при сохранении описания
+        "translate":     topic.get("translate", []),  # 💬 что делает эта часть: отдельные фазы «Переводить»
 
     }
 
@@ -1453,6 +1454,13 @@ async def handle_main_menu(message: Message, state: FSMContext):
         elif text == "📚 Читать":
             text = "📖 Добавить чтение"
 
+    # ----------------------- Добавить перевод -----------------------
+    if text == "📝 Добавить перевод":
+        await state.update_data(last_block="translate")  # 💬 что делает эта часть: помечаем режим «Переводить»
+    
+        prompt = "📝 Впишите название фазы перевода:"  # 💬 заголовок фазы translate
+        await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
+        return await state.set_state(NewTopicStates.waiting_reading_title)  # 💬 переиспользуем FSM чтения
 
     # ----------------------- Добавить словарь -----------------------
     if text == "📚 словарь":
@@ -1618,9 +1626,64 @@ async def handle_main_menu(message: Message, state: FSMContext):
                     lines.append("  …")
             lines.append("")
 
+        
+
         else:
-            # 💬 fallback для лексики оставляем как было, но без падений
-            lines.append("ℹ️ Это не грамматика. Для лексики оставляем старый просмотр.")
+            # ====== ЛЕКСИКА: словарь/упражнения/видео + Читать/Переводить ======
+            vocab_phases = topic_data.get("vocab") or []
+            lines.append("📖 <b>Словарь (фазы):</b>")
+            if not vocab_phases:
+                lines.append("  — пусто")
+            else:
+                for p_idx, ph in enumerate(vocab_phases[:20], start=1):
+                    ph_name = str(ph.get("phase_name") or f"Фаза {p_idx}")
+                    items = ph.get("vocab") or []
+                    lines.append(f"  {p_idx}) <b>{_preview_text(ph_name, 40)}</b> (элементов: {len(items)})")
+            lines.append("")
+        
+            ex_list = topic_data.get("exercises") or []
+            lines.append("✏️ <b>Упражнения:</b>")
+            lines.append(f"  — всего: {len(ex_list)}")  # 💬 что делает эта часть: быстрый счётчик
+            lines.append("")
+        
+            vid_list = topic_data.get("videos") or []
+            lines.append("🎥 <b>Видео:</b>")
+            if not vid_list:
+                lines.append("  — пусто")
+            else:
+                for idx, v in enumerate(vid_list[:15], start=1):
+                    title = str(v.get("title") or _preview_url_title(str(v.get("link") or "")) or "видео")
+                    lines.append(f"  {idx}) 🎬 {_preview_text(title, 50)}")
+                if len(vid_list) > 15:
+                    lines.append("  …")
+            lines.append("")
+        
+            reading_list = topic_data.get("reading") or []
+            lines.append("📖 <b>Читать:</b>")
+            if not reading_list:
+                lines.append("  — пусто")
+            else:
+                for r_idx, pack in enumerate(reading_list[:15], start=1):
+                    ttl = str(pack.get("title") or "Чтение")
+                    fr = pack.get("fragments") or []
+                    assets = pack.get("assets") or []
+                    lines.append(f"  {r_idx}) 📖 <b>{_preview_text(ttl, 40)}</b> (fr={len(fr)}, assets={len(assets)})")
+            lines.append("")
+        
+            translate_list = topic_data.get("translate") or []
+            lines.append("📝 <b>Переводить:</b>")
+            if not translate_list:
+                lines.append("  — пусто")
+            else:
+                for t_idx, pack in enumerate(translate_list[:15], start=1):
+                    ttl = str(pack.get("title") or "Перевод")
+                    fr = pack.get("fragments") or []
+                    assets = pack.get("assets") or []
+                    lines.append(f"  {t_idx}) 📝 <b>{_preview_text(ttl, 40)}</b> (fr={len(fr)}, assets={len(assets)})")
+            lines.append("")
+
+
+        
 
         await message.answer("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
 
@@ -3711,17 +3774,23 @@ async def get_reading_title(message: Message, state: FSMContext):
         await message.answer("❗ Ошибка: не найден путь темы (topic_path).")
         return
 
-    topic.setdefault("reading", []).append({
-        "title": title,
-        "fragments": [],
-        "assets": []  # 💬 сюда кладём фото/стикеры/гифки для чтения
-    })
-    pack_index = len(topic["reading"]) - 1
+    pack_key = "translate" if (data.get("last_block") == "translate") else "reading"  # 💬 что делает эта часть: выбираем ключ хранения
+    topic.setdefault(pack_key, []).append({
+            "title": title,
+            "fragments": [],
+            "assets": []  # 💬 ассеты внутри конкретного пака
+        })
+        pack_index = len(topic[pack_key]) - 1  # 💬 индекс именно в выбранном ключе
+    
+        with open(topic_path, "w", encoding="utf-8") as f:
+            json.dump(topic, f, ensure_ascii=False, indent=2)
+    
+        await state.update_data(
+            topic=topic,
+            current_reading_pack_index=pack_index,
+            current_reading_pack_key=pack_key,  # 💬 что делает эта часть: дальше фрагменты/фото сохраняем в правильный раздел
+        )
 
-    with open(topic_path, "w", encoding="utf-8") as f:
-        json.dump(topic, f, ensure_ascii=False, indent=2)
-
-    await state.update_data(topic=topic, current_reading_pack_index=pack_index)
 
     kb = ReplyKeyboardMarkup(
         keyboard=[
@@ -3904,7 +3973,9 @@ async def save_reading_fragments(message: Message, state: FSMContext):
     except Exception:
         pack_index = -1  # 💬 защита, если индекс не сохранён
 
-    packs = topic.setdefault("reading", [])
+    pack_key = data.get("current_reading_pack_key") or ("translate" if data.get("last_block") == "translate" else "reading")  # 💬 что делает эта часть: правильный раздел
+    packs = topic.setdefault(pack_key, [])
+
     if not (topic_path and 0 <= pack_index < len(packs)):
         await message.answer(
             "⚠️ Не найден активный пак чтения. Начни добавление чтения заново.",
@@ -3976,7 +4047,9 @@ async def save_reading_photo(message: Message, state: FSMContext):
     except Exception:
         pack_index = -1
 
-    packs = topic.setdefault("reading", [])
+    pack_key = data.get("current_reading_pack_key") or ("translate" if data.get("last_block") == "translate" else "reading")  # 💬 что делает эта часть: правильный раздел
+    packs = topic.setdefault(pack_key, [])
+
     if not (topic_path and 0 <= pack_index < len(packs)):
         await message.answer(
             "⚠️ Не найден активный пак чтения. Начни добавление чтения заново.",
@@ -4630,6 +4703,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
