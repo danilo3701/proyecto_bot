@@ -3824,7 +3824,8 @@ async def get_reading_title(message: Message, state: FSMContext):
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🧩 Ассет блоки"), KeyboardButton(text="🖼 Фото")],
-            [KeyboardButton(text="✅ Готово"), KeyboardButton(text="↩️ Назад")]
+            [KeyboardButton(text="🔄 Создать ещё"), KeyboardButton(text="↩️ Назад")]  # 💬 запускаем создание следующего пакета без выхода
+
         ],
         resize_keyboard=True
     )
@@ -3853,7 +3854,7 @@ async def handle_reading_action(message: Message, state: FSMContext):
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🧩 Ассет блоки"), KeyboardButton(text="🖼 Фото")],
-            [KeyboardButton(text="✅ Готово"), KeyboardButton(text="↩️ Назад")],
+            [KeyboardButton(text="🔄 Создать ещё"), KeyboardButton(text="↩️ Назад")],
         ],
         resize_keyboard=True,
     )
@@ -3879,30 +3880,44 @@ async def handle_reading_action(message: Message, state: FSMContext):
         )
         return await state.set_state(NewTopicStates.waiting_reading_photo_text)
 
-    if action in {"✅ Готово", "↩️ Назад"}:
-        # 💬 если пакет пустой и нажали Назад = удаляем его, чтобы не плодить мусор
+    if action in {"🔄 Создать ещё", "↩️ Назад"}:  # 💬 либо создаём следующий пакет, либо выходим назад
+
+        # 💬 если пакет пустой = удаляем его, чтобы не плодить мусор
         try:
             idx = int(data.get("current_reading_pack_index"))
         except Exception:
-            idx = -1
+            idx = None  # 💬 если индекса нет = ничего не удаляем
 
+        if action == "🔄 Создать ещё":
+            await state.update_data(
+                current_reading_pack_index=None,
+                current_reading_pack_key=None,
+                reading_photo_caption=None,  # 💬 сбрасываем контекст текущего пакета перед созданием нового
+            )
+            await message.answer(
+                f"✍️ Впишите название фазы {pack_label}:",
+                reply_markup=ReplyKeyboardRemove(),  # 💬 снова ждём обычный текст
+            )
+            return await state.set_state(NewTopicStates.waiting_reading_title)
+
+        packs_list = topic.get(pack_key) if pack_key in {"reading", "translate"} else topic.get("reading")  # 💬 выбираем правильный список пакетов
         if (
-            action == "↩️ Назад"
-            and topic_path
-            and isinstance(topic.get("reading"), list)
-            and 0 <= idx < len(topic["reading"])
+            topic_path
+            and isinstance(packs_list, list)
+            and idx is not None
+            and 0 <= idx < len(packs_list)
         ):
-            pack = topic["reading"][idx] or {}
+            pack = packs_list[idx] or {}
             if not (pack.get("fragments") or pack.get("assets")):
-                topic["reading"].pop(idx)
+                packs_list.pop(idx)
                 try:
                     import json
-
                     with open(topic_path, "w", encoding="utf-8") as f:
                         json.dump(topic, f, ensure_ascii=False, indent=2)
                     await state.update_data(topic=topic)
                 except Exception:
                     pass
+
 
         await state.update_data(
             current_reading_pack_index=None,
@@ -3912,23 +3927,14 @@ async def handle_reading_action(message: Message, state: FSMContext):
 
         # 💬 если это редактирование грамматики = не прыгаем в меню лексики, возвращаемся в список Читать
         if data.get("edit_gram_section") == "📚 Читать":
-            if action == "✅ Готово":
-                data = await state.get_data()
-                category_now = ((data.get("topic") or {}).get("category") or "")  # 💬 берём категорию текущей темы
-                await message.answer("✅ Пакет чтения сохранён.", reply_markup=get_main_menu(category_now))
-
-            else:
-                await message.answer("↩️ Вернулись к списку чтения.", reply_markup=ReplyKeyboardRemove())
+            await message.answer("↩️ Вернулись к списку чтения.", reply_markup=ReplyKeyboardRemove())  # 💬 кнопки пакета убраны
             return await _edit_grammar_show_list(message, state)
 
-        # 💬 иначе = обычный режим = возвращаемся в главное меню темы (с правильной категорией)
-        if action == "✅ Готово":
-            category_now = ((data.get("topic") or {}).get("category") or "")  # 💬 возвращаемся в меню по категории темы
-            await message.answer("↩️ Вернулись назад.", reply_markup=get_main_menu(category_now))
 
-        else:
-            await message.answer("↩️ Вернулись назад.", reply_markup=get_main_menu(category_now))
+        # 💬 обычный выход назад из пакета = возвращаемся в меню темы
+        await message.answer("↩️ Вернулись назад.", reply_markup=get_main_menu(category_now))
         return await state.set_state(NewTopicStates.waiting_first_choice)
+
 
     await message.answer("Выбери действие кнопками.", reply_markup=kb)
 
@@ -3942,7 +3948,7 @@ async def save_reading_fragments(message: Message, state: FSMContext):
         kb = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="🧩 Ассет блоки"), KeyboardButton(text="🖼 Фото")],
-                [KeyboardButton(text="✅ Готово"), KeyboardButton(text="↩️ Назад")],
+                [KeyboardButton(text="🔄 Создать ещё"), KeyboardButton(text="↩️ Назад")],
             ],
             resize_keyboard=True,
         )
@@ -4034,7 +4040,7 @@ async def save_reading_fragments(message: Message, state: FSMContext):
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🧩 Ассет блоки"), KeyboardButton(text="🖼 Фото")],
-            [KeyboardButton(text="✅ Готово"), KeyboardButton(text="↩️ Назад")],
+            [KeyboardButton(text="🔄 Создать ещё"), KeyboardButton(text="↩️ Назад")],
         ],
         resize_keyboard=True,
     )
@@ -4052,7 +4058,7 @@ async def handle_reading_photo_text(message: Message, state: FSMContext):
         kb = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="🧩 Ассет блоки"), KeyboardButton(text="🖼 Фото")],
-                [KeyboardButton(text="✅ Готово"), KeyboardButton(text="↩️ Назад")],
+                [KeyboardButton(text="🔄 Создать ещё"), KeyboardButton(text="↩️ Назад")],
             ],
             resize_keyboard=True,
         )
@@ -4125,7 +4131,7 @@ async def save_reading_photo(message: Message, state: FSMContext):
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🧩 Ассет блоки"), KeyboardButton(text="🖼 Фото")],
-            [KeyboardButton(text="✅ Готово"), KeyboardButton(text="↩️ Назад")],
+            [KeyboardButton(text="🔄 Создать ещё"), KeyboardButton(text="↩️ Назад")],
         ],
         resize_keyboard=True,
     )
@@ -4737,6 +4743,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
