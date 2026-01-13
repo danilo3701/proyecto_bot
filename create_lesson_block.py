@@ -1291,6 +1291,8 @@ async def get_topic_name(message: Message, state: FSMContext):
         "videos": [],
         "dialogs": [],
         "reading": []  # 💬 что делает эта часть: хранит пакеты чтения (фрагменты как в подкастах)
+        "translate": [],  # 💬 отдельные пакеты для кнопки «Переводи»
+
 
     }
     
@@ -4257,7 +4259,7 @@ async def handle_edit_action(message: Message, state: FSMContext):
         return
 
     # 💬 добавить чтение
-    if text in {"➕ Добавить чтение", "📖 Добавить чтение"}:
+    if text in {"➕ Добавить чтение", "📖 Добавить чтение", "➕ Добавить перевод", }:
         await state.update_data(last_block="reading")  # 💬 чтобы не путать меню после сохранения
 
         data = await state.get_data()
@@ -4735,6 +4737,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
