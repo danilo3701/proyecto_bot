@@ -24,6 +24,7 @@ from pathlib import Path  # 💬 чтобы строить путь к файл�
 
 import json                         # Чтение/запись JSON-топиков
 import random                       # Рандомизация (CTA-фразы, сценарии, стикеры)
+import html                         # 💬 html.escape для безопасного HTML в Telegram
 import asyncio                      # Асинхронные паузы (smart_reply)
 import logging                      # Логирование для отладки
 import math
