@@ -7320,14 +7320,15 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
         return
 
     data = await state.get_data()
+
     streak = int(data.get("vocab_timeout_streak", 0) or 0) + 1
-    await state.update_data(vocab_timeout_streak=streak)  # 💬 считаем серию тайм-аутов подряд
+    await state.update_data(vocab_timeout_streak=streak)  # 💬 считаем серию тайм-аутов подряд (один инкремент)
 
     if data.get("current_poll_id") != poll_id:
         return  # 💬 квиз уже обработан или это не текущий poll
 
-    streak = int(data.get("vocab_timeout_streak", 0) or 0) + 1  # 💬 считаем серию тайм-аутов
     poll_msg_id = data.get("current_poll_message_id")
+
 
     # 💬 что делает эта часть: закрываем poll и ставим реакцию таймаута прямо на poll
     if poll_msg_id:
@@ -7360,6 +7361,31 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
     topic_key = data.get("selected_topic", "unknown")
     await award_xp(-20, state)
     await add_xp(chat_id, topic_key, -20)
+
+    if streak >= 2:
+        await state.update_data(
+            vocab_timeout_streak=0,
+            current_poll_id=None,
+            current_poll_message_id=None
+        )  # 💬 2 тайм-аута подряд = сбрасываем серию и уходим в меню
+
+        try:
+            await bot.send_message(chat_id, "👀 Похоже, тебя уже нет. Возвращаю в меню 🙌")
+        except Exception:
+            pass
+
+        fake_chat = Chat(id=chat_id, type="private")
+        fake_user = User(id=chat_id, is_bot=False, first_name="")
+        fake_msg = Message(
+            message_id=0,
+            date=datetime.datetime.now(),
+            chat=fake_chat,
+            from_user=fake_user,
+            text=""
+        )
+        return await lesson_menu_handler(fake_msg, state)  # 💬 сохраняем то, что уже начислено, и выходим
+
+    
     
     await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)
     
@@ -7569,7 +7595,39 @@ async def _review_failed_vocab_quiz_timeout_handler(poll_id: str, chat_id: int, 
         return
 
     # 💬 сбрасываем poll_id, чтобы не сработало дважды
+    streak = int(data.get("vocab_timeout_streak", 0) or 0) + 1
     await state.update_data(current_poll_id=None, vocab_timeout_streak=streak)  # 💬 фиксируем серию тайм-аутов
+
+    if streak >= 2:
+        await state.update_data(
+            vocab_timeout_streak=0,
+            current_poll_id=None,
+            current_poll_message_id=None
+        )  # 💬 2 тайм-аута подряд в пересдаче = выходим в меню
+
+        mid = data.get("current_poll_message_id")
+        if mid:
+            try:
+                await bot.delete_message(chat_id, mid)
+            except Exception:
+                pass
+
+        try:
+            await bot.send_message(chat_id, "👀 Похоже, ты отвлёкся. Вернул в меню 🙌")
+        except Exception:
+            pass
+
+        fake_chat = Chat(id=chat_id, type="private")
+        fake_user = User(id=chat_id, is_bot=False, first_name="")
+        fake_msg = Message(
+            message_id=0,
+            date=datetime.datetime.now(),
+            chat=fake_chat,
+            from_user=fake_user,
+            text=""
+        )
+        return await lesson_menu_handler(fake_msg, state)  # 💬 выход без зацикливания пересдачи
+
 
     failed = data.get("failed_vocab", [])
     if failed:
@@ -7722,7 +7780,6 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
         return
 
     # 2) Отменяем таймаут
-    await state.update_data(current_poll_id=None)
     await state.update_data(current_poll_id=None, vocab_timeout_streak=0)  # 💬 сбрасываем серию тайм-аутов после ответа
 
     # 3) Правильность и начисление XP
