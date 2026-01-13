@@ -1241,14 +1241,18 @@ async def add_xp(user_id: int, topic: str, amount: int, action: str = None):
     reset_daily_words_if_needed(user)  # 💬 Сбросить/обновить дату, если нужно
 
     # 1. Общий XP
-    user["total_xp"] = user.get("total_xp", 0) + amount
-
-
+    if amount > 0:
+        user["total_xp"] = user.get("total_xp", 0) + amount  # 💬 total_xp никогда не уменьшаем
+    else:
+        user["total_xp"] = user.get("total_xp", 0)  # 💬 минусы не трогают общий XP
 
     # 2. По теме
     if "by_topic" not in user:
         user["by_topic"] = {}
-    user["by_topic"][topic] = user["by_topic"].get(topic, 0) + amount
+
+    cur_topic_xp = user["by_topic"].get(topic, 0)
+    user["by_topic"][topic] = max(0, cur_topic_xp + amount)  # 💬 штрафы режут только topic_xp, но не ниже 0
+
 
     # 3. words_learned сегодня + лимит
     if action == "words_learned":
@@ -1439,6 +1443,9 @@ async def award_xp(amount: int, state: FSMContext):
     """
     data = await state.get_data()
     xp = data.get("xp", 0) + amount
+    if xp < 0:
+        xp = 0  # 💬 session_xp не уходит в минус
+
     await state.update_data(xp=xp, level=xp // 100)
 
 async def award_dialog(amount: int, state: FSMContext):
@@ -4794,29 +4801,52 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     # 4) Подробный прогресс по разделам
     # 💬 Строим прогресс по разделам. Строку «Видео» показываем только,
     #     если в теме реально есть хотя бы одно видео.
-    progress_lines = [
-        # 💬 «Словарь» — жирный + наклонный, звёзды и цифры — жирные
-        f"<b><i>📖 Словарь:</i></b>    <b>{stars}   {completed_phases}/{total_phases}</b>",
+    # 💬 прогресс бар как в грамматике: иконка + бар + проценты + ✅ на 100%
+    def _bar(pct: float, width: int = 10) -> str:
+        if pct < 0:
+            pct = 0
+        if pct > 1:
+            pct = 1
+        filled = int(round(pct * width))
+        if filled <= 0:
+            filled = 1  # 💬 минимум 1 сегмент
+        if filled > width:
+            filled = width
+        return "█" * filled + "░" * (width - filled)
+
+    def _line(icon: str, pct: float) -> str:
+        p = int(pct * 100)
+        if p > 100:
+            p = 100
+        tick = " ✅" if p >= 100 else ""
+        return f"{icon}  {_bar(pct, width=10)}  {p}%{tick}"
+
+    vocab_pct = (completed_phases / total_phases) if total_phases else 0.0
+    tr_total = len(translate_packs)
+    rd_total = len(reading_packs)
+    tr_pct = (done_translate / tr_total) if tr_total else 0.0
+    rd_pct = (done_read / rd_total) if rd_total else 0.0
+    vid_pct = (dv_idx / total_video) if total_video else 0.0
+
+    lines_pb = [
+        _line("📖", vocab_pct),   # 💬 учить слова
+        _line("📝", tr_pct),      # 💬 переводить
+        _line("🙊", rd_pct),      # 💬 читать
     ]
-
     if total_video > 0:
-        progress_lines.append(
-            # 💬 «Видео» — то же самое: название курсив+жирный, прогресс — жирный
-            f"<b><i>🎬 Видео:</i></b>      <b>{video_stars}   {dv_idx}/{total_video}</b>"
-        )
+        lines_pb.insert(2, _line("🎬", vid_pct))  # 💬 видео между переводом и чтением
 
-    progress_lines.append(
-        # 💬 «Читать» — курсив+жирный, звёзды и счётчик — жирные
-        f"<b><i>🙊 Читать:</i></b>    <b>{dlg_stars}   {done_dlg}/{total_dlg}</b>"
-    )
+    parts.append("<blockquote>" + "\n".join(lines_pb) + "</blockquote>")  # 💬 общий блок прогресса
 
-    # 💬 Блок по разделам в одну группу
-    parts.append("\n".join(progress_lines))
+    blocks_done = 0
+    if total_phases and vocab_pct >= 0.999999:
+        blocks_done += 1  # 💬 словарь закрыт на 100%
+    blocks_done += int(done_translate)  # 💬 звёзды только за 100% пакеты
+    blocks_done += int(done_read)
+    if total_video and vid_pct >= 0.999999:
+        blocks_done += 1  # 💬 видео закрыто на 100%
 
-    # 💬 Отдельная строка про дневной лимит слов:
-    #     «Слов выучено» — жирный+наклонный, счётчик — жирный,
-    #     текст перед эмодзи как ты просил.
-    parts.append(f"<b><i>Слов выучено</i> 🍪 {today}/{limit}</b>")
+    parts.append(f"💯 <b>Блоков пройдено:</b> +{blocks_done}⭐")  # 💬 итог звёзд за 100% блоки
 
     # 💬 Если видео нет (total_video == 0), строка «🎬 Видео» вообще не попадёт в текст
 
@@ -7356,6 +7386,11 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
             text=""
         )
 
+    if streak >= 2:
+        await state.update_data(vocab_timeout_streak=0)  # 💬 авто-выход = сбрасываем серию тайм-аутов
+        return await lesson_menu_handler(_fake_msg(), state)  # 💬 закрываем квиз и уходим в меню, сохранив набранное
+
+
     # 💬 защита от кривого idx или не quiz блока
     if idx >= len(vocab_list) or vocab_list[idx].get("type") != "quiz":
         await state.update_data(vocab_index=min(idx + 1, len(vocab_list)))
@@ -7809,21 +7844,7 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
 
 
-    # ─── Рандомное оформление сообщения об изменении XP ─────────────────────────
-    xp_variants = [
-        lambda d, x: f"➕ <b>{d}</b> XP · 🏆 <b>{x}</b>",        # 💬 позитив
-        lambda d, x: f"➖ <b>{abs(d)}</b> XP · 🏆 <b>{x}</b>",   # 💬 негатив
-    ]
-
-
-    # 💬 XP-фидбэк показываем раз в 3 ответа для обычных квизов
-    cnt = (data.get("quiz_fb_counter", 0) + 1)
-    await state.update_data(quiz_fb_counter=cnt)
-    fb = None
-    if cnt % 3 == 0:
-        # 💬 выбираем шаблон строго по знаку (без рандома)
-        text = xp_variants[0](delta, xp) if delta > 0 else xp_variants[1](delta, xp)
-        fb = await bot.send_message(poll_answer.user.id, text, parse_mode="HTML")
+    fb = None  # 💬 XP-фидбэк больше не показываем (только реакции)
 
 
 
@@ -7853,10 +7874,7 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
         pass
 
     if fb:
-        try:
-            await bot.delete_message(chat_id, fb.message_id)
-        except Exception:
-            pass
+
 
 
 
