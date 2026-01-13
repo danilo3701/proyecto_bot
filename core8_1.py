@@ -4845,10 +4845,13 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     blocks_done = 0
     if total_phases and vocab_pct >= 0.999999:
         blocks_done += 1  # 💬 словарь закрыт на 100%
-    blocks_done += int(done_translate)  # 💬 звёзды только за 100% пакеты
-    blocks_done += int(done_read)
+    if tr_total and done_translate >= tr_total:
+        blocks_done += 1  # 💬 перевод закрыт на 100%
+    if rd_total and done_read >= rd_total:
+        blocks_done += 1  # 💬 читать закрыто на 100%
     if total_video and vid_pct >= 0.999999:
         blocks_done += 1  # 💬 видео закрыто на 100%
+
 
     parts.append(f"💯 <b>Блоков пройдено:</b> +{blocks_done}⭐")  # 💬 итог звёзд за 100% блоки
 
@@ -4867,28 +4870,8 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
     # 5) XP по текущей теме
     # 💬 показываем именно XP по выбранной теме (by_topic), а не общий total_xp
-    parts.append(f"🏆 <b>Сейчас опыта: {topic_xp} XP</b> 🌟")
+    parts.append(f"🏆 <b>Опыт по теме: +{topic_xp} XP</b>")
 
-
-    # 💬 звёзды по фазам = если фаза пройдена на 100%
-    try:
-        topic_key = data.get("selected_topic")
-        topic_info = topics.get(topic_key, {}) if topic_key else {}
-        phases = topic_info.get("phases") or []  # 💬 фазы темы (если есть)
-        progress_all = data.get("lex_translate_progress") or {}  # 💬 прогресс «Переводить/Читать» по фазам
-        progress_by_phase = progress_all.get(topic_key, {}) if isinstance(progress_all, dict) else {}
-
-        if phases and isinstance(progress_by_phase, dict):
-            done_cnt = 0
-            for i, ph in enumerate(phases, 1):
-                pid = str(ph.get("phase_id") or ph.get("id") or i)
-                if progress_by_phase.get(pid) in (True, 1, 100, "100", "done", "✅"):
-                    done_cnt += 1
-
-            stars = ("⭐" * done_cnt) + ("☆" * (len(phases) - done_cnt))
-            parts.append(f"⭐ <b>Фазы:</b> {stars}  {done_cnt}/{len(phases)}")  # 💬 индикатор выполнения фаз
-    except Exception:
-        pass  # 💬 если структура темы без фаз = не ломаем меню
 
 
 
@@ -7319,6 +7302,7 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
     if data.get("current_poll_id") != poll_id:
         return  # 💬 квиз уже обработан или это не текущий poll
 
+    streak = int(data.get("vocab_timeout_streak", 0) or 0) + 1  # 💬 считаем серию тайм-аутов
     poll_msg_id = data.get("current_poll_message_id")
 
     # 💬 что делает эта часть: закрываем poll и ставим реакцию таймаута прямо на poll
@@ -7348,15 +7332,15 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
 
     await asyncio.sleep(SLEEP_BEFORE_FEEDBACK_S)
 
-    # 💬 штраф XP синхронизируем в xp_data
-    topic_key = (await state.get_data()).get("selected_topic", "unknown")
+    # 💬 штраф XP: режем session_xp и topic_xp, но total_xp не уменьшаем
+    topic_key = data.get("selected_topic", "unknown")
+    await award_xp(-20, state)
     await add_xp(chat_id, topic_key, -20)
-
-    fb = await bot.send_message(chat_id, "⚠️ -20 XP")
-
+    
     await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)
+    
+    # 💬 чистим сообщения (опрос + прогресс) без отдельного XP-сообщения
 
-    # 💬 чистим сообщения (опрос + штраф) чтобы чат не заспамливался
     data = await state.get_data()
     try:
         pmid = data.get("current_poll_message_id")
@@ -7561,7 +7545,7 @@ async def _review_failed_vocab_quiz_timeout_handler(poll_id: str, chat_id: int, 
         return
 
     # 💬 сбрасываем poll_id, чтобы не сработало дважды
-    await state.update_data(current_poll_id=None)
+    await state.update_data(current_poll_id=None, vocab_timeout_streak=streak)  # 💬 фиксируем серию тайм-аутов
 
     failed = data.get("failed_vocab", [])
     if failed:
@@ -7715,8 +7699,7 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
     # 2) Отменяем таймаут
     await state.update_data(current_poll_id=None)
-    await state.update_data(vocab_timeout_streak=0)  # 💬 любой ответ сбрасывает серию тайм-аутов
-
+    await state.update_data(current_poll_id=None, vocab_timeout_streak=0)  # 💬 сбрасываем серию тайм-аутов после ответа
 
     # 3) Правильность и начисление XP
     idx = data.get("vocab_index", 0)
@@ -7779,12 +7762,16 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     topic   = data.get("selected_topic", "unknown")
     xp_before = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
 
-    # 💬 что делает эта часть: не блокируем хендлер тяжёлой записью в файл, чтобы квиз не "вис"
-    asyncio.create_task(add_xp(user_id, topic, delta))
-
-
+    # 💬 что делает эта часть: total_xp не уменьшаем (штрафы режут только topic_xp), поэтому xp_after считаем локально
+    will_level_up = ((xp_before + (delta if delta > 0 else 0)) // XP_PER_LEVEL) > (xp_before // XP_PER_LEVEL)
+    if will_level_up:
+        await add_xp(user_id, topic, delta)  # 💬 для level-up ждём запись, чтобы прогресс/медаль были точными
+    else:
+        asyncio.create_task(add_xp(user_id, topic, delta))  # 💬 обычный случай = не блокируем квиз
+    
     # 🔥 Проверяем, перешли ли на новый уровень
-    xp_after = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
+    xp_after = xp_before + (delta if delta > 0 else 0)  # 💬 штрафы не уменьшают total_xp
+
     prev_lvl = xp_before // XP_PER_LEVEL
     new_lvl  = xp_after  // XP_PER_LEVEL
 
@@ -8163,20 +8150,13 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
     
     # 💬 3) Показываем XP-фидбэк (или стикер 30% при верном ответе)
-    xp_total = (await state.get_data())["xp"]
-    xp_fb = None  # 💬 по умолчанию текстового фидбэка может не быть
 
     if is_correct and random.random() < 0.3:
         # 💬 30% случаев — вместо текста XP показываем позитивный стикер, как в обычном квизе
         from scenarios_estiloso8_1 import exercise_stickers
         sticker_id = random.choice(exercise_stickers)
         await send_and_auto_delete_sticker(bot, message.chat.id, sticker_id)
-    else:
-        # 💬 остальные случаи (и все неверные ответы) — обычный текстовый XP-фидбэк
-        xp_fb = await message.answer(
-            f"{'🏆' if delta > 0 else '⚠️'} <b>{delta:+}</b> XP · 📊 <b>{xp_total}</b>",  # 💬 1 строка, без "Всего XP"
-            parse_mode="HTML"
-        )
+
 
 
     # 🔐 Новый критерий разблокировки:
