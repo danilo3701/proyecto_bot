@@ -1290,7 +1290,7 @@ async def get_topic_name(message: Message, state: FSMContext):
         "exercises": [],
         "videos": [],
         "dialogs": [],
-        "reading": []  # 💬 что делает эта часть: хранит пакеты чтения (фрагменты как в подкастах)
+        "reading": [],  # 💬 что делает эта часть: хранит пакеты чтения (фрагменты как в подкастах)
         "translate": [],  # 💬 отдельные пакеты для кнопки «Переводи»
 
 
@@ -4737,6 +4737,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
