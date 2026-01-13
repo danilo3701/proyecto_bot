@@ -1256,13 +1256,11 @@ async def add_xp(user_id: int, topic: str, amount: int, action: str = None):
 
     # 3. words_learned сегодня + лимит
     if action == "words_learned":
-        
+        # 💬 daily-limit учитываем только в xp_data, вывод в меню делается отдельно
         limit = user.get("words_daily_limit", 10)
-        learned = int((user.get("stats", {}) or {}).get("words_learned", 0) or 0)  # 💬 всего выучено слов (общий счётчик)
-        parts.append(f"🍪 Слов выучено: {learned}")  # 💬 показываем всегда, без плюса
 
         if user.get("words_learned_today", 0) < limit:
-            user["words_learned_today"] = user.get("words_learned_today", 0) + 1
+            user["words_learned_today"] = user.get("words_learned_today", 0) + 1  # 💬 +1 сегодня (если не превышен лимит)
 
         # 💬 Счётчик за неделю
         week = datetime.date.today().isocalendar()[1]
@@ -4873,8 +4871,10 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
     # 💬 Если видео нет (total_video == 0), строка «🎬 Видео» вообще не попадёт в текст
     
-    # 💬 что делает эта часть: показываем дневную норму слов из настроек пользователя (общая, мигрирует между темами)
-    parts.append(f"🍪 <b>Выучено слов сегодня: {today}/{limit}</b>")
+    # 💬 показываем общий счётчик выученных слов (stats.words_learned) всегда
+    learned = int((user.get("stats", {}) or {}).get("words_learned", 0) or 0)  # 💬 всего выучено слов
+    parts.append(f"🍪 Слов выучено: {learned}")  # 💬 без плюса, всегда строкой
+
 
 
 
@@ -5120,43 +5120,23 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
         return await change_topic(callback.message, state)
 
 
-    # 📝 Переводить — твой текущий reading-пак
+    # 📝 Переводить — стартуем поток translate (topic["translate"])
     if action == "translate":
         await callback.answer()  # 💬 снимаем «часики»
 
-    
         data = await state.get_data()
         last_menu_msg_id = data.get("last_menu_msg_id")
         last_progress_msg_id = data.get("last_progress_msg_id")
-    
-        if last_menu_msg_id:
-            try:
-                await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=last_menu_msg_id)
-            except Exception:
-                pass
-    
-        if last_progress_msg_id:
-            try:
-                await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=last_progress_msg_id)
-            except Exception:
-                pass
-    
-        await state.update_data(
-            menu_hidden=True,
-            last_menu_msg_id=None,
-            last_progress_msg_id=None,
-        )  # 💬 убираем меню и прогресс до показа стикера
-    
-        # 🎲 Рандомный стикер при старте «Читать» из инлайн-меню (и авто-удаление)
-        try:
-            sticker_id = random.choice(READ_STICKERS)  # 💬 берём один из списка
-            asyncio.create_task(
-                send_and_auto_delete_sticker(callback.bot, callback.message.chat.id, sticker_id)
-            )  # 💬 отправляем и удаляем стикер фоном, не блокируя выдачу фаз
-        except Exception:
-            pass
-    
-        return await start_dialog_reading(callback.message, state)
+
+        # 💬 чистим старое меню и прогресс, чтобы сверху не висели старые кнопки
+        for mid in (last_menu_msg_id, last_progress_msg_id):
+            if mid:
+                try:
+                    await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=mid)
+                except Exception:
+                    pass
+
+        return await lex_translate_intro(callback.message, state)  # 💬 показываем фазы «Переводить»
 
     # 📖 Читать — пока переиспользуем тот же вход, но помечаем режим
     if action == "read":
