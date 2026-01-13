@@ -1458,9 +1458,16 @@ async def handle_main_menu(message: Message, state: FSMContext):
     if text == "📝 Добавить перевод":
         await state.update_data(last_block="translate")  # 💬 что делает эта часть: помечаем режим «Переводить»
     
-        prompt = "📝 Впишите название фазы перевода:"  # 💬 заголовок фазы translate
+        prompt = (
+            "📝 Впишите название фазы перевода:\n\n"
+            "Примеры:\n"
+            "• Перевод = Кухня\n"
+            "• Перевод = В магазине\n"
+            "• Перевод = Диалоги A1"
+        )  # 💬 показываем примеры именно для режима «Перевод»
         await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
-        return await state.set_state(NewTopicStates.waiting_reading_title)  # 💬 переиспользуем FSM чтения
+        return await state.set_state(NewTopicStates.waiting_reading_title)  # 💬 FSM общий, различаем по last_block
+
 
     # ----------------------- Добавить словарь -----------------------
     if text == "📚 словарь":
@@ -3806,8 +3813,10 @@ async def get_reading_title(message: Message, state: FSMContext):
         ],
         resize_keyboard=True
     )
-    await message.answer("Что добавляем в чтение?", reply_markup=kb)
+    label = "перевод" if pack_key == "translate" else "чтение"  # 💬 корректный текст в зависимости от режима
+    await message.answer(f"Что добавляем в {label}?", reply_markup=kb)
     return await state.set_state(NewTopicStates.waiting_reading_action)
+
 
 @router.message(NewTopicStates.waiting_reading_action)
 async def handle_reading_action(message: Message, state: FSMContext):
@@ -3816,6 +3825,9 @@ async def handle_reading_action(message: Message, state: FSMContext):
     data = await state.get_data()
     topic = data.get("topic") or {}
     topic_path = data.get("topic_path")
+    pack_key = data.get("current_reading_pack_key") or ("translate" if data.get("last_block") == "translate" else "reading")  # 💬 определяем режим пакета
+    pack_label = "перевода" if pack_key == "translate" else "чтения"  # 💬 текст для UI
+
 
     category_now = (topic.get("category") or "").strip().lower()
     if category_now.startswith("gram"):
@@ -3833,7 +3845,7 @@ async def handle_reading_action(message: Message, state: FSMContext):
 
     if action == "🧩 Ассет блоки":
         await message.answer(
-            "Отправь ассет блоки текстом.\n"
+            f"Отправь ассет блоки для {pack_label} текстом.\n"
             "Формат каждой строки: ES | RU | hint (опц.)\n"
             "Минимум 2 поля: ES | RU\n"
             "Символ | внутри полей запрещён\n\n"
@@ -4710,6 +4722,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
