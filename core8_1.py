@@ -5136,11 +5136,29 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
 
     # 📖 Читать — пока переиспользуем тот же вход, но помечаем режим
     if action == "read":
+        # 💬 Читать = сначала чистим старое меню и прогресс, потом показываем reading
         await callback.answer()
-        return await lex_read_intro(callback.message, state)  # 💬 что делает эта часть: отдельный поток «Читать»
 
-        # 💬 временно используем тот же запуск, что и «Переводить», пока админка/ключи не разведены
-        action = "translate"
+        data = await state.get_data()
+
+        # 💬 удаляем старые сообщения меню и прогресса, чтобы не висели сверху
+        for key in ("last_menu_msg_id", "last_progress_msg_id"):
+            msg_id = data.get(key)
+            if msg_id:
+                try:
+                    await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
+                except Exception:
+                    pass
+
+        # 💬 на всякий случай удаляем текущее меню-сообщение с кнопками (если оно не совпало с last_menu_msg_id)
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+        await state.update_data(menu_hidden=True)  # 💬 фиксируем, что меню уже спрятали
+        return await lex_read_intro(callback.message, state)
+
 
 
     # 🎬 Смотреть видео — показываем ссылку в слове + галочка «готово»
@@ -5240,7 +5258,7 @@ def _lex_render_translate_fragment(f) -> str:
     if es_txt:
         lines.append(f"<i>🇪🇸 <tg-spoiler>{es_txt}</tg-spoiler></i>")
     if hint_txt:
-        lines.append(f"<b><i>💡 {hint_txt}</i></b>")
+        lines.append(f"<b><i>{hint_txt}</i></b>")
 
     return "\n".join(lines).strip() or "Пустой фрагмент"
 
@@ -5503,17 +5521,12 @@ def _lex_kb_read_packs(topic: dict, st: dict, topic_key: str) -> InlineKeyboardM
 def _lex_kb_read_controls() -> InlineKeyboardMarkup:
     # 💬 стрелки + назад + меню
     return InlineKeyboardMarkup(
-        inline_keyboard=[
+        inline_keyboard = [
             [
                 InlineKeyboardButton(text="⬅️", callback_data="lex_rd:prev"),
                 InlineKeyboardButton(text="➡️", callback_data="lex_rd:next"),
             ],
-            [
-                InlineKeyboardButton(text="⬅️ Назад", callback_data="lex_rd:back"),
-            ],
-            [
-                InlineKeyboardButton(text="⬅️ Меню", callback_data="lex_rd:menu"),
-            ],
+            [InlineKeyboardButton(text="⬅️ Меню", callback_data="lex_rd:menu")],  # 💬 без "Назад" как в грамматике
         ]
     )
 
