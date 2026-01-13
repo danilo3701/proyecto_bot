@@ -5482,27 +5482,38 @@ def _lex_read_fragments(topic: dict, pack_idx: int) -> list:
     return frags if isinstance(frags, list) else []
 
 def _lex_render_read_fragment(f) -> str:
-    # 💬 «Читать»: ES видно, RU в spoiler, hint видно
+    # 💬 стиль как в подкастах: ES видно, RU спрятано, hint видно (💡 максимум одна)
     if isinstance(f, str):
-        s = (f or "").strip()
-        return html.escape(s) if s else "Пустой фрагмент"
+        ru_txt = html.escape((f or "").strip())
+        return (f"<i>🔹 <tg-spoiler>{ru_txt}</tg-spoiler></i>").strip() if ru_txt else "Пустой фрагмент"
 
     if not isinstance(f, dict):
-        return "Пустой фрагмент"
+        return "Пустой фрагмент"  # 💬 защита от мусора
 
-    es_txt = html.escape(str(f.get("es") or "").strip())
-    ru_txt = html.escape(str(f.get("ru") or "").strip())
-    hint_txt = html.escape(str(f.get("hint") or "").strip())
+    es_raw = str(f.get("es") or "").strip()
+    ru_raw = str(f.get("ru") or "").strip()
+    hint_raw = str(f.get("hint") or "").strip()
+
+    bulb_in_text = ("💡" in es_raw) or ("💡" in ru_raw)  # 💬 если лампочка уже в тексте, не дублируем её в hint
+    hint_clean = hint_raw.replace("💡", "").strip()      # 💬 убираем лампочку из самого hint-текста
+
+    es_txt = html.escape(es_raw)
+    ru_txt = html.escape(ru_raw)
+    hint_txt = html.escape(hint_clean)
 
     lines = []
     if es_txt:
         lines.append(f"<b>🇪🇸 {es_txt}</b>")
     if ru_txt:
-        lines.append(f"<i>🇷🇺 <tg-spoiler>{ru_txt}</tg-spoiler></i>")
+        lines.append(f"<i>🔹 <tg-spoiler>{ru_txt}</tg-spoiler></i>")
     if hint_txt:
-        lines.append(f"<b><i>💡 {hint_txt}</i></b>")
+        if bulb_in_text:
+            lines.append(f"<b><i>{hint_txt}</i></b>")
+        else:
+            lines.append(f"<b><i>💡 {hint_txt}</i></b>")
 
     return "\n".join(lines).strip() or "Пустой фрагмент"
+
 
 def _lex_kb_read_packs(topic: dict, st: dict, topic_key: str) -> InlineKeyboardMarkup:
     # 💬 список фаз + меню
