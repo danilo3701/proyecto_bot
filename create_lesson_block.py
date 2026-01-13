@@ -3776,20 +3776,20 @@ async def get_reading_title(message: Message, state: FSMContext):
 
     pack_key = "translate" if (data.get("last_block") == "translate") else "reading"  # 💬 что делает эта часть: выбираем ключ хранения
     topic.setdefault(pack_key, []).append({
-            "title": title,
-            "fragments": [],
-            "assets": []  # 💬 ассеты внутри конкретного пака
-        })
-        pack_index = len(topic[pack_key]) - 1  # 💬 индекс именно в выбранном ключе
-    
-        with open(topic_path, "w", encoding="utf-8") as f:
-            json.dump(topic, f, ensure_ascii=False, indent=2)
-    
-        await state.update_data(
-            topic=topic,
-            current_reading_pack_index=pack_index,
-            current_reading_pack_key=pack_key,  # 💬 что делает эта часть: дальше фрагменты/фото сохраняем в правильный раздел
-        )
+        "title": title,
+        "fragments": [],
+        "assets": []  # 💬 ассеты внутри конкретного пака
+    })
+    pack_index = len(topic[pack_key]) - 1  # 💬 индекс именно в выбранном ключе
+
+    with open(topic_path, "w", encoding="utf-8") as f:
+        json.dump(topic, f, ensure_ascii=False, indent=2)
+
+    await state.update_data(
+        topic=topic,
+        current_reading_pack_index=pack_index,
+        current_reading_pack_key=pack_key,  # 💬 что делает эта часть: дальше фрагменты/фото сохраняем в правильный раздел
+    )
 
 
     kb = ReplyKeyboardMarkup(
@@ -4703,6 +4703,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
