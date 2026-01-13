@@ -4684,17 +4684,25 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     total_phases = len(phases)
     per_phase    = data.get("vocab_done_per_phase", {})
     # сколько фаз полностью пройдено?
-    completed_phases = sum(
-        1 for ph in phases
-        if per_phase.get(ph["phase_id"], 0)
-           >= len([b for b in ph.get("vocab", []) if "link" in b or "url" in b])
-    )
+    completed_phases = 0
+    total_phases_for_unlock = 0
+
+    for ph in phases:
+        link_cnt = len([b for b in ph.get("vocab", []) if "link" in b or "url" in b])
+        if link_cnt <= 0:
+            continue  # 💬 пустая/без ссылок фаза не считается пройденной и не участвует в %
+        total_phases_for_unlock += 1
+
+        if per_phase.get(ph.get("phase_id"), 0) >= link_cnt:
+            completed_phases += 1  # 💬 фаза пройдена по ссылочным блокам
+
     # 💬 70% фаз словаря пройдено = разблокируем остальные разделы
-    vocab_unlock_percent = (completed_phases / total_phases * 100) if total_phases else 100
+    vocab_unlock_percent = (completed_phases / total_phases_for_unlock * 100) if total_phases_for_unlock else 0  # 💬 нет фаз = 0%
     unlocked = vocab_unlock_percent >= 70
     await state.update_data(unlocked=unlocked)
 
-    stars = "⭐" * completed_phases + "☆" * (total_phases - completed_phases)
+    stars = "⭐" * completed_phases + "☆" * (total_phases_for_unlock - completed_phases)
+
 
 
 
