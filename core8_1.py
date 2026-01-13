@@ -3330,12 +3330,21 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
             ex_index=0,
             video_index=0,
             vocab_done=0,
+            vocab_done_per_phase={},          # 💬 ключевое: сброс прогресса по фазам, иначе 100% наследуется
             ex_done=0,
             done_dialog=0,
             redo_stack=[],
-            pending_textquiz=None,
+            redo_stack_text=[],               # 💬 сброс очереди повторов textquiz
+            pending_textquiz=[],              # 💬 всегда список, чтобы логика очередей не путалась
+            textquiz_seen=[],                 # 💬 чтобы новый топик не считал textquiz “уже показанным”
+            last_prompt_id=None,              # 💬 чистим id последнего вопроса
+            vocab_textquiz_prompt_id=None,    # 💬 чистим id textquiz вопроса
+            last_oc_msg_id=None,              # 💬 на всякий случай, чтобы не удалить чужое
+            offer_continue_target_idx=None,   # 💬 сброс точки прыжка
+            unlocked=False,                   # 💬 новый топик стартует закрытым до 70%
             lex_mode_active=False,
         )  # 💬 сбрасываем прогресс, чтобы новый топик не наследовал 100%
+
 
     # 💬 Сохраняем выбранную тему в FSM
     await state.update_data(selected_topic=topic_key)
@@ -8414,10 +8423,26 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         vocab_index=next_idx,
         pending_textquiz=pending,
         redo_stack_text=redo_text,
-        current_poll_id=None
-    )  # 💬 сохраняем очереди и продолжаем без возврата в меню
+        current_poll_id=None,
+        vocab_textquiz_prompt_id=data.get("last_prompt_id"),  # 💬 запоминаем id вопроса textquiz для зачистки
+    )  # 💬 сохраняем очереди, но НЕ прыгаем сразу на следующий блок
 
-    return await send_one_vocab(message, state)
+    if not is_correct:
+        # 💬 показываем правильный ответ при ошибке, потом чистим
+        try:
+            correct_show = html.escape(variants[0]) if variants else ""
+            fb = await message.answer(
+                f"✅<b>{correct_show}</b>",
+                parse_mode="HTML",
+            )
+            await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)
+            await _safe_delete_message(message.chat.id, fb.message_id)
+        except Exception:
+            pass
+
+    # 💬 дальше всегда offer_continue (вопрос + ответ пользователя удалит helper)
+    return await _show_offer_continue_after_textquiz(message, state, target_idx=next_idx)
+
 
 
 
