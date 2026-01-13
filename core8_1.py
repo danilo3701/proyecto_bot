@@ -3297,10 +3297,19 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
     try:
         await query.message.delete()
     except TelegramBadRequest:
-        try:
-            await query.message.edit_reply_markup(reply_markup=None)  # 💬 fallback: хотя бы снять кнопки
-        except TelegramBadRequest:
-            pass  # 💬 сообщение уже удалено/нельзя редактировать
+        if menu_msg_id:
+            try:
+                await bot.delete_message(chat_id=message.chat.id, message_id=int(menu_msg_id))
+            except (TelegramBadRequest, ValueError, TypeError):
+                try:
+                    await bot.edit_message_reply_markup(
+                        chat_id=message.chat.id,
+                        message_id=int(menu_msg_id),
+                        reply_markup=None
+                    )  # 💬 fallback: снять inline-кнопки, если удалить нельзя
+                except (TelegramBadRequest, ValueError, TypeError):
+                    pass  # 💬 если id битый/сообщение уже исчезло = просто игнорируем
+
 
 
     # 💬 Сохраняем выбранную тему в FSM
