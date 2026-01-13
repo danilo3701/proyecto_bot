@@ -5647,10 +5647,16 @@ async def lex_read_nav(cb: CallbackQuery, state: FSMContext):
 @track_handler
 async def lex_read_to_menu(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
+    # 💬 удаляем сообщение со строфой/фрагментом, чтобы оно не висело при выходе из «Читать»
     try:
-        await cb.message.edit_reply_markup(reply_markup=None)
+        await cb.message.delete()
     except Exception:
-        pass
+        # 💬 fallback: если удалить нельзя (например, старое сообщение) = хотя бы снимаем кнопки
+        try:
+            await cb.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
     await state.update_data(lex_section=None)  # 💬 выходим из «Читать»
     return await lesson_menu_handler(cb.message, state)
 
