@@ -3774,13 +3774,18 @@ async def get_reading_title(message: Message, state: FSMContext):
         await message.answer("❗ Ошибка: не найден путь темы (topic_path).")
         return
 
-    pack_key = "translate" if (data.get("last_block") == "translate") else "reading"  # 💬 что делает эта часть: выбираем ключ хранения
+    pack_key = "translate" if (data.get("last_block") == "translate") else "reading"  # 💬 выбираем ключ хранения
+    
+    if pack_key == "translate" and "translation" in topic and "translate" not in topic:
+        pack_key = "translation"  # 💬 сохраняем в существующий ключ, чтобы не дробить структуру
+    
     topic.setdefault(pack_key, []).append({
         "title": title,
         "fragments": [],
         "assets": []  # 💬 ассеты внутри конкретного пака
     })
     pack_index = len(topic[pack_key]) - 1  # 💬 индекс именно в выбранном ключе
+
 
 
 
@@ -4705,6 +4710,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
