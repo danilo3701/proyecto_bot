@@ -4932,14 +4932,22 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         # ...
         # 💬 Показываем кнопку «Видео» только если есть хотя бы одно видео в теме
         has_videos = total_video > 0
+        has_translate = len(topic.get("translate", []) or []) > 0  # 💬 если нет раздела «Переводить» = кнопку не показываем
 
         if unlocked:
             # 💬 Строим ряды так, чтобы КАЖДАЯ кнопка была на своей строке (полная ширина)
             rows = [
                 [InlineKeyboardButton(text="📖 Учить слова", callback_data="lex_menu:learn")],
-                [InlineKeyboardButton(text="📝 Переводить", callback_data="lex_menu:translate")],  # 💬 отдельный callback под «Переводить»
-                [InlineKeyboardButton(text="📖 Читать", callback_data="lex_menu:read")],  # 💬 новый поток «Читать» (отдельно от «Переводить»)
             ]
+
+            if has_translate:
+                rows.append(
+                    [InlineKeyboardButton(text="📝 Переводить", callback_data="lex_menu:translate")]
+                )  # 💬 показываем только когда есть translate-паки
+
+            rows.append(
+                [InlineKeyboardButton(text="📖 Читать", callback_data="lex_menu:read")]
+            )  # 💬 поток «Читать» всегда (если он у тебя есть по JSON)
 
             if has_videos:
                 rows.append(
@@ -4954,9 +4962,16 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
             # 💬 Заблокированный вариант — тоже одна кнопка в строке
             rows = [
                 [InlineKeyboardButton(text="📖 Учить слова", callback_data="lex_menu:learn")],
-                [InlineKeyboardButton(text="🔒 Переводить", callback_data="lex_menu:locked_translate")],  # 💬 заблокирован «Переводить»
-                [InlineKeyboardButton(text="🔒 Читать", callback_data="lex_menu:locked_read")],  # 💬 заблокирован «Читать»
             ]
+
+            if has_translate:
+                rows.append(
+                    [InlineKeyboardButton(text="🔒 Переводить", callback_data="lex_menu:locked_translate")]
+                )  # 💬 блокируемый «Переводить» тоже скрываем, если раздела нет
+
+            rows.append(
+                [InlineKeyboardButton(text="🔒 Читать", callback_data="lex_menu:locked_read")]
+            )  # 💬 заблокирован «Читать»
 
             if has_videos:
                 rows.append(
@@ -4967,6 +4982,8 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
             )
 
             inline_kb = InlineKeyboardMarkup(inline_keyboard=rows)
+
+        # 💬 В результате, если translate/videos пустые, соответствующие кнопки не показываем
 
         # 💬 В результате, если videos пустой, в меню останутся только:
         #     «Учить слова», «Читать» и «Сменить тему»
