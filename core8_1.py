@@ -6202,6 +6202,19 @@ async def send_one_vocab(message: Message, state: FSMContext):
             chat_id = message.chat.id if hasattr(message, "chat") else message.id
             return await send_failed_vocab(chat_id, state)
 
+        # 💬 что делает эта часть: если poll-quiz закончились = запускаем отложенные textquiz и крутим до 100% правильных
+        pending = list(data.get("pending_textquiz") or [])
+        redo_text = list(data.get("redo_stack_text") or [])
+        if pending or redo_text:
+            next_idx = redo_text[0] if redo_text else pending[0]
+            await state.update_data(
+                vocab_index=next_idx,
+                resume_vocab_index=None,  # 💬 больше не возвращаемся в основной поток = после textquiz идём в меню
+            )
+            await state.set_state(LessonStates.showing_vocab)
+            return await send_one_vocab(message, state)
+
+
         # 💬 что делает эта часть: если это ALL IN (lex_mode_active) и раунды ещё не закончились = собираем следующий раунд, а не выходим в меню
         if data.get("lex_mode_active"):
             current_round = int(data.get("lex_round", 0) or 0)
@@ -6362,32 +6375,28 @@ async def send_one_vocab(message: Message, state: FSMContext):
 
     # ——— TextQuiz-блок ———
     if btype == "textquiz":
-
-        # 💬 Всегда откладываем textquiz, пока остались обычные quiz
-        vocab_list = get_vocab_list(await state.get_data())
-        next_quiz_idx = next(
-            (i for i in range(idx + 1, len(vocab_list)) if vocab_list[i].get("type") == "quiz"),
-            None
-        )
-        if next_quiz_idx is not None:
-            # 💬 сбрасываем «липкий» маркер мини-сессии, чтобы не прыгать в textquiz
-            await state.update_data(vocab_index=next_quiz_idx, pending_textquiz=[])
-            return await send_one_vocab(message, state)
-
-        # 💬 1) Проверяем, есть ли активная мини-сессия textquiz (после сета quiz)
         data = await state.get_data()
-        pending = data.get("pending_textquiz") or []
+        pending = list(data.get("pending_textquiz") or [])
         vocab_list = get_vocab_list(data)
 
-        # 💬 2) Откладываем textquiz ВСЕГДА, если впереди ещё есть обычные quiz
-        next_quiz_idx = next(
-            (i for i in range(idx + 1, len(vocab_list)) if vocab_list[i].get("type") == "quiz"),
-            None
+        # 💬 что делает эта часть: пока впереди есть обычные quiz = складываем textquiz в pending и идём дальше по ленте
+        has_quiz_ahead = any(
+            (vocab_list[i] or {}).get("type") == "quiz"
+            for i in range(idx + 1, len(vocab_list))
         )
-        if next_quiz_idx is not None:
-            await state.update_data(vocab_index=next_quiz_idx, pending_textquiz=[])
+        if has_quiz_ahead:
+            if idx not in pending:
+                pending.append(idx)
+            await state.update_data(
+                pending_textquiz=pending,
+                vocab_index=idx + 1,  # 💬 не прыгаем через другие блоки (фото/текст/линк)
+            )
             return await send_one_vocab(message, state)
 
+        # 💬 что делает эта часть: quiz закончились = показываем textquiz (в т.ч. тот, что был отложен)
+        if idx in pending:
+            pending = [i for i in pending if i != idx]
+            await state.update_data(pending_textquiz=pending)
 
         # 🔽 поддержка \n в JSON как переноса строки
         q = block.get("question", "")
@@ -6396,7 +6405,7 @@ async def send_one_vocab(message: Message, state: FSMContext):
         # 💬 Спойлеры [[...]] → tg-spoiler
         q = q.replace("[[", '<span class="tg-spoiler">').replace("]]", "</span>")
 
-        # 💬 Отмечаем, что этот textquiz уже показывался (для выбора НОВЫХ в следующих сетах)
+        # 💬 Отмечаем, что этот textquiz уже показывался
         textquiz_seen = data.get("textquiz_seen", [])
         if idx not in textquiz_seen:
             textquiz_seen.append(idx)
@@ -8389,59 +8398,70 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         sticker_id = random.choice(exercise_stickers)
         await send_and_auto_delete_sticker(bot, message.chat.id, sticker_id)
 
-
-    # 💬 4) Очередь textquiz: не дублируем сразу, при ошибке кидаем в конец ВСЕГО пула
+    # 💬 4) Очередь textquiz: при ошибке кидаем в redo_stack_text, крутим до 100% правильных, потом финал и меню
     data = await state.get_data()
     idx = data.get("vocab_index", 0)
 
     pending = list(data.get("pending_textquiz") or [])
     redo_text = list(data.get("redo_stack_text") or [])
 
-    # 💬 текущий textquiz больше не повторяем в этой мини-сессии
+    # 💬 текущий textquiz больше не повторяем как pending
     pending = [i for i in pending if i != idx]
 
     if is_correct:
-        # 💬 если верно = полностью убираем из очереди повторов
+        # 💬 что делает эта часть: правильный ответ = убираем из повторов
         redo_text = [i for i in redo_text if i != idx]
     else:
-        # 💬 если неверно = добавляем в хвост очереди повторов без дублей
+        # 💬 что делает эта часть: неверный ответ = добавляем в хвост повторов без дублей
         if idx not in redo_text:
             redo_text.append(idx)
 
-    # 💬 следующий textquiz: сначала pending, потом redo_stack_text
+    # 💬 следующий textquiz: сначала pending, потом redo_stack_text, иначе конец сессии
     if pending:
         next_idx = pending[0]
     elif redo_text:
         next_idx = redo_text.pop(0)
     else:
-        # 💬 мини-сессия textquiz закончилась = возвращаемся в основной поток
-        next_idx = data.get("resume_vocab_index")
-        if next_idx is None:
-            next_idx = idx + 1  # 💬 безопасный fallback
+        next_idx = None  # 💬 все textquiz закрыты верно
 
     await state.update_data(
-        vocab_index=next_idx,
         pending_textquiz=pending,
         redo_stack_text=redo_text,
         current_poll_id=None,
-        vocab_textquiz_prompt_id=data.get("last_prompt_id"),  # 💬 запоминаем id вопроса textquiz для зачистки
-    )  # 💬 сохраняем очереди, но НЕ прыгаем сразу на следующий блок
+        vocab_textquiz_prompt_id=data.get("last_prompt_id"),  # 💬 id вопроса textquiz для зачистки
+    )
 
-    if not is_correct:
-        # 💬 показываем правильный ответ при ошибке, потом чистим
-        try:
+    # 💬 5) Фидбек: отдельное сообщение, ждём и удаляем
+    try:
+        if is_correct:
+            fb = await message.answer("✅ правильный ответ")
+        else:
             correct_show = html.escape(variants[0]) if variants else ""
-            fb = await message.answer(
-                f"✅<b>{correct_show}</b>",
-                parse_mode="HTML",
-            )
-            await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)
-            await _safe_delete_message(message.chat.id, fb.message_id)
-        except Exception:
-            pass
+            fb = await message.answer(f"✅ правильный ответ: <b>{correct_show}</b>", parse_mode="HTML")
+        await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)
+        await _safe_delete_message(message.chat.id, fb.message_id)
+    except Exception:
+        pass
 
-    # 💬 дальше всегда offer_continue (вопрос + ответ пользователя удалит helper)
-    return await _show_offer_continue_after_textquiz(message, state, target_idx=next_idx)
+    # 💬 6) Чистим вопрос textquiz и ответ пользователя (чтобы чат не рос)
+    prompt_id = data.get("vocab_textquiz_prompt_id") or data.get("last_prompt_id")
+    await _safe_delete_message(message.chat.id, prompt_id)
+    await _safe_delete_message(message.chat.id, getattr(message, "message_id", None))
+
+    # 💬 7) Либо следующий textquiz, либо финал блока
+    if next_idx is None:
+        await state.update_data(
+            pending_textquiz=[],
+            redo_stack_text=[],
+            resume_vocab_index=None,
+            vocab_textquiz_prompt_id=None,
+        )
+        await smart_reply(message, "🎉 Это конец блока. Молодец!", reply_markup=ReplyKeyboardRemove())
+        return await lesson_menu_handler(message, state)
+
+    await state.update_data(vocab_index=next_idx)
+    await state.set_state(LessonStates.showing_vocab)
+    return await send_one_vocab(message, state)
 
 
 
