@@ -6222,10 +6222,28 @@ async def send_one_vocab(message: Message, state: FSMContext):
             chat_id = message.chat.id if hasattr(message, "chat") else message.id
             return await send_failed_vocab(chat_id, state)
 
-        # 💬 что делает эта часть: если это ALL IN (lex_mode_active) и раунды ещё не закончились = собираем следующий раунд, а не выходим в меню
+        # 💬 что делает эта часть: если мы дошли до конца и накопили textquiz = запускаем финальную textquiz-сессию
+        pending_final = data.get("pending_textquiz") or []
+        if pending_final and not data.get("textquiz_session_active"):
+            await state.update_data(
+                textquiz_session_active=True,
+                vocab_index=pending_final[0],
+                pending_textquiz=pending_final,
+                redo_stack_text=[],
+                resume_vocab_index=None,
+                last_main_quiz_index=None,
+                redo_stack=[],
+                redo_active=False,
+                refusal_count=0,
+            )
+            await state.set_state(LessonStates.showing_vocab)
+            return await send_one_vocab(message, state)
+
+        # 💬 что делает эта часть: если это ALL IN (lex_mod...ё не закончились = собираем следующий раунд, а не выходим в меню
         if data.get("lex_mode_active"):
             current_round = int(data.get("lex_round", 0) or 0)
             total_rounds = int(data.get("lex_round_total", 0) or 0)
+
 
             if total_rounds and current_round < (total_rounds - 1):
                 next_round = current_round + 1
@@ -6385,8 +6403,9 @@ async def send_one_vocab(message: Message, state: FSMContext):
         data = await state.get_data()
         vocab_list = get_vocab_list(data)
 
-        # 💬 что делает эта часть: textquiz показываем только в финальной сессии, иначе копим индексы и пропускаем
-        if not data.get("textquiz_session_active"):
+        # 💬 что делает эта часть: в ALL IN textquiz показываем сразу, а в обычном режиме = только в финальной сессии
+        if (not data.get("textquiz_session_active")) and (not data.get("lex_mode_active")):
+
             pending = data.get("pending_textquiz") or []
             if idx not in pending:
                 pending.append(idx)  # 💬 копим textquiz для финала, не показывая между poll-сетами
