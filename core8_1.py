@@ -4815,9 +4815,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         chosen_quotes = list(motivational_quotes.values())[-1]
     quote = random.choice(chosen_quotes)
 
-    parts.append("")  # 💬 даёт 2 пустые строки сверху цитаты (из-за join "\n\n")
     parts.append(f"<tg-spoiler><b><i>“{quote}”</i></b></tg-spoiler>")
-    parts.append("")  # 💬 даёт 2 пустые строки снизу цитаты (из-за join "\n\n")
 
 
     # ─── Daily learned words (сегодня) ─────────────────────────────────────
