@@ -752,7 +752,7 @@ def _lex_detect_total_rounds(phrases: list, default_total: int = 4) -> int:
 
 
 async def _lex_prepare_round_session(state: FSMContext, round_idx: int):
-    # 💬 что делает эта часть: собираем lex_session_vocab_list = N poll-quiz (по фразам) + 1 textquiz (по очереди)
+    # 💬 что делает эта часть: собираем lex_session_vocab_list = N poll-quiz (по фразам); textquiz добавляем ТОЛЬКО в последнем раунде
     data = await state.get_data()
     phrases = data.get("lex_active_phrases") or []
     if not isinstance(phrases, list):
@@ -767,12 +767,15 @@ async def _lex_prepare_round_session(state: FSMContext, round_idx: int):
         if poll_block:
             session.append(poll_block)
 
-    # 1 textquiz после сета (по очереди по фразам)
-    if 0 <= cursor < len(phrases):
-        tq = _lex_get_textquiz_first(phrases[cursor])
-        if tq:
-            session.append(tq)
-        cursor += 1
+    # 💬 что делает эта часть: до финала НЕ вставляем textquiz, чтобы было 4 сета PollQuiz подряд
+    # 💬 в финале (последний раунд) добавляем ПАКЕТ textquiz (по всем фразам)
+    is_last_round = (int(round_idx) >= int(total_rounds) - 1)
+    if is_last_round:
+        for ph in phrases:
+            tq = _lex_get_textquiz_first(ph)
+            if tq:
+                session.append(tq)
+        cursor = len(phrases)
 
     quiz_count = sum(1 for b in session if b.get("type") == "quiz")
 
@@ -798,8 +801,6 @@ async def _lex_prepare_round_session(state: FSMContext, round_idx: int):
         failed_vocab=[],
         failed_textquiz=[]
     )
-
-
 
 import os
 
