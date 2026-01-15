@@ -9039,18 +9039,26 @@ async def handle_confirm_done_vocab(message: Message, state: FSMContext):
     # 💬 Стираем старую клавиатуру сразу после нажатия
  
   
-    await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    # 💬 убираем клавиатуру и показываем “Гружу...”, без «пустого» сообщения
+    loading_msg = await message.answer("Гружу... 🙄", reply_markup=ReplyKeyboardRemove())
+
     data = await state.get_data()
     scene = data["current_scene"]
-
 
     # 🚫 Если ответ не из кнопок — восстанавливаем клавиатуру
     if not await ensure_valid_choice(message, scene["buttons"]):
         return
 
-    # 💬 UX: короткая псевдозагрузка перед следующим сетом
-    loading_msg = await message.answer("Гружу... 🙄")        # 💬 что делает эта часть: имитация загрузки
-    asyncio.create_task(send_and_auto_delete_text(bot, message.chat.id, "Гружу... 🙄", delay=5))
+    # 💬 удаляем именно это сообщение “Гружу...”, не создавая второе
+    async def _delete_loading():
+        await asyncio.sleep(5)
+        try:
+            await bot.delete_message(chat_id=loading_msg.chat.id, message_id=loading_msg.message_id)
+        except Exception:
+            pass
+
+    asyncio.create_task(_delete_loading())
+
 
 
     params     = scene["replies"][message.text]
