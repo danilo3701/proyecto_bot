@@ -7810,15 +7810,20 @@ async def _select_pending_textquiz_for_set(state: FSMContext, limit: int = 2) ->
     """
     data = await state.get_data()
     if data.get("lex_mode_active"):
-        # 💬 что делает эта часть: в ALL IN показываем ровно 1 textquiz после завершения сета квизов
         vocab_list = get_vocab_list(data)
         t_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "textquiz"]
         if not t_positions:
             return []
+
+        # 💬 что делает эта часть: мини-сессии (limit=2) между PollQuiz-сетами = НЕ показываем textquiz, копим до финала
+        if limit == 2:
+            return []
+
+        # 💬 что делает эта часть: финал (limit > 2) = показываем пакет textquiz только один раз за раунд
         if data.get("lex_textquiz_done_round"):
             return []
         await state.update_data(lex_textquiz_done_round=True)
-        return [t_positions[0]]
+        return t_positions[:limit]
 
     vocab_list = get_vocab_list(data)
     
