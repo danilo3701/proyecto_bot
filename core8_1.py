@@ -6001,7 +6001,10 @@ async def show_phase_menu(message: Message, state: FSMContext):
         # отбираем только link-блоки (те, что имеют ключ "link" или "url")
         link_blocks = [b for b in blocks if "link" in b or "url" in b]
         total       = len(link_blocks)
-        passed      = data.get("vocab_done_per_phase", {}).get(ph["phase_id"], 0)
+        phase_id = ph["phase_id"]  # 💬 что делает эта часть: единый id для чтения прогресса/кнопок
+        per_phase = data.get("vocab_done_per_phase", {})  # 💬 что делает эта часть: прогресс по пакам
+        passed = per_phase.get(str(phase_id), per_phase.get(phase_id, 0))  # 💬 поддержка str/int ключей
+
         # порог 80%, округляем вверх (если блоков нет — считаем, что фаза не заполнена)
         threshold   = math.ceil(total * 0.8) if total else 0
         mark = " ✅" if total and passed >= threshold else ""
@@ -6017,7 +6020,8 @@ async def show_phase_menu(message: Message, state: FSMContext):
         buttons.append(
             InlineKeyboardButton(
                 text=btn_text,
-                callback_data=f"topic_phase:{ph['phase_id']}"  # 💬 теперь только ID фазы
+                callback_data=(f"topic_phase_done:{phase_id}" if mark else f"topic_phase:{phase_id}")  # 💬 закрытый пак не открываем
+
         )
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[[btn] for btn in buttons])
@@ -6030,6 +6034,13 @@ async def show_phase_menu(message: Message, state: FSMContext):
 
     await state.set_state(LessonStates.waiting_vocab_phase)
 
+# ─────────────────────────────────────────────────────────
+@dp.callback_query(LessonStates.waiting_vocab_phase, F.data.startswith("topic_phase_done:"))
+@track_handler
+async def topic_phase_done_clicked(cb: CallbackQuery, state: FSMContext):
+    # 💬 что делает эта часть: не даём открыть уже завершённый пак
+    await cb.answer("✅ Блок уже пройден. Молодчина!", show_alert=True)
+    return
 
 # ─────────────────────────────────────────────────────────
 # 4️⃣ Поток «Учить слова» (start_vocab)
@@ -6124,7 +6135,8 @@ async def topic_phase_chosen(cb: CallbackQuery, state: FSMContext):
     blocks      = phase.get("vocab", []) if phase else []
     link_blocks = [b for b in blocks if "link" in b or "url" in b]
     total       = len(link_blocks)
-    passed      = data.get("vocab_done_per_phase", {}).get(phase_id, 0)
+    per_phase = data.get("vocab_done_per_phase", {})  # 💬 что делает эта часть: прогресс по пакам
+    passed = per_phase.get(str(phase_id), per_phase.get(phase_id, 0))  # 💬 поддержка str/int ключей
     threshold   = math.ceil(total * 0.8) if total else 0
 
 
@@ -7702,8 +7714,10 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
         await state.update_data(
             vocab_index=next_idx,
             pending_textquiz=pending,
+            current_stage="show_textquiz",  # 💬 запускаем 5-й раунд = textquiz-сет
             current_poll_id=None
         )
+        await state.set_state(LessonStates.vocab_textquiz)  # 💬 переключаем FSM на ответы textquiz
         return await send_one_vocab(_fake_msg(), state)
 
     oc_scene = random.choice(scenarios["offer_continue"])
