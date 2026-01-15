@@ -4800,6 +4800,21 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     topic_title = topic.get("visible_title") or topic_key  # 💬 заголовок темы
     parts.append(f"<b><i>“{topic_title}”</i></b>")
 
+    # 💬 мотивационная цитата сразу под темой (2 пустые строки сверху/снизу делаем через пустые элементы parts)
+    chosen_quotes = None
+    for thresh, quotes in sorted(motivational_quotes.items()):
+        if percent <= thresh:
+            chosen_quotes = quotes
+            break
+    if not chosen_quotes:
+        chosen_quotes = list(motivational_quotes.values())[-1]
+    quote = random.choice(chosen_quotes)
+
+    parts.append("")  # 💬 даёт 2 пустые строки сверху цитаты (из-за join "\n\n")
+    parts.append(f"<tg-spoiler><b><i>“{quote}”</i></b></tg-spoiler>")
+    parts.append("")  # 💬 даёт 2 пустые строки снизу цитаты (из-за join "\n\n")
+
+
     # ─── Daily learned words (сегодня) ─────────────────────────────────────
     xp_data = load_xp_data()
     user_id = str(message.chat.id)
@@ -4898,17 +4913,6 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
             "🔐 <b><i>Набери минимум 70% 📖</i></b>",
             "🎀 <b><i>И разблокируй остальные</i></b>",
         ]
-
-        # 💬 мотивационная цитата только в locked-режиме, чтобы меню было компактнее
-        chosen_quotes = None
-        for thresh, quotes in sorted(motivational_quotes.items()):
-            if percent <= thresh:
-                chosen_quotes = quotes
-                break
-        if not chosen_quotes:
-            chosen_quotes = list(motivational_quotes.values())[-1]
-        quote = random.choice(chosen_quotes)
-        tail_lines.append(f"<tg-spoiler><b><i>“{quote}”</i></b></tg-spoiler>")
 
         parts.append("\n".join(tail_lines))
 
@@ -9125,11 +9129,6 @@ async def handle_confirm_done_vocab(message: Message, state: FSMContext):
 
 
         await smart_reply(message, f"{stars} {passed}/{total} игр пройдено!")
-
-        # 💬 Подсказка после 3-го слова
-        if passed == 3:
-            await smart_reply(message, "Если ты чувствуешь, что готов, можешь перейти к упражнениям.")
-
 
         # 🎲 Выбираем случайный вариант вопроса о сложности из списка сценариев
         fb_scene = random.choice(scenarios["feedback_difficulty"])
