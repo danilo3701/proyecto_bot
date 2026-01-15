@@ -4691,13 +4691,27 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     total_phases_for_unlock = 0
 
     for ph in phases:
+        phase_id = ph.get("phase_id")
+
+        # 💬 что делает эта часть: определяем "норму" фазы
+        # 💬 PHRASE PACK v2 = считаем по количеству phrases, старые фазы = по количеству link/url
+        phrases_cnt = len(ph.get("phrases", []) or [])
         link_cnt = len([b for b in ph.get("vocab", []) if "link" in b or "url" in b])
-        if link_cnt <= 0:
-            continue  # 💬 пустая/без ссылок фаза не считается пройденной и не участвует в %
+
+        need = phrases_cnt if phrases_cnt > 0 else link_cnt
+        if need <= 0:
+            continue  # 💬 пустая фаза не участвует в % и не может быть пройдена
+
         total_phases_for_unlock += 1
 
-        if per_phase.get(ph.get("phase_id"), 0) >= link_cnt:
-            completed_phases += 1  # 💬 фаза пройдена по ссылочным блокам
+        # 💬 что делает эта часть: ключ phase_id мог сохраниться как int или str = проверяем оба
+        done_raw = per_phase.get(phase_id, None)
+        if done_raw is None:
+            done_raw = per_phase.get(str(phase_id), 0)
+        done = int(done_raw or 0)
+
+        if done >= need:
+            completed_phases += 1  # 💬 фаза пройдена (по phrases или по ссылкам)
 
     # 💬 70% фаз словаря пройдено = разблокируем остальные разделы
     vocab_unlock_percent = (completed_phases / total_phases_for_unlock * 100) if total_phases_for_unlock else 0  # 💬 нет фаз = 0%
