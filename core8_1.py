@@ -4780,59 +4780,44 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
 
     # — Формируем единый текст меню, сохраняя условие блокировки —
+    # — Формируем единый текст меню, компактно и в нужном порядке —
     parts: list[str] = []
 
-    # 1) Общий прогресс
-    # 💬 Сначала текст с процентом, ниже — визуальный бар
+    topic_title = topic.get("visible_title") or topic_key  # 💬 заголовок темы
+    parts.append(f"<b><i>“{topic_title}”</i></b>")
 
-
-    # — Мотивационная цитата по прогрессу —
-    chosen_quotes = None
-    for thresh, quotes in sorted(motivational_quotes.items()):
-        if percent <= thresh:
-            chosen_quotes = quotes
-            break
-    if not chosen_quotes:
-        chosen_quotes = list(motivational_quotes.values())[-1]
-    quote = random.choice(chosen_quotes)
-    # 💬 Цитата в спойлере теперь и жирная, и наклонная
-    parts.append(f"<tg-spoiler><b><i>“{quote}”</i></b></tg-spoiler>")
-
-
-
-    # ─── ВСТАВКА: Learned Words в виде «печенек» ────────────────────────────
+    # ─── Daily learned words (сегодня) ─────────────────────────────────────
     xp_data = load_xp_data()
     user_id = str(message.chat.id)
     user = xp_data.get(user_id, {})
     reset_daily_words_if_needed(user)
-    today = user.get("words_learned_today", 0)
-    limit = user.get("words_daily_limit", 10)
+    today = int(user.get("words_learned_today", 0) or 0)  # 💬 слова сегодня
 
-
-    
     # 💬 звёзды по фазам = done True только по ➡️ на последнем фрагменте
     reading_packs = topic.get("reading", []) or []
     translate_packs = topic.get("translate", []) or []
-    
+
     rd_all = data.get("lex_read_progress") or {}
     rd_topic = rd_all.get(topic_key, {}) if isinstance(rd_all, dict) else {}
     if not isinstance(rd_topic, dict):
         rd_topic = {}
-    
+
     tr_all = data.get("lex_translate_progress") or {}
     tr_topic = tr_all.get(topic_key, {}) if isinstance(tr_all, dict) else {}
     if not isinstance(tr_topic, dict):
         tr_topic = {}
-    
-    done_read = sum(1 for i in range(len(reading_packs)) if isinstance(rd_topic.get(str(i)), dict) and rd_topic.get(str(i), {}).get("done"))
-    done_translate = sum(1 for i in range(len(translate_packs)) if isinstance(tr_topic.get(str(i)), dict) and tr_topic.get(str(i), {}).get("done"))
-    
-    
+
+    done_read = sum(
+        1 for i in range(len(reading_packs))
+        if isinstance(rd_topic.get(str(i)), dict) and rd_topic.get(str(i), {}).get("done")
+    )
+    done_translate = sum(
+        1 for i in range(len(translate_packs))
+        if isinstance(tr_topic.get(str(i)), dict) and tr_topic.get(str(i), {}).get("done")
+    )
 
     # 4) Подробный прогресс по разделам
-    # 💬 Строим прогресс по разделам. Строку «Видео» показываем только,
-    #     если в теме реально есть хотя бы одно видео.
-    # 💬 прогресс бар как в грамматике: иконка + бар + проценты + ✅ на 100%
+    # 💬 прогресс бар: иконка + бар + проценты + ✅, видео показываем только если есть
     def _bar(pct: float, width: int = 10) -> str:
         if pct < 0:
             pct = 0
@@ -4849,9 +4834,11 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         p = int(pct * 100)
         if p > 100:
             p = 100
-        tick = " ✅" if p >= 100 else ""
-        return f"<b>{icon}  {_bar(pct, width=10)}  {p}%{tick}</b>"  # 💬 жирным вся строка прогресса (и цифры тоже)
-
+        if p < 0:
+            p = 0
+        bar = _bar(pct, 10)
+        done = " ✅" if p >= 100 else ""
+        return f"<b>{icon}  {bar}  {p}%</b>{done}"
 
     vocab_pct = (completed_phases / total_phases) if total_phases else 0.0
     tr_total = len(translate_packs)
@@ -4868,85 +4855,52 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     if total_video > 0:
         lines_pb.insert(2, _line("🎬", vid_pct))  # 💬 видео между переводом и чтением
 
-    parts.append("<blockquote>" + "\n".join(lines_pb) + "</blockquote>")  # 💬 общий блок прогресса
+    progress_block = "<blockquote>" + "\n".join(lines_pb) + "</blockquote>"  # 💬 общий блок прогресса
 
     blocks_done = 0
     if total_phases and vocab_pct >= 0.999999:
-        blocks_done += 1  # 💬 словарь закрыт на 100%
+        blocks_done += 1  # 💬 учить слова закрыто на 100%
     if tr_total and done_translate >= tr_total:
-        blocks_done += 1  # 💬 перевод закрыт на 100%
+        blocks_done += 1  # 💬 переводить закрыто на 100%
     if rd_total and done_read >= rd_total:
         blocks_done += 1  # 💬 читать закрыто на 100%
     if total_video and vid_pct >= 0.999999:
         blocks_done += 1  # 💬 видео закрыто на 100%
 
+    # 💬 блок статистики без лишних пустых строк (как ты нарисовал)
+    parts.append(
+        "\n".join([
+            f"🏆 <b><i>Опыт по теме: +{topic_xp} XP</i></b>",
+            f"💯 <b><i>Блоков пройдено: +{blocks_done} ⭐️</i></b>",
+            f"🍪 <b><i>Слов выучено сегодня: {today}</i></b>",
+        ])
+    )
 
-    parts.append(f"💯 <b>Блоков пройдено:</b> +{blocks_done}⭐")  # 💬 итог звёзд за 100% блоки
+    parts.append(progress_block)
 
-    # 💬 начисляем глобальные ⭐️ только 1 раз за каждый блок 100% в этой теме
-    new_stars = 0
-    try:
-        xp_data = load_xp_data()
-        uid = str(message.from_user.id)
-
-        user = xp_data.get(uid, {}) or {}
-        blocks_completed = user.get("blocks_completed", {}) or {}
-        topic_blocks = blocks_completed.get(topic_key, {}) or {}
-
-        def _mark(block_key: str):
-            nonlocal new_stars
-            if not topic_blocks.get(block_key):
-                topic_blocks[block_key] = 1
-                new_stars += 1
-
-        if total_phases and vocab_pct >= 0.999999:
-            _mark("vocab")
-        if tr_total and done_translate >= tr_total:
-            _mark("translate")
-        if rd_total and done_read >= rd_total:
-            _mark("read")
-        if total_video and vid_pct >= 0.999999:
-            _mark("video")
-
-        if new_stars > 0:
-            user["stars_total"] = int(user.get("stars_total", 0) or 0) + int(new_stars)
-            blocks_completed[topic_key] = topic_blocks
-            user["blocks_completed"] = blocks_completed
-            xp_data[uid] = user
-            save_xp_data(xp_data)  # 💬 сохраняем в Railway Volume
-    except Exception:
-        new_stars = 0  # 💬 меню не должно падать из-за наград
-
-
-    # 💬 Если видео нет (total_video == 0), строка «🎬 Видео» вообще не попадёт в текст
-    
-    # 💬 показываем общий счётчик выученных слов (stats.words_learned) всегда
-    learned = int((user.get("stats", {}) or {}).get("words_learned", 0) or 0)  # 💬 всего выучено слов
-    parts.append(f"🍪 Слов выучено: {learned}")  # 💬 без плюса, всегда строкой
-
-
-
-
-    # 3) Если ещё не разблокировано — строка «Набери минимум display_threshold»
+    # 💬 блокировка внизу + компактно (и только если ещё не unlocked)
     if not unlocked:
-        parts.append(
-            "🔒 <b>Набери минимум 70% 📖</b>\n"
-        )
+        tail_lines: list[str] = [
+            "🔐 <b><i>Набери минимум 70% 📖</i></b>",
+            "🎀 <b><i>И разблокируй остальные</i></b>",
+        ]
 
-  
-    # ────────────────────────────────────────────────────────────────────────
+        # 💬 мотивационная цитата только в locked-режиме, чтобы меню было компактнее
+        chosen_quotes = None
+        for thresh, quotes in sorted(motivational_quotes.items()):
+            if percent <= thresh:
+                chosen_quotes = quotes
+                break
+        if not chosen_quotes:
+            chosen_quotes = list(motivational_quotes.values())[-1]
+        quote = random.choice(chosen_quotes)
+        tail_lines.append(f"<tg-spoiler><b><i>“{quote}”</i></b></tg-spoiler>")
 
-    # 5) XP по текущей теме
-    # 💬 показываем именно XP по выбранной теме (by_topic), а не общий total_xp
-    parts.append(f"🏆 <b>Опыт по теме: +{topic_xp} XP</b>")
-
-
-
-
-
+        parts.append("\n".join(tail_lines))
 
     # Отправляем всем блоком через bot.send_message, чтобы избежать NotMounted
     menu_text = "\n\n".join(parts)
+
 
     progress_msg = await bot.send_message(message.chat.id, menu_text, parse_mode="HTML")
     await state.update_data(last_progress_msg_id=progress_msg.message_id)  # 💬 запоминаем id прогресс-блока для удаления при смене темы
@@ -10236,6 +10190,21 @@ async def _show_offer_continue_after_textquiz(message: Message, state: FSMContex
         offer_continue_target_idx=target_idx # 💬 куда прыгнуть после “Продолжить”
     )
     await state.set_state(LessonStates.showing_vocab)
+
+    # 💬 что делает эта часть: закрываем фазу после полного прохождения textquiz-сета (чтобы нельзя было фармить XP)
+    topic_key = st.get("selected_topic_key")
+    phase_id = st.get("selected_phase_id")
+    if topic_key is not None and phase_id is not None:
+        topic = topics.get(topic_key, {})
+        phases = topic.get("vocab", {})
+        if isinstance(phases, dict) and str(phase_id) in phases:
+            phrases = phases[str(phase_id)].get("phrases", []) or []
+            total_quizzes = len(phrases)
+            if total_quizzes > 0:
+                per_phase = st.get("vocab_done_per_phase") or {}
+                per_phase[str(phase_id)] = total_quizzes  # 💬 ставим флаг "фаза пройдена" через счётчик
+                await state.update_data(vocab_done_per_phase=per_phase)
+
 
     oc_msg = await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
     await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 cb_scenario_vocab удалит это сообщение
