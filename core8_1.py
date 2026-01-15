@@ -767,15 +767,17 @@ async def _lex_prepare_round_session(state: FSMContext, round_idx: int):
         if poll_block:
             session.append(poll_block)
 
-    # 💬 что делает эта часть: до финала НЕ вставляем textquiz, чтобы было 4 сета PollQuiz подряд
-    # 💬 в финале (последний раунд) добавляем ПАКЕТ textquiz (по всем фразам)
-    is_last_round = (int(round_idx) >= int(total_rounds) - 1)
-    if is_last_round:
+
+    poll_rounds = max(0, int(total_rounds or 0) - 1)  # 💬 4 poll-раунда, 5-й = text
+
+    # 💬 что делает эта часть: если это 5-й раунд = строим ТОЛЬКО textquiz и НЕ добавляем poll
+    if int(round_idx) >= poll_rounds:
+        session = []  # 💬 гарантируем, что poll-блоков тут не будет
         for ph in phrases:
             tq = _lex_get_textquiz_first(ph)
             if tq:
                 session.append(tq)
-        cursor = len(phrases)
+        cursor = len(phrases)  # 💬 курсор больше не нужен в этой схеме
 
     quiz_count = sum(1 for b in session if b.get("type") == "quiz")
 
@@ -785,7 +787,7 @@ async def _lex_prepare_round_session(state: FSMContext, round_idx: int):
         lex_round_total=total_rounds,
         lex_textquiz_phrase_cursor=cursor,
         lex_session_vocab_list=session,
-        lex_round_block_size=quiz_count,
+        lex_round_block_size=(quiz_count if quiz_count else max(1, len(session))),  # 💬 в text-раунде тоже нужен стабильный BLOCK
 
         # сброс сетовой механики под новый раунд
         vocab_index=0,
@@ -7058,16 +7060,22 @@ async def handle_lex_phrases_done(cb: CallbackQuery, state: FSMContext):
     phrases = data.get("lex_active_phrases") or []
     if not isinstance(phrases, list):
         phrases = []
-    total_rounds = data.get("lex_round_total") or _lex_detect_total_rounds(phrases, default_total=4)
+    poll_rounds = _lex_detect_total_rounds(phrases, default_total=4)  # 💬 сколько poll-раундов (обычно 4)
+    total_rounds = int(poll_rounds or 0) + 1  # 💬 +1 раунд чисто под textquiz
 
     await state.update_data(
-        poll_total_phase=len(phrases) * int(total_rounds or 0),
+        lex_round_total=total_rounds,  # 💬 фиксируем 5 раундов в state, чтобы не тянуть старое значение
+        poll_total_phase=len(phrases) * int(poll_rounds or 0),  # 💬 прогресс poll считаем только по poll-раундам
         poll_done_ids=[],
         quiz_correct_phase=0,
         quiz_correct_total=0,
         vocab_quiz_progress_msg_id=None,
         vocab_quiz_progress_last_phrase=None,
-    )
+
+        textquiz_session_active=False,  # 💬 чтобы ALL IN не стартовал текстовый режим сам по себе
+        pending_textquiz=[],            # 💬 в ALL IN не используем очередь textquiz между сетами
+        lex_textquiz_done_round=False,  # 💬 сброс флага на старт ALL IN
+    ))
 
 
     # собираем 1-й раунд (round_idx=0)
@@ -7811,20 +7819,8 @@ async def _select_pending_textquiz_for_set(state: FSMContext, limit: int = 2) ->
     """
     data = await state.get_data()
     if data.get("lex_mode_active"):
-        vocab_list = get_vocab_list(data)
-        t_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "textquiz"]
-        if not t_positions:
-            return []
-
-        # 💬 что делает эта часть: мини-сессии (limit=2) между PollQuiz-сетами = НЕ показываем textquiz, копим до финала
-        if limit == 2:
-            return []
-
-        # 💬 что делает эта часть: финал (limit > 2) = показываем пакет textquiz только один раз за раунд
-        if data.get("lex_textquiz_done_round"):
-            return []
-        await state.update_data(lex_textquiz_done_round=True)
-        return t_positions[:limit]
+        # 💬 что делает эта часть: в ALL IN textquiz всегда отдельный 5-й раунд, между сетами его не запускаем
+        return []
 
     vocab_list = get_vocab_list(data)
     
