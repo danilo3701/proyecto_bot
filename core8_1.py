@@ -7075,7 +7075,7 @@ async def handle_lex_phrases_done(cb: CallbackQuery, state: FSMContext):
         textquiz_session_active=False,  # 💬 чтобы ALL IN не стартовал текстовый режим сам по себе
         pending_textquiz=[],            # 💬 в ALL IN не используем очередь textquiz между сетами
         lex_textquiz_done_round=False,  # 💬 сброс флага на старт ALL IN
-    ))
+    )
 
 
     # собираем 1-й раунд (round_idx=0)
