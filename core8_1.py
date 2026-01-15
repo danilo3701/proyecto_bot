@@ -6002,7 +6002,7 @@ async def show_phase_menu(message: Message, state: FSMContext):
         # порог 80%, округляем вверх (если блоков нет — считаем, что фаза не заполнена)
         threshold   = math.ceil(total * 0.8) if total else 0
         mark = " ✅" if total and passed >= threshold else ""
-        display_name = f"📦 Пак слов {ph['phase_id']}"  # 💬 единый шаблон названий паков
+        display_name = f"📦 Блок слов {ph['phase_id']}"  # 💬 единый шаблон названий паков
         if mark:
             # зачёркиваем название пака и добавляем галочку
             name = strike(display_name)
@@ -6021,7 +6021,7 @@ async def show_phase_menu(message: Message, state: FSMContext):
 
     # 💬 Легенда по цветам книг и выбор фазы
     await message.answer(
-        "Выбери фазу для изучения:",
+        "Выбери блок для изучения:",
         reply_markup=kb
     )
 
