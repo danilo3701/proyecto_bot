@@ -59,10 +59,7 @@ from aiogram.types import (
 
 )
 
-# 💬 Уровни и медали для глобального прогресса
-LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
-XP_PER_LEVEL = 3000  # XP, необходимое для перехода на следующий уровень
-MEDALS = ["🥉", "🥈", "🥇"]  # бронза, серебро, золото
+
 # 💬 Игровые уровни ЛЕКСИКИ (Lvl. 1–30) = кумулятивные пороги XP (только лексика)
 LEX_LEVEL_THRESHOLDS = [
     1200, 3000, 5000, 7200, 9600, 12200, 15000, 18000, 21200, 24600,
@@ -72,60 +69,6 @@ LEX_LEVEL_THRESHOLDS = [
 
 
 
-
-# 💬 Короткий прогресс по уровню для главного меню и Level-Up
-def render_short_level_progress(user_id: int) -> str:
-    """
-    💬 Возвращает строку вида:
-        🧭 Explorador A1: 1 de 5 ⭐️
-        46% 🟩🟩🟩🟨⬜⬜⬜⬜⬜⬜
-    Основано на глобальном total_xp из xp_data.json.
-    """
-    xp_data = load_xp_data()
-    total_xp = xp_data.get(str(user_id), {}).get("total_xp", 0)
-
-    # Текущий уровень по глобальному XP
-    lvl_idx = total_xp // XP_PER_LEVEL if XP_PER_LEVEL else 0
-    if lvl_idx >= len(LEVELS):
-        lvl_idx = len(LEVELS) - 1
-    level_code = LEVELS[lvl_idx]
-
-    # Названия уровней (можно будет допилить/переименовать отдельно)
-    level_titles = {
-        "A1": "🧭 Explorador A1",
-        "A2": "🧭 Explorador A2",
-        "A0": "🧭 Уровень новичок",  # 💬 вместо A0 показываем новичок
-        "B1": "🚀 Pro B1",
-        "B2": "🚀 Pro B2",
-        "C1": "🎓 Maestro C1",
-        "C2": "🎓 Maestro C2",
-    }
-    title = level_titles.get(level_code, f"🧭 Explorador {level_code}")
-
-    # 5 ступенек внутри одного уровня
-    STEPS_PER_LEVEL = 5
-    xp_in_level = total_xp % XP_PER_LEVEL if XP_PER_LEVEL else 0
-
-    if XP_PER_LEVEL:
-        step_idx = min(
-            xp_in_level * STEPS_PER_LEVEL // XP_PER_LEVEL,
-            STEPS_PER_LEVEL - 1,
-        )
-        percent = int(xp_in_level * 100 / XP_PER_LEVEL)
-    else:
-        step_idx = 0
-        percent = 0
-
-    step_num = step_idx + 1  # от 1 до 5
-    # 💬 прогресс-бар из 20 сегментов (5% за сегмент) + минимум 1 сегмент по умолчанию
-    display_percent = int(percent)
-    if display_percent <= 0:
-        display_percent = 5  # 💬 по дефолту показываем 1 заполненный сегмент (5%)
-    if display_percent > 100:
-        display_percent = 100  # 💬 защита от некорректных значений
-
-    bar = render_bar(display_percent, length=20)
-    return f"{title}: {step_num} de {STEPS_PER_LEVEL} ⭐️\n{bar} {display_percent}%"
 
 
 
@@ -2013,37 +1956,6 @@ async def start_handler(message: Message, state: FSMContext):
 
     asyncio.create_task(_auto_delete_start_sticker(sticker_msg))
 
-    # 💬 Глобальный прогресс пользователя
-
-    xp_data = load_xp_data()
-    total_xp = xp_data.get(user_id, {}).get("total_xp", 0)
-    # Текущий уровень
-    lvl_idx = total_xp // XP_PER_LEVEL
-    if lvl_idx >= len(LEVELS):
-        lvl_idx = len(LEVELS) - 1
-    current_level = LEVELS[lvl_idx]
-    # Текущая медаль внутри уровня
-    medal_idx = (total_xp % XP_PER_LEVEL) // (XP_PER_LEVEL // 3)
-    current_medal = MEDALS[min(medal_idx, 2)]
-    # Определяем, что будет следующим
-    if medal_idx < 2:
-        next_level = current_level
-        next_medal = MEDALS[medal_idx + 1]
-    else:
-        next_level = LEVELS[min(lvl_idx + 1, len(LEVELS) - 1)]
-        next_medal = MEDALS[0]
-    # Строим прогресс-бар из 10 сегментов
-    filled = int((total_xp % XP_PER_LEVEL) / XP_PER_LEVEL * 10)
-    bar = "■" * filled + "□" * (10 - filled)
-
-    '''
-    # Отправляем прогресс
-    await message.answer(
-        f"📊 Уровень: {current_level}{current_medal}👇   \n"
-        f"[{bar}]\n"
-        f"{total_xp % XP_PER_LEVEL}/{XP_PER_LEVEL} XP ➡️ {next_level}{next_medal}"
-    )
-    '''
 
     # 💬 Инициализация показа рекламы в «Учить слова»
     await state.update_data(phase_entry_count=0, pending_phase=False)
@@ -7511,17 +7423,6 @@ async def handle_review_failed_vocab(poll_answer: PollAnswer, state: FSMContext)
     user_id = poll_answer.user.id
     topic_key = data["selected_topic"]
 
-    xp_before = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
-    await add_xp(user_id, topic_key, delta)
-    xp_after = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
-    if xp_after // XP_PER_LEVEL > xp_before // XP_PER_LEVEL:
-        lvl_idx = min(xp_after // XP_PER_LEVEL, len(LEVELS)-1)
-        medal_idx = min((xp_after % XP_PER_LEVEL) // (XP_PER_LEVEL // 3), 2)
-        await bot.send_message(
-            poll_answer.user.id,
-            f"🎉 Поздравляем! Ты достиг уровня {LEVELS[lvl_idx]}{MEDALS[medal_idx]}!"
-        )
-
     # 6) Сообщаем об изменении XP
     xp = (await state.get_data())["xp"]
 
@@ -8112,35 +8013,6 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
     topic   = data.get("selected_topic", "unknown")
     xp_before = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
 
-    # 💬 что делает эта часть: total_xp не уменьшаем (штрафы режут только topic_xp), поэтому xp_after считаем локально
-    will_level_up = ((xp_before + (delta if delta > 0 else 0)) // XP_PER_LEVEL) > (xp_before // XP_PER_LEVEL)
-    if will_level_up:
-        await add_xp(user_id, topic, delta)  # 💬 для level-up ждём запись, чтобы прогресс/медаль были точными
-    else:
-        asyncio.create_task(add_xp(user_id, topic, delta))  # 💬 обычный случай = не блокируем квиз
-    
-    # 🔥 Проверяем, перешли ли на новый уровень
-    xp_after = xp_before + (delta if delta > 0 else 0)  # 💬 штрафы не уменьшают total_xp
-
-    prev_lvl = xp_before // XP_PER_LEVEL
-    new_lvl  = xp_after  // XP_PER_LEVEL
-
-    if new_lvl > prev_lvl:
-        # 💬 Определяем безопасные индексы уровня и медали (не выходим за границы массивов)
-        lvl_idx = min(new_lvl, len(LEVELS) - 1)
-        medal_idx = min(
-            (xp_after % XP_PER_LEVEL) // (XP_PER_LEVEL // 3),
-            len(MEDALS) - 1,
-        )
-
-        # 💬 Короткий прогресс по новой системе уровней
-        progress_text = render_short_level_progress(user_id)
-
-        await bot.send_message(
-            user_id,
-            f"🎉 Поздравляем! Вы достигли уровня {LEVELS[lvl_idx]}{MEDALS[medal_idx]}!\n\n"
-            f"{progress_text}"
-        )
 
 
 
@@ -9665,34 +9537,6 @@ async def handle_failed_textquiz(message: Message, state: FSMContext):
 
     # 🔥 Проверка перехода на новый уровень
     xp_after = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
-
-    if xp_after // XP_PER_LEVEL > xp_before // XP_PER_LEVEL:
-        # 💬 что делает эта часть: безопасно берём индекс уровня, не выходим за пределы LEVELS
-        lvl_idx = min(xp_after // XP_PER_LEVEL, len(LEVELS) - 1)
-
-        # 💬 что делает эта часть: безопасно берём индекс медали, не выходим за пределы MEDALS
-        medal_idx = min(
-            (xp_after % XP_PER_LEVEL) // (XP_PER_LEVEL // 3),
-            len(MEDALS) - 1,
-        )
-
-        # 💬 что делает эта часть: строим короткий прогресс по новой системе уровней
-        progress_text = render_short_level_progress(user_id)
-
-        await message.answer(
-            f"🎉 Поздравляем! Вы достигли уровня {LEVELS[lvl_idx]}{MEDALS[medal_idx]}!\n\n"
-            f"{progress_text}"
-        )
-
-
-        # 💬 Короткий прогресс по новой системе уровней
-        progress_text = render_short_level_progress(user_id)
-
-        await message.answer(
-            f"🎉 Поздравляем! Вы достигли уровня {LEVELS[lvl_idx]}{MEDALS[medal_idx]}!\n\n"
-            f"{progress_text}"
-        )
-
 
 
     # 💬 Сообщаем XP-фидбэк
