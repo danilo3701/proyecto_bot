@@ -4803,7 +4803,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     parts: list[str] = []
 
     topic_title = topic.get("visible_title") or topic_key  # 💬 заголовок темы
-    parts.append(f"<b><i>“{topic_title}”</i></b>")
+    parts.append(f"<b><i>{topic_title}</i></b>")
 
     # 💬 мотивационная цитата сразу под темой (2 пустые строки сверху/снизу делаем через пустые элементы parts)
     chosen_quotes = None
