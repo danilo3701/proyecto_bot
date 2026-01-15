@@ -766,6 +766,10 @@ async def _lex_prepare_round_session(state: FSMContext, round_idx: int):
 
     poll_rounds = max(0, int(total_rounds or 0) - 1)  # 💬 4 poll-раунда, 5-й = text
 
+    is_text_round = False  # 💬 флаг: сейчас НЕ текстовый раунд
+    text_positions = []    # 💬 индексы textquiz в текущей session (заполним только в 5-м раунде)
+
+
     # 💬 что делает эта часть: если это 5-й раунд = строим ТОЛЬКО textquiz и НЕ добавляем poll
     if int(round_idx) >= poll_rounds:
         session = []  # 💬 гарантируем, что poll-блоков тут не будет
@@ -787,6 +791,7 @@ async def _lex_prepare_round_session(state: FSMContext, round_idx: int):
         lex_textquiz_phrase_cursor=cursor,
         lex_session_vocab_list=session,
         lex_round_block_size=(quiz_count if quiz_count else max(1, len(session))),  # 💬 в text-раунде тоже нужен стабильный BLOCK
+        vocab_timeout_streak=0,  # 💬 сбрасываем таймаут-стрик при старте каждого раунда (иначе 1-й таймаут может стать "2-м")
 
         # сброс сетовой механики под новый раунд
         vocab_index=0,
@@ -10410,6 +10415,27 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
             pass
 
         await state.update_data(last_oc_msg_id=None)  # 💬 чистим, чтобы не пытаться удалить повторно
+
+
+        # 💬 перед выходом (Домой/Продолжить) фиксируем прогресс фазы,
+        # 💬 чтобы 📖 % в меню темы обновился даже если юзер нажал "Домой"
+        try:
+            phase_id = data.get("selected_phase_id")
+            total_phase = int(data.get("total_quizzes_phase", 0) or 0)
+
+            poll_done_ids = data.get("poll_done_ids") or []
+            poll_phase_done = max(int(data.get("quiz_correct_phase", 0) or 0), len(poll_done_ids))
+            txt_phase_done = int(data.get("textquiz_correct_phase", 0) or 0)
+            phase_done = poll_phase_done + txt_phase_done
+
+            if phase_id is not None and total_phase > 0 and phase_done >= total_phase:
+                per_phase = data.get("vocab_done_per_phase") or {}
+                prev = per_phase.get(str(phase_id), per_phase.get(phase_id, 0))
+                per_phase[str(phase_id)] = max(int(prev or 0), int(total_phase))
+                await state.update_data(vocab_done_per_phase=per_phase)
+        except Exception:
+            pass  # 💬 меню не должно падать из-за синхронизации прогресса
+
 
 
         # Переход по результату
