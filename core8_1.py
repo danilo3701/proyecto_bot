@@ -5139,6 +5139,42 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
     # 📖 Учить слова — переиспользуем существующий хендлер
     if action == "learn":
         await callback.answer()
+
+        data = await state.get_data()
+
+        # 💬 чистим старое меню и прогресс, чтобы не висели сверху
+        for key in ("last_menu_msg_id", "last_progress_msg_id"):
+            msg_id = data.get(key)
+            if msg_id:
+                try:
+                    await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
+                except Exception:
+                    pass
+
+        try:
+            await callback.message.delete()  # 💬 удаляем меню с кнопками (если оно другое)
+        except Exception:
+            pass
+
+        await state.update_data(menu_hidden=True)  # 💬 меню спрятано перед показом видео
+
+
+        # 💬 чистим старое меню и прогресс, чтобы проценты в новом меню были актуальны
+        for key in ("last_menu_msg_id", "last_progress_msg_id"):
+            msg_id = data.get(key)
+            if msg_id:
+                try:
+                    await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
+                except Exception:
+                    pass
+
+        # 💬 на всякий случай удаляем текущее меню-сообщение (если id не совпали)
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+        await state.update_data(menu_hidden=True)  # 💬 фиксируем, что меню спрятали
         return await show_phase_menu(callback.message, state)
 
     # 🔄 Сменить тему — тот же хендлер, что и у ReplyKeyboard
