@@ -778,6 +778,9 @@ async def _lex_prepare_round_session(state: FSMContext, round_idx: int):
             if tq:
                 session.append(tq)
         cursor = len(phrases)  # 💬 курсор больше не нужен в этой схеме
+        is_text_round = True  # 💬 5-й раунд = текстовый сет
+        text_positions = [i for i, b in enumerate(session) if b.get("type") == "textquiz"]  # 💬 индексы всех textquiz
+
 
     quiz_count = sum(1 for b in session if b.get("type") == "quiz")
 
@@ -794,7 +797,9 @@ async def _lex_prepare_round_session(state: FSMContext, round_idx: int):
         redo_stack=[],
         redo_active=False,
         refusal_count=0,
-        pending_textquiz=[],
+        pending_textquiz=(text_positions if int(round_idx) >= poll_rounds else []),  # 💬 в 5-м раунде = весь сет textquiz
+        textquiz_session_active=(int(round_idx) >= poll_rounds),  # 💬 включаем режим прохождения textquiz-сета
+        redo_stack_text=[],  # 💬 отдельный redo для textquiz, чтобы повторы работали внутри сета
         lex_textquiz_done_round=False,
         last_main_quiz_index=-1,
         vocab_set_anchor=0,
