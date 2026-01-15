@@ -63,6 +63,14 @@ from aiogram.types import (
 LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
 XP_PER_LEVEL = 3000  # XP, необходимое для перехода на следующий уровень
 MEDALS = ["🥉", "🥈", "🥇"]  # бронза, серебро, золото
+# 💬 Игровые уровни ЛЕКСИКИ (Lvl. 1–30) = кумулятивные пороги XP (только лексика)
+LEX_LEVEL_THRESHOLDS = [
+    1200, 3000, 5000, 7200, 9600, 12200, 15000, 18000, 21200, 24600,
+    28200, 32000, 36000, 40200, 44600, 49200, 54000, 59000, 64200, 69600,
+    75200, 81000, 87000, 93200, 99600, 106200, 113000, 120000, 127200, 134600
+]  # 💬 пороги Lvl по нарастающей
+
+
 
 
 # 💬 Короткий прогресс по уровню для главного меню и Level-Up
@@ -120,6 +128,51 @@ def render_short_level_progress(user_id: int) -> str:
     return f"{title}: {step_num} de {STEPS_PER_LEVEL} ⭐️\n{bar} {display_percent}%"
 
 
+
+
+def get_lex_level_state(user_id: int) -> dict:
+    # 💬 считаем Lvl/pct/⭐️ только по темам category="lex"
+    xp_data = load_xp_data()
+    u = xp_data.get(str(user_id), {}) or {}
+
+    by_topic = u.get("by_topic", {}) or {}
+    stars_total = int(u.get("stars_total", 0) or 0)
+
+    lex_total_xp = 0
+    try:
+        for k, info in (topics or {}).items():
+            if (info or {}).get("category") == "lex":
+                lex_total_xp += int(by_topic.get(k, 0) or 0)
+    except Exception:
+        lex_total_xp = int(u.get("total_xp", 0) or 0)  # 💬 fallback, чтобы не ломаться
+
+    thresholds = LEX_LEVEL_THRESHOLDS
+    lvl = 1
+    prev_thr = 0
+    next_thr = thresholds[0] if thresholds else 0
+
+    for i, thr in enumerate(thresholds, start=1):
+        if lex_total_xp < thr:
+            lvl = i
+            next_thr = thr
+            prev_thr = 0 if i == 1 else thresholds[i - 2]
+            break
+    else:
+        lvl = len(thresholds) if thresholds else 1
+        prev_thr = thresholds[-2] if thresholds and len(thresholds) > 1 else 0
+        next_thr = thresholds[-1] if thresholds else max(1, lex_total_xp)
+
+    xp_in_level = max(0, lex_total_xp - prev_thr)
+    need = max(1, next_thr - prev_thr)
+    pct = int((xp_in_level / need) * 100)
+    pct = max(0, min(pct, 100))  # 💬 защита
+
+    return {
+        "lvl": int(lvl),
+        "pct": int(pct),
+        "stars_total": int(stars_total),
+        "lex_total_xp": int(lex_total_xp),
+    }
 
 
 # 💬 минимальная задержка между удалением старого и показом нового квиза
@@ -1244,6 +1297,9 @@ async def add_xp(user_id: int, topic: str, amount: int, action: str = None):
             "by_topic": {},
             "stats": {"words_learned": 0, "exercises_done": 0},
             "first_join": int(time.time()),
+            "stars_total": 0,          # 💬 глобальные ⭐️ за закрытые блоки (лексика)
+            "blocks_completed": {},    # 💬 {topic_key: {block_key: 1}} чтобы не начислять повторно
+
         }
 
     reset_daily_words_if_needed(user)  # 💬 Сбросить/обновить дату, если нужно
@@ -2239,35 +2295,7 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
 
     inline_kb = InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
-    # 💬 Глобальный прогресс пользователя — короткий формат
-    try:
-        progress_text = render_short_level_progress(message.from_user.id)
-    except Exception:
-        # 💬 если вдруг что-то пошло не так с чтением xp_data — не ломаем поток
-        progress_text = ""
-
-    # 💬 Подпись экрана уровня + категория, чтобы не путать пользователя
-    if category == "lex":
-        cat_title = "📚 <b>ЛЕКСИКА</b>"
-    elif category == "gram":
-        cat_title = "🧠 <b>ГРАММАТИКА</b>"
-    else:
-        cat_title = "📘 <b>Категория</b>"
-
-    level_show = "новичок" if str(level).upper() == "A0" else level  # 💬 A0 показываем как новичок
-
-    # 💬 Прогресс: 20 ячеек (5% за ячейку) + ✅ в начале + смайлик после процентов
-    import re  # 💬 локальный импорт, чтобы не зависеть от верхних импортов
-
-    pct = 0
-    try:
-        m = re.search(r"(\d{1,3})\s*%", str(progress_text or ""))
-        if m:
-            pct = int(m.group(1))
-    except Exception:
-        pct = 0
-    pct = max(0, min(int(pct), 100))  # 💬 защита от мусорных значений
-
+    # 💬 mood уже есть в проекте = оставляем, только добавляем недостающую логику для LEX Lvl и ⭐️
     mood_steps = [
         "🗿", "💩", "🐥", "🐒", "🔥",
         "🦥", "🐝", "🌝", "🍷", "🐙",
@@ -2275,20 +2303,61 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
         "🔱", "🎗", "🎖", "🏆", "🏆",
     ]  # 💬 20 смайликов на шаги 0–95% (по 5%)
 
-    mood_idx = min(int(pct // 5), len(mood_steps) - 1)
-    mood_emoji = mood_steps[mood_idx]
+    if category == "lex":
+        st = get_lex_level_state(message.from_user.id)
+        pct = int(st.get("pct", 0) or 0)
+        pct = max(0, min(pct, 100))  # 💬 защита
+        lvl_num = int(st.get("lvl", 1) or 1)
+        stars_total = int(st.get("stars_total", 0) or 0)
 
-    filled = max(1, min(int(pct * 20 / 100), 20))  # 💬 всегда минимум 1 “закрашенный” квадратик
-    bar = ("█" * filled) + ("░" * (20 - filled))
-    bar_line = f"✅{bar} {pct}% {mood_emoji}"
+        mood_idx = min(int(pct // 5), len(mood_steps) - 1)
+        mood_emoji = mood_steps[mood_idx]
 
-    # 💬 Итоговый текст экрана: 1) уровень 2) прогресс 3) призыв выбрать тему
-    level_screen_text = (
-        f"🧭 Уровень <b>{level_show}</b> · {cat_title}\n"
-        f"{bar_line}\n\n"
-        f"Выбери тему для этого уровня:"
-    )
+        filled = min(11, 1 + int(pct // 10))  # 💬 11 клеток, 1 всегда заполнена
+        bar = ("█" * filled) + ("░" * (11 - filled))
+        bar_line = f"<b>🔥{bar} {pct}% {mood_emoji}</b>"
 
+        level_screen_text = (
+            f"<b>👑 Lvl. {lvl_num} · ЛЕКСИКА · ⭐️ {stars_total}</b>\n"
+            f"{bar_line}\n\n"
+            f"Выбери тему:"
+        )
+    else:
+        # 💬 старый формат для не-лексики = не ломаем существующее
+        try:
+            progress_text = render_short_level_progress(message.from_user.id)
+        except Exception:
+            progress_text = ""
+
+        if category == "gram":
+            cat_title = "🧠 <b>ГРАММАТИКА</b>"
+        else:
+            cat_title = "📘 <b>Категория</b>"
+
+        level_show = "новичок" if str(level).upper() == "A0" else level  # 💬 A0 показываем как новичок
+
+        import re  # 💬 локальный импорт, чтобы не зависеть от верхних импортов
+        pct = 0
+        try:
+            m = re.search(r"(\d{1,3})\s*%", str(progress_text or ""))
+            if m:
+                pct = int(m.group(1))
+        except Exception:
+            pct = 0
+        pct = max(0, min(int(pct), 100))  # 💬 защита
+
+        mood_idx = min(int(pct // 5), len(mood_steps) - 1)
+        mood_emoji = mood_steps[mood_idx]
+
+        filled = max(1, min(int(pct * 20 / 100), 20))  # 💬 старый бар на 20 клеток
+        bar = ("█" * filled) + ("░" * (20 - filled))
+        bar_line = f"✅{bar} {pct}% {mood_emoji}"
+
+        level_screen_text = (
+            f"👑 Lvl. <b>{level_show}</b> · {cat_title}\n"
+            f"{bar_line}\n\n"
+            f"Выберай тему:"
+        )
 
 
     # 💬 Отправляем уровень со списком тем этого уровня (прогресс уже перед словом «Уровень»)
@@ -2821,13 +2890,16 @@ async def show_leaderboard(message: Message, state: FSMContext):
         name = (u.get("name", "") or "").strip()
         week = int(u.get("words_learned_week", 0) or 0)
         month = int(u.get("words_learned_month", 0) or 0)
+        stars_total = int(u.get("stars_total", 0) or 0)  # 💬 ⭐️ за закрытые блоки
 
         users.append({
             "uid": str(uid),
             "name": name or f"User {uid}",
             "words_learned_week": week,
-            "words_learned_month": month
+            "words_learned_month": month,
+            "stars_total": stars_total
         })
+
 
     current_uid = str(message.from_user.id)
     data = await state.get_data()  # 💬 берём FSM-data один раз, чтобы render_block мог читать actor_uid/actor_name и last_menu_msg_id
@@ -2968,6 +3040,8 @@ async def show_leaderboard(message: Message, state: FSMContext):
 
     week_text = render_block("🏆 Рейтинг недели", "words_learned_week", "🍪")
     month_text = render_block("🏆 Рейтинг месяца", "words_learned_month", "🍪")
+    stars_text = render_block("⭐️ Блоков пройдено", "stars_total", "⭐️")  # 💬 рейтинг по звёздам
+
 
 
     last_menu_msg_id = data.get("last_menu_msg_id")
@@ -4896,6 +4970,41 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
 
     parts.append(f"💯 <b>Блоков пройдено:</b> +{blocks_done}⭐")  # 💬 итог звёзд за 100% блоки
+
+    # 💬 начисляем глобальные ⭐️ только 1 раз за каждый блок 100% в этой теме
+    new_stars = 0
+    try:
+        xp_data = load_xp_data()
+        uid = str(message.from_user.id)
+
+        user = xp_data.get(uid, {}) or {}
+        blocks_completed = user.get("blocks_completed", {}) or {}
+        topic_blocks = blocks_completed.get(topic_key, {}) or {}
+
+        def _mark(block_key: str):
+            nonlocal new_stars
+            if not topic_blocks.get(block_key):
+                topic_blocks[block_key] = 1
+                new_stars += 1
+
+        if total_phases and vocab_pct >= 0.999999:
+            _mark("vocab")
+        if tr_total and done_translate >= tr_total:
+            _mark("translate")
+        if rd_total and done_read >= rd_total:
+            _mark("read")
+        if total_video and vid_pct >= 0.999999:
+            _mark("video")
+
+        if new_stars > 0:
+            user["stars_total"] = int(user.get("stars_total", 0) or 0) + int(new_stars)
+            blocks_completed[topic_key] = topic_blocks
+            user["blocks_completed"] = blocks_completed
+            xp_data[uid] = user
+            save_xp_data(xp_data)  # 💬 сохраняем в Railway Volume
+    except Exception:
+        new_stars = 0  # 💬 меню не должно падать из-за наград
+
 
     # 💬 Если видео нет (total_video == 0), строка «🎬 Видео» вообще не попадёт в текст
     
