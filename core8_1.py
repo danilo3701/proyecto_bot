@@ -4805,17 +4805,22 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     topic_title = topic.get("visible_title") or topic_key  # 💬 заголовок темы
     parts.append(f"<b><i>{topic_title}</i></b>")
 
-    # 💬 мотивационная цитата сразу под темой (2 пустые строки сверху/снизу делаем через пустые элементы parts)
-    chosen_quotes = None
-    for thresh, quotes in sorted(motivational_quotes.items()):
-        if percent <= thresh:
-            chosen_quotes = quotes
-            break
-    if not chosen_quotes:
-        chosen_quotes = list(motivational_quotes.values())[-1]
-    quote = random.choice(chosen_quotes)
+    # 💬 что делает эта часть: общий прогресс-бар больше не используем для мотивации
+    # 💬 фраза = стартовая всегда, а финальная только если все существующие разделы закрыты на 100%
+    checks = [
+        (done_vocab, total_vocab),
+        (done_ex_link, total_ex_link),
+        (dv_idx, total_video),
+        (done_dlg, total_dlg),
+    ]
+    existing = [(d, t) for (d, t) in checks if int(t or 0) > 0]
+    all_done = bool(existing) and all(int(d or 0) >= int(t or 0) for (d, t) in existing)
 
-    parts.append(f"<tg-spoiler><b><i>“{quote}”</i></b></tg-spoiler>")
+    chosen_quotes = motivational_quotes.get(100 if all_done else 0) or []
+    if not chosen_quotes:
+        chosen_quotes = list(motivational_quotes.values())[0]  # 💬 запасной вариант
+    quote = random.choice(chosen_quotes)
+    parts.append(f"<tg-spoiler>“{quote}”</tg-spoiler>")
 
 
     # ─── Daily learned words (сегодня) ─────────────────────────────────────
@@ -5245,6 +5250,25 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
     # 🎬 Смотреть видео — показываем ссылку в слове + галочка «готово»
     if action == "video":
         await callback.answer()
+
+        data = await state.get_data()
+
+        # 💬 чистим старое меню и прогресс, чтобы не висели сверху
+        for key in ("last_menu_msg_id", "last_progress_msg_id"):
+            msg_id = data.get(key)
+            if msg_id:
+                try:
+                    await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=msg_id)
+                except Exception:
+                    pass
+
+        try:
+            await callback.message.delete()  # 💬 удаляем меню с кнопками (если оно другое)
+        except Exception:
+            pass
+
+        await state.update_data(menu_hidden=True)  # 💬 меню спрятано перед показом видео
+
 
         data = await state.get_data()
         topic_key = data.get("selected_topic")
