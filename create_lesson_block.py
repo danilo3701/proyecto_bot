@@ -1641,7 +1641,8 @@ async def handle_main_menu(message: Message, state: FSMContext):
                         first = _preview_text(str(fr[0]), 40)
                     elif assets:
                         first = _preview_item(assets[0])
-                    lines.append(f"  {r_idx}) 📖 <b>{_preview_text(ttl, 40)}</b> (fr={len(fr)}, assets={len(assets)})")
+                    lines.append(f"  {r_idx}) 📖 <b>{_preview_text(ttl, 40)}</b> (фраз: {len(fr) + len(assets)})")  # 💬 считаем фразы как fragments+assets
+
                     if first:
                         lines.append(f"      ↳ {first}")
                 if len(reading_list) > 15:
@@ -1689,7 +1690,8 @@ async def handle_main_menu(message: Message, state: FSMContext):
                     ttl = str(pack.get("title") or "Чтение")
                     fr = pack.get("fragments") or []
                     assets = pack.get("assets") or []
-                    lines.append(f"  {r_idx}) 📖 <b>{_preview_text(ttl, 40)}</b> (fr={len(fr)}, assets={len(assets)})")
+                    lines.append(f"  {r_idx}) 📖 <b>{_preview_text(ttl, 40)}</b> (фраз: {len(fr) + len(assets)})")  # 💬 считаем фразы как fragments+assets
+
             lines.append("")
         
             translate_list = topic_data.get("translate") or []
@@ -1701,7 +1703,8 @@ async def handle_main_menu(message: Message, state: FSMContext):
                     ttl = str(pack.get("title") or "Перевод")
                     fr = pack.get("fragments") or []
                     assets = pack.get("assets") or []
-                    lines.append(f"  {t_idx}) 📝 <b>{_preview_text(ttl, 40)}</b> (fr={len(fr)}, assets={len(assets)})")
+                    lines.append(f"  {t_idx}) 📝 <b>{_preview_text(ttl, 40)}</b> (фраз: {len(fr) + len(assets)})")  # 💬 считаем фразы как fragments+assets
+
             lines.append("")
 
 
@@ -1944,7 +1947,8 @@ async def _edit_grammar_show_list(message: Message, state: FSMContext):
             ttl = str((it or {}).get("title") or "Чтение")
             fr = (it or {}).get("fragments") or []
             assets = (it or {}).get("assets") or []
-            lines.append(f"{i}) 📖 {_preview_text(ttl, 40)} (fr={len(fr)}, assets={len(assets)})")
+            lines.append(f"{i}) 📖 {_preview_text(ttl, 40)} (фраз: {len(fr) + len(assets)})")  # 💬 считаем фразы как fragments+assets
+
         else:
             lines.append(f"{i}) {_preview_item(it)}")
 
@@ -4818,6 +4822,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
