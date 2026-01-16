@@ -6069,6 +6069,13 @@ async def show_phase_menu(message: Message, state: FSMContext):
     buttons = []
     for ph in phases:
         blocks     = ph.get("vocab", [])
+
+        # 💬 что делает эта часть: если фаза пустая (нет vocab и нет пулов), не показываем её как пакет
+        pool_cnt = len(ph.get("quiz_pool", [])) + len(ph.get("textquiz_pool", []))
+        if not blocks and pool_cnt == 0:
+            continue
+
+        
         # отбираем только link-блоки (те, что имеют ключ "link" или "url")
         link_blocks = [b for b in blocks if "link" in b or "url" in b]
         total       = len(link_blocks)
