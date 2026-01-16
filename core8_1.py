@@ -1229,7 +1229,7 @@ async def register_or_update_user(message: Message):
 
 
 
-async def add_xp(user_id: int, topic: str, amount: int, action: str = None):
+async def add_xp(user_id: int, topic: str, amount: int, action: str = None, action_amount: int = 1):
     """
     Универсальное начисление XP и обновление статистики по пользователю.
     """
@@ -1269,38 +1269,45 @@ async def add_xp(user_id: int, topic: str, amount: int, action: str = None):
     # 3. words_learned сегодня + лимит
     if action == "words_learned":
         # 💬 daily-limit учитываем только в xp_data, вывод в меню делается отдельно
-        limit = user.get("words_daily_limit", 10)
+        # 💬 daily-limit учитываем только в xp_data, вывод в меню делается отдельно
+        limit = int(user.get("words_daily_limit", 10) or 0)
+        cur_today = int(user.get("words_learned_today", 0) or 0)
 
-        if user.get("words_learned_today", 0) < limit:
-            user["words_learned_today"] = user.get("words_learned_today", 0) + 1  # 💬 +1 сегодня (если не превышен лимит)
+        # 💬 что делает эта часть: не даём превысить лимит, но учитываем action_amount (например +2)
+        inc = int(action_amount or 0)
+        if limit > 0:
+            inc = max(0, min(inc, max(0, limit - cur_today)))
 
-        # 💬 Счётчик за неделю
-        week = datetime.date.today().isocalendar()[1]
-        month = datetime.date.today().month
+        if inc > 0:
+            user["words_learned_today"] = cur_today + inc  # 💬 +inc сегодня (если не превышен лимит)
 
-        # Сброс если неделя или месяц поменялись
-        if user.get("words_week_number") != week:
-            user["words_learned_week"] = 0
-            user["words_week_number"] = week
-        if user.get("words_month_number") != month:
-            user["words_learned_month"] = 0
-            user["words_month_number"] = month
+            # 💬 Счётчик за неделю
+            week = datetime.date.today().isocalendar()[1]
+            month = datetime.date.today().month
 
-        user["words_learned_week"] = user.get("words_learned_week", 0) + 1
-        user["words_learned_month"] = user.get("words_learned_month", 0) + 1
+            # 💬 Сброс если неделя или месяц поменялись
+            if user.get("words_week_number") != week:
+                user["words_learned_week"] = 0
+                user["words_week_number"] = week
+            if user.get("words_month_number") != month:
+                user["words_learned_month"] = 0
+                user["words_month_number"] = month
 
-        # 💬 Глобальная статистика: общий счётчик выученных слов (для отчётов/лимитов в сессии)
-        if "stats" not in user:
-            user["stats"] = {"words_learned": 0, "exercises_done": 0}
-        user["stats"]["words_learned"] = user["stats"].get("words_learned", 0) + 1  # 🍪 +1
+            user["words_learned_week"] = int(user.get("words_learned_week", 0) or 0) + inc
+            user["words_learned_month"] = int(user.get("words_learned_month", 0) or 0) + inc
 
-        # 💬 аналитика: слова по темам (чтобы понимать, какие темы реально учат)
-        analytics = user.get("analytics", {})
-        topics_words = analytics.get("topics_words", {})
-        if isinstance(topics_words, dict):
-            topics_words[topic] = topics_words.get(topic, 0) + 1
-        analytics["topics_words"] = topics_words
-        user["analytics"] = analytics
+            # 💬 Глобальная статистика: общий счётчик выученных слов
+            if "stats" not in user:
+                user["stats"] = {"words_learned": 0, "exercises_done": 0}
+            user["stats"]["words_learned"] = int(user["stats"].get("words_learned", 0) or 0) + inc  # 🍪 +inc
+
+            # 💬 аналитика: слова по темам
+            analytics = user.get("analytics", {})
+            topics_words = analytics.get("topics_words", {})
+            if isinstance(topics_words, dict):
+                topics_words[topic] = int(topics_words.get(topic, 0) or 0) + inc
+            analytics["topics_words"] = topics_words
+            user["analytics"] = analytics = analytics
 
 
 
@@ -4828,6 +4835,9 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     user_id = str(message.chat.id)
     user = xp_data.get(user_id, {})
     reset_daily_words_if_needed(user)
+    xp_data[user_id] = user
+    save_xp_data(xp_data)  # 💬 сохраняем words_today_date, иначе каждый вход в меню будет снова сбрасывать в 0
+
     today = int(user.get("words_learned_today", 0) or 0)  # 💬 слова сегодня
 
     # 💬 звёзды по фазам = done True только по ➡️ на последнем фрагменте
@@ -4877,7 +4887,8 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         done = " ✅" if p >= 100 else ""
         return f"<b>{icon}  {bar}  {p}%</b>{done}"
 
-    vocab_pct = (completed_phases / total_phases) if total_phases else 0.0
+    denom = total_phases_for_unlock if total_phases_for_unlock else total_phases
+    vocab_pct = (completed_phases / denom) if denom else 0.0  # 💬 считаем только фазы, которые реально участвуют в прогрессе
     tr_total = len(translate_packs)
     rd_total = len(reading_packs)
     tr_pct = (done_translate / tr_total) if tr_total else 0.0
@@ -8395,6 +8406,14 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     else:
         # 💬 что делает эта часть: верно = засчитываем прогресс textquiz
         await award_xp(30, state)
+        await add_xp(
+            message.from_user.id,
+            data.get("selected_topic", "") or "",
+            0,
+            action="words_learned",
+            action_amount=2
+        )  # 💬 +2 слова сегодня за 1 правильный textquiz
+
         await state.update_data(
             textquiz_correct=data.get("textquiz_correct", 0) + 1,
             textquiz_correct_phase=data.get("textquiz_correct_phase", 0) + 1,
