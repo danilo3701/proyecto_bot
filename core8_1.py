@@ -8400,28 +8400,29 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
     variants_norm = [normalize_textquiz(v) for v in variants if v]
     is_correct = user_norm in variants_norm
-    
-        # 💬 реакция на сообщение пользователя (✅ или случайная негативная)
-        try:
-            if is_correct:
-                await bot.set_message_reaction(
-                    chat_id=message.chat.id,
-                    message_id=message.message_id,
-                    reaction=[ReactionTypeEmoji(emoji="🍪")],
-                    is_big=True
-                )
-            else:
-                await bot.set_message_reaction(
-                    chat_id=message.chat.id,
-                    message_id=message.message_id,
-                    reaction=[ReactionTypeEmoji(emoji=random.choice(TEXTQUIZ_NEGATIVE_REACTS))],
-                    is_big=True
-                )
-        except Exception:
-            pass
-    
-        pending = (data.get("pending_textquiz") or [])[:]
-        redo_text = (data.get("redo_stack_text") or [])[:]
+
+    # 💬 реакция на сообщение пользователя (✅ или случайная негативная)
+    try:
+        if is_correct:
+            await bot.set_message_reaction(
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                reaction=[ReactionTypeEmoji(emoji="🍪")],
+                is_big=True
+            )
+        else:
+            await bot.set_message_reaction(
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                reaction=[ReactionTypeEmoji(emoji=random.choice(TEXTQUIZ_NEGATIVE_REACTS))],
+                is_big=True
+            )
+    except Exception:
+        pass
+
+    pending = (data.get("pending_textquiz") or [])[:]
+    redo_text = (data.get("redo_stack_text") or [])[:]
+
 
 
     # 💬 что делает эта часть: убираем текущий idx из pending, чтобы очередь двигалась
@@ -8429,17 +8430,10 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         pending = [p for p in pending if p != idx]
 
     if not is_correct:
-        # 💬 что делает эта часть: неверно = показываем ✅ правильный ответ, ждём и удаляем, добавляем в redo_stack_text
-        correct_str = " / ".join(variants) if variants else ""
-        fb = await message.answer(f"✅ {correct_str}".strip())
-        await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)
-        try:
-            await bot.delete_message(message.chat.id, fb.message_id)
-        except Exception:
-            pass
-
+        # 💬 неверно = добавляем в redo_stack_text для повтора, правильный ответ покажем единым фидбэком ниже
         if idx not in redo_text:
             redo_text.append(idx)
+
     else:
         # 💬 что делает эта часть: верно = засчитываем прогресс textquiz
         await award_xp(30, state)
