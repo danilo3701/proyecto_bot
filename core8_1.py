@@ -1634,6 +1634,10 @@ SLEEP_BEFORE_FEEDBACK_S  = 0.35   # ⏸ пауза между показом «�
 SLEEP_AFTER_FEEDBACK_S   = 0.35    # 📖 даём дочитать XP/фидбек перед удалением
 
 AUTO_DELETE_TEXT_DELAY_S = 0.35   # 🧹 авто-удаление сервисных сообщений («Время вышло!», «✅ …»)
+TEXTQUIZ_FB_OK_S          = 0.3   # 💬 сколько держим фидбэк на ✅ в text_quiz
+TEXTQUIZ_FB_WRONG_S       = 1.5   # 💬 сколько держим правильный ответ на ❌ в text_quiz
+TEXTQUIZ_NEGATIVE_REACTS  = ["💩", "🤮", "🤢"]  # 💬 случайная негативная реакция на ответ пользователя
+
 AUTO_DELETE_GIF_DELAY_S  = 3.0    # 🧹 авто-удаление MP4/стикеров после ссылки-упражнения
 
 AUTO_DELETE_STICKER_DELAY_S = 2.3   # 🧹 авто-удаление стикеров по умолчанию
@@ -8103,18 +8107,22 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
   
     # 💬 Новый: показываем правильный ответ или фразу похвалы перед XP
     if is_correct:
-        # 💬 20% шанс — показать стикер, 80% — фразу поддержки
-        if random.random() < 0.2:
-            from scenarios_estiloso8_1 import exercise_stickers  # 💬 стикеры для успеха в упражнениях
-            sticker_id = random.choice(exercise_stickers)
-            await send_and_auto_delete_sticker(bot, user_id, sticker_id)
-        else:
-            await send_and_auto_delete_text(
+        # 💬 всегда показываем фразу поддержки, стикер = доп эффект (не замена)
+        asyncio.create_task(
+            send_and_auto_delete_text(
                 bot,
                 user_id,
                 random.choice(vocab_quiz_success_phrases),
-                delay=SLEEP_BEFORE_FEEDBACK_S,  # 💬 короткий показ текста
+                delay=AUTO_DELETE_TEXT_DELAY_S,  # 💬 чуть видим и удаляем
             )
+        )
+
+        # 💬 20% шанс дополнительно показать стикер
+        if random.random() < 0.2:
+            from scenarios_estiloso8_1 import exercise_stickers  # 💬 стикеры для успеха в упражнениях
+            sticker_id = random.choice(exercise_stickers)
+            asyncio.create_task(send_and_auto_delete_sticker(bot, user_id, sticker_id))  # 💬 стикер удалится сам
+
     else:
         # 💬 при ошибке: держим правильный ответ 2 сек + иногда даём «негативный» стикер поверх
         asyncio.create_task(_maybe_send_negative_sticker(bot, user_id))  # 💬 шанс/тайминги в константах
@@ -8392,9 +8400,29 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
     variants_norm = [normalize_textquiz(v) for v in variants if v]
     is_correct = user_norm in variants_norm
+    
+        # 💬 реакция на сообщение пользователя (✅ или случайная негативная)
+        try:
+            if is_correct:
+                await bot.set_message_reaction(
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    reaction=[ReactionTypeEmoji(emoji="🍪")],
+                    is_big=True
+                )
+            else:
+                await bot.set_message_reaction(
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    reaction=[ReactionTypeEmoji(emoji=random.choice(TEXTQUIZ_NEGATIVE_REACTS))],
+                    is_big=True
+                )
+        except Exception:
+            pass
+    
+        pending = (data.get("pending_textquiz") or [])[:]
+        redo_text = (data.get("redo_stack_text") or [])[:]
 
-    pending = (data.get("pending_textquiz") or [])[:]
-    redo_text = (data.get("redo_stack_text") or [])[:]
 
     # 💬 что делает эта часть: убираем текущий idx из pending, чтобы очередь двигалась
     if idx in pending:
@@ -8551,14 +8579,19 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
                 )
             )
 
-        # 💬 показываем сколько «печенька» дала слов за этот текстквиз
-        extra_fb = await message.answer(f"🍪 +{to_give}\n📚 +{to_give} слов", parse_mode="HTML")
+        # 💬 показываем мотивацию + сколько «печенька» дала слов за этот текстквиз
+        extra_fb = await message.answer(
+            f"{random.choice(vocab_quiz_success_phrases)}\n🍪 +{to_give}\n📚 +{to_give} слов",
+            parse_mode="HTML"
+        )
+
 
 
     elif not is_correct:
-        # 📌 показываем правильный ответ заглавными
-        correct_str = " или ".join(variants).upper()
+        # 💬 показываем правильный ответ (держим дольше)
+        correct_str = str(block.get("correct_answer", "")).strip().upper() or " / ".join(variants).upper()
         extra_fb = await message.answer(f"👉 {correct_str}", parse_mode="HTML")
+
 
     else:
         # 💬 лимит печенек достигнут, но фидбэк на ✅ всё равно показываем (иначе кажется, что ничего не произошло)
@@ -8569,7 +8602,9 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
 
     # 💬 что делает эта часть: даём увидеть реакцию и на ✅ и на ❌ (иначе ❌ исчезает слишком быстро)
-    await asyncio.sleep(max(SLEEP_AFTER_FEEDBACK_S, REPLY_REACTION_READ_DELAY_S))
+    # 💬 отдельные тайминги именно для text_quiz
+    await asyncio.sleep(TEXTQUIZ_FB_OK_S if is_correct else TEXTQUIZ_FB_WRONG_S)
+
 
 
     # 💬 5) Удаляем всё: вопрос, ответ пользователя, XP-фидбэк и (если есть) extra-фидбэк
@@ -9671,7 +9706,6 @@ async def handle_failed_textquiz(message: Message, state: FSMContext):
         # 📌 показываем все допустимые ответы заглавными, через «или»
         correct_str = " или ".join(variants).upper()
         extra_fb = await message.answer(f"👉 {correct_str}", parse_mode="HTML")
-        extra_fb = await message.answer(f"👉 {block['correct_answer'].upper()}", parse_mode="HTML")
     else:
         # 💬 лимит печенек достигнут, но фидбэк на ✅ всё равно показываем (иначе кажется, что ничего не произошло)
         extra_fb = await message.answer(
