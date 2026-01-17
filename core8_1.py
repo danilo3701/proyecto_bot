@@ -9455,7 +9455,7 @@ async def handle_offer_continue_vocab(message: Message, state: FSMContext):
         phrase, sticker_id = random.choice(go_next_phrases)
         await smart_reply(message, phrase)
         # 💬 отправка стикера без await, чтобы не блочить поток
-        asyncio.create_task(send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=3))
+        asyncio.create_task(send_and_auto_delete_sticker(bot, message.chat.id, sticker_id, delay=1.5))
 
         if data.get("lex_mode_active"):
             # 💬 что делает эта часть: вместо старого "следующий сет" = запускаем следующий раунд
