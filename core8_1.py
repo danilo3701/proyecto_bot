@@ -4694,38 +4694,45 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     # ─────────────────────────────────────────────────────────────────────────────
 
 
-    # 📚 Словарь → считаем **фазы**, а значит “done phases / total phases”
+    # 📚 Словарь → прогресс считаем по "юнитам" внутри фаз (раунды 1–5), чтобы % рос после каждого offer_continue
     phases = topic.get("vocab", [])
     total_phases = len(phases)
-    per_phase    = data.get("vocab_done_per_phase", {})
-    # сколько фаз полностью пройдено?
+    per_phase = data.get("vocab_done_per_phase", {})
+
     completed_phases = 0
     total_phases_for_unlock = 0
+
+    vocab_done_units = 0
+    vocab_total_units = 0
 
     for ph in phases:
         phase_id = ph.get("phase_id")
 
         # 💬 что делает эта часть: определяем "норму" фазы
-        # 💬 PHRASE PACK v2 = считаем по количеству phrases, старые фазы = по количеству link/url
+        # 💬 PHRASE PACK v2 = 5 раундов (4 poll + 1 text), старые фазы = по количеству link/url
         phrases_cnt = len(ph.get("phrases", []) or [])
         link_cnt = len([b for b in ph.get("vocab", []) if "link" in b or "url" in b])
 
-        need = phrases_cnt if phrases_cnt > 0 else link_cnt
+        need = 5 if phrases_cnt > 0 else link_cnt  # 💬 фиксируем 5 раундов для phrase-pack
         if need <= 0:
             continue  # 💬 пустая фаза не участвует в % и не может быть пройдена
 
         total_phases_for_unlock += 1
+        vocab_total_units += need  # 💬 суммарная норма по словарю
 
         # 💬 что делает эта часть: ключ phase_id мог сохраниться как int или str = проверяем оба
-        done_raw = per_phase.get(phase_id, None)
-        if done_raw is None:
-            done_raw = per_phase.get(str(phase_id), 0)
+        done_raw = per_phase.get(str(phase_id), per_phase.get(phase_id, 0))
         done = int(done_raw or 0)
 
-        if done >= need:
-            completed_phases += 1  # 💬 фаза пройдена (по phrases или по ссылкам)
+        vocab_done_units += min(done, need)  # 💬 копим частичный прогресс, не больше нормы
 
-    # 💬 70% фаз словаря пройдено = разблокируем остальные разделы
+        if done >= need:
+            completed_phases += 1  # 💬 фаза полностью пройдена (все 5 раундов / все link)
+
+    # 💬 прогресс 📖 = частичный (по юнитам), чтобы рос после каждого раунда
+    vocab_pct = (vocab_done_units / vocab_total_units) if vocab_total_units else 0.0  # 💬 0 если нет фаз
+
+    # 💬 70% фаз словаря пройдено = разблокируем остальные разделы (логика разблокировки остаётся по закрытым фазам)
     vocab_unlock_percent = (completed_phases / total_phases_for_unlock * 100) if total_phases_for_unlock else 0  # 💬 нет фаз = 0%
     unlocked = vocab_unlock_percent >= 70
     await state.update_data(unlocked=unlocked)
@@ -4887,8 +4894,8 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         done = " ✅" if p >= 100 else ""
         return f"<b>{icon}  {bar}  {p}%</b>{done}"
 
-    denom = total_phases_for_unlock if total_phases_for_unlock else total_phases
-    vocab_pct = (completed_phases / denom) if denom else 0.0  # 💬 считаем только фазы, которые реально участвуют в прогрессе
+    # 💬 vocab_pct уже посчитан выше как частичный прогресс по раундам (1–5) / link-блокам
+    vocab_pct = float(vocab_pct or 0.0)
     tr_total = len(translate_packs)
     rd_total = len(reading_packs)
     tr_pct = (done_translate / tr_total) if tr_total else 0.0
@@ -10521,21 +10528,26 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
         # 💬 чтобы 📖 % в меню темы обновился даже если юзер нажал "Домой"
         try:
             phase_id = data.get("selected_phase_id")
-            total_phase = int(data.get("total_quizzes_phase", 0) or 0)
-
-            poll_done_ids = data.get("poll_done_ids") or []
-            poll_phase_done = max(int(data.get("quiz_correct_phase", 0) or 0), len(poll_done_ids))
-            txt_phase_done = int(data.get("textquiz_correct_phase", 0) or 0)
-            phase_done = poll_phase_done + txt_phase_done
-
-            if phase_id is not None and total_phase > 0 and phase_done >= total_phase:
+            if phase_id is not None:
                 per_phase = data.get("vocab_done_per_phase") or {}
+
+                # 💬 что делает эта часть: PHRASE PACK v2 = прогресс по раундам (1–5)
+                poll_total = int(data.get("lex_round_total", 4) or 4)  # 💬 4 poll-раунда
+                poll_done = int(data.get("lex_round", 0) or 0)         # 💬 сколько раундов уже закрыто
+                poll_done = max(0, min(poll_done, poll_total))
+
+                text_done = 1 if data.get("lex_textquiz_done_round") else 0  # 💬 5-й раунд
+                done_rounds = poll_done + text_done
+                total_rounds = poll_total + 1
+
                 prev = per_phase.get(str(phase_id), per_phase.get(phase_id, 0))
-                per_phase[str(phase_id)] = max(int(prev or 0), int(total_phase))
+                per_phase[str(phase_id)] = max(int(prev or 0), int(done_rounds))  # 💬 сохраняем частичный прогресс
                 await state.update_data(vocab_done_per_phase=per_phase)
+
+                # 💬 что делает эта часть: total_quizzes_phase нужен другим местам = держим консистентно "5"
+                await state.update_data(total_quizzes_phase=int(total_rounds))
         except Exception:
             pass  # 💬 меню не должно падать из-за синхронизации прогресса
-
 
 
         # Переход по результату
