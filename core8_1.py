@@ -8554,8 +8554,11 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         extra_fb = await message.answer(f"👉 {correct_str}", parse_mode="HTML")
 
     else:
-        # 📌 лимит печенек достигнут — пропускаем
-        extra_fb = None
+        # 💬 лимит печенек достигнут, но фидбэк на ✅ всё равно показываем (иначе кажется, что ничего не произошло)
+        extra_fb = await message.answer(
+            random.choice(vocab_quiz_success_phrases),
+            parse_mode="HTML"
+        )
 
 
     # 💬 что делает эта часть: даём увидеть реакцию и на ✅ и на ❌ (иначе ❌ исчезает слишком быстро)
@@ -9663,8 +9666,12 @@ async def handle_failed_textquiz(message: Message, state: FSMContext):
         extra_fb = await message.answer(f"👉 {correct_str}", parse_mode="HTML")
         extra_fb = await message.answer(f"👉 {block['correct_answer'].upper()}", parse_mode="HTML")
     else:
-        # 📌 лимит печенек достигнут — пропускаем
-        extra_fb = None
+        # 💬 лимит печенек достигнут, но фидбэк на ✅ всё равно показываем (иначе кажется, что ничего не произошло)
+        extra_fb = await message.answer(
+            random.choice(vocab_quiz_success_phrases),
+            parse_mode="HTML"
+        )
+
 
 
 
