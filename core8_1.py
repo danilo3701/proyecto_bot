@@ -8453,7 +8453,16 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
             action_amount=2
         )  # 💬 +2 слова сегодня за 1 правильный textquiz
 
-    # 💬 фикс: обязательно сохраняем обновлённые очереди, иначе последний textquiz может зациклиться
+    # 💬 что делает эта часть: при верном ответе увеличиваем счётчики и ОБЯЗАТЕЛЬНО чистим redo_stack_text
+    if is_correct:
+        await state.update_data(
+            textquiz_correct=data.get("textquiz_correct", 0) + 1,
+            textquiz_correct_phase=data.get("textquiz_correct_phase", 0) + 1,
+        )
+        if idx in redo_text:
+            redo_text = [r for r in redo_text if r != idx]  # 💬 убираем текущий idx из пересдач
+
+    # 💬 фикс: сохраняем обновлённые очереди, чтобы следующий выбор не взял тот же idx снова
     await state.update_data(
         pending_textquiz=pending,
         redo_stack_text=redo_text
@@ -8471,13 +8480,6 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         )
         return await lesson_menu_handler(message, state)
 
-
-        await state.update_data(
-            textquiz_correct=data.get("textquiz_correct", 0) + 1,
-            textquiz_correct_phase=data.get("textquiz_correct_phase", 0) + 1,
-        )
-        if idx in redo_text:
-            redo_text = [r for r in redo_text if r != idx]
 
     # 💬 что делает эта часть: чистим вопрос + ответ пользователя (если бот имеет права)
     prompt_id = data.get("last_prompt_id")
