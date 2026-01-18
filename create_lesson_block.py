@@ -2798,6 +2798,23 @@ async def import_vocab_allin_bulk(message: Message, state: FSMContext):
 
     await state.update_data(topic=topic_data)
 
+    # 💬 если ALL IN добавляли из режима редактирования = возвращаемся в edit-меню лексики
+    if data.get("edit_mode"):
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➕ Новая фаза словаря"), KeyboardButton(text="🗑 Удалить фазу словаря")],
+                [KeyboardButton(text="➕ Новая фаза диалогов"), KeyboardButton(text="🗑 Удалить фазу диалогов")],
+                [KeyboardButton(text="➕ Добавить видео"), KeyboardButton(text="🗑 Удалить видео")],
+                [KeyboardButton(text="➕ Добавить чтение"), KeyboardButton(text="🗑 Удалить пак чтения")],
+                [KeyboardButton(text="↩️ Вернуться в Главное меню")],
+            ],
+            resize_keyboard=True,
+        )
+        await message.answer("✅ ALL IN добавлен. Возвращаю в режим редактирования.", reply_markup=kb)
+        await state.set_state(EditTopicStates.choose_action)
+        return
+
+
     found = (meta or {}).get("found", 0)
     saved = (meta or {}).get("saved", 0)
     invalid = (meta or {}).get("invalid", 0)
@@ -4237,12 +4254,29 @@ async def save_reading_photo(message: Message, state: FSMContext):
 
 # 🎨 Утилита: меню действий в режиме редактирования
 async def send_edit_menu(chat_id: int, bot: Bot, state: FSMContext):
-    kb = make_kb([
-        ["➕ Добавить словарь",    "➕ Добавить упражнение"],
-        ["➕ Добавить видео",      "➕ Добавить диалог"],
-        ["➕ Добавить QUIZ",       "📝 Добавить ТЕКСТ"],
-        ["↩️ Вернуться в Главное меню"]
-    ])
+    data = await state.get_data()
+    topic = data.get("topic") or {}
+    category_now = ((topic.get("category") or "").strip().lower())
+
+    if category_now.startswith("lex"):
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➕ Новая фаза словаря"), KeyboardButton(text="🗑 Удалить фазу словаря")],
+                [KeyboardButton(text="➕ Новая фаза диалогов"), KeyboardButton(text="🗑 Удалить фазу диалогов")],
+                [KeyboardButton(text="➕ Добавить видео"), KeyboardButton(text="🗑 Удалить видео")],
+                [KeyboardButton(text="➕ Добавить чтение"), KeyboardButton(text="🗑 Удалить пак чтения")],
+                [KeyboardButton(text="↩️ Вернуться в Главное меню")],
+            ],
+            resize_keyboard=True,
+        )  # 💬 единое меню редактирования лексики через фазы
+    else:
+        kb = make_kb([
+            ["➕ Добавить словарь",    "➕ Добавить упражнение"],
+            ["➕ Добавить видео",      "➕ Добавить диалог"],
+            ["➕ Добавить QUIZ",       "📝 Добавить ТЕКСТ"],
+            ["↩️ Вернуться в Главное меню"]
+        ])  # 💬 старое меню для не-лексики
+
     await bot.send_message(chat_id, "✏️ Режим редактирования. Что вы хотите сделать?", reply_markup=kb)
     await state.set_state(EditTopicStates.choose_action)
 
@@ -4278,6 +4312,7 @@ async def handle_edit_action(message: Message, state: FSMContext):
     # 💬 создать фазу словаря
     if text == "➕ Новая фаза словаря":
         await state.update_data(last_block="vocab")  # 💬 чтобы после создания фазы открыть меню добавления блоков
+        await state.update_data(edit_mode=True)  # 💬 помечаем, что добавление идёт из режима редактирования
         new_phase = await _create_vocab_phase_auto(state)  # 💬 создаём пак автоматически
         await message.answer(
             f"Создан: {new_phase['phase_name']}",
@@ -4835,6 +4870,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
