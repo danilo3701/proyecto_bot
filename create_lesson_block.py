@@ -985,7 +985,7 @@ async def admin_edit_scope(cb: CallbackQuery, state: FSMContext):
     if kind == "phase_vocab":
         hint = "Пришли название фазы\nили '-' для авто"
     elif kind == "video":
-        hint = "Пришли 2 строки\n1) название\n2) ссылка или iframe"
+        hint = "Пришли 1 строку\nссылка или iframe"
     elif kind == "exercise":
         hint = "Пришли 2 строки\n1) название\n2) ссылка или iframe"
     else:
@@ -1040,11 +1040,22 @@ async def admin_edit_waiting_insert_payload(message: Message, state: FSMContext)
             new_item.setdefault("phrases", [])
 
     elif kind == "video":
-        if len(lines) < 2:
-            await _inline_edit_by_id(message, state, "❌ Нужно 2 строки: название и ссылка или iframe", nav_kb)
+        if len(lines) < 1:
+            await _inline_edit_by_id(message, state, "❌ Пришли ссылку или iframe", nav_kb)
             return
-        skipped = max(0, len(lines) - 2)
-        new_item = {"title": lines[0], "link": _extract_src(lines[1])}
+
+        items_now = topic_data.get(scope) or []
+        if not isinstance(items_now, list):
+            items_now = []
+
+        if len(lines) >= 2:
+            skipped = max(0, len(lines) - 2)
+            new_item = {"title": lines[0], "link": _extract_src(lines[1])}
+        else:
+            skipped = max(0, len(lines) - 1)
+            auto_title = f"Video {len(items_now) + 1}"
+            new_item = {"title": auto_title, "link": _extract_src(lines[0])}
+
 
     elif kind == "exercise":
         if len(lines) < 2:
@@ -1982,12 +1993,21 @@ async def handle_main_menu(message: Message, state: FSMContext):
 
     #ть видео -----------------------
     if text == "🎥 Добавить видео":
-        # 💬 Последний блок – «video»
+        # 💬 Последний блок = video
         await state.update_data(last_block="video")
-        # Просим ввести заголовок видео
-        await message.answer("Введите ЗАГОЛОВОК видео:")
-        # Переходим в состояние, где ждём title видео
-        await state.set_state(NewTopicStates.waiting_video_title)
+
+        data = await state.get_data()
+        topic = data.get("topic") or {}
+
+        # 💬 авто-тайтл по количеству уже добавленных видео
+        existing_videos = topic.get("videos") or []
+        auto_title = f"Video {len(existing_videos) + 1}"
+
+        await state.update_data(current_video_title=auto_title)
+
+        # 💬 сразу просим ссылку, без шага ввода названия
+        await message.answer("Пришли ссылку на видео (или iframe):", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(NewTopicStates.waiting_video_link)
         return
 
     #ть чтение -----------------------
@@ -4173,11 +4193,20 @@ async def receive_vocab_media(message: Message, state: FSMContext):
 # 1) Запрашиваем заголовок видео
 @router.message(NewTopicStates.waiting_video_title)
 async def get_video_title(message: Message, state: FSMContext):
-    video_title = message.text.strip()
+    raw = (message.text or "").strip()
+
+    data = await state.get_data()
+    topic = data.get("topic") or {}
+    existing_videos = topic.get("videos") or []
+    auto_title = f"Video {len(existing_videos) + 1}"
+
+    video_title = auto_title if raw == "-" else raw
+
     await state.update_data(current_video_title=video_title)
-    # Переходим к запросу ссылки на видео
-    await message.answer("Введите ССЫЛКУ на видео:")
+    # 💬 Переходим к запросу ссылки на видео
+    await message.answer("Пришли ссылку на видео (или iframe):")
     await state.set_state(NewTopicStates.waiting_video_link)
+
 
 # 2) Запрашиваем ссылку на видео, сохраняем и пост-меню
 @router.message(NewTopicStates.waiting_video_link)
@@ -4202,6 +4231,13 @@ async def get_video_link(message: Message, state: FSMContext):
     data = await state.get_data()
     topic_data = data["topic"]
     topic_path = data["topic_path"]
+    # 💬 если title не задан (на всякий случай) = авто-тайтл Video N
+    current_title = data.get("current_video_title")
+    if not current_title:
+        topic_data.setdefault("videos", [])
+        current_title = f"Video {len(topic_data.get('videos') or []) + 1}"
+        await state.update_data(current_video_title=current_title)
+
 
     new_video = {
         "title": data.get("current_video_title"),
@@ -5104,6 +5140,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
