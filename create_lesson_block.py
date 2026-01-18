@@ -1456,7 +1456,7 @@ async def handle_main_menu(message: Message, state: FSMContext):
         elif text == "📚 Читать":
             text = "📖 Добавить чтение"
 
-    # ----------------------- Добавить чтение -----------------------
+    #ть чтение -----------------------
     if text in ("➕ Добавить чтение", "📖 Читать", "📖 читать"):
         await state.update_data(last_block="reading")  # 💬 помечаем режим "Читать", дальше общий FSM сохранит в topic["reading"]
         await message.answer(
@@ -1469,7 +1469,7 @@ async def handle_main_menu(message: Message, state: FSMContext):
         return await state.set_state(NewTopicStates.waiting_reading_title)  # 💬 общий state, различаем по last_block
 
     
-    # ----------------------- Добавить перевод -----------------------
+    #ть перевод -----------------------
     if text == "📝 Добавить перевод":
         await state.update_data(last_block="translate")  # 💬 что делает эта часть: помечаем режим «Переводить»
     
@@ -1484,35 +1484,41 @@ async def handle_main_menu(message: Message, state: FSMContext):
         return await state.set_state(NewTopicStates.waiting_reading_title)  # 💬 FSM общий, различаем по last_block
 
 
-    # ----------------------- Добавить словарь -----------------------
+        #ть словарь -----------------------
     if text == "📚 словарь":
-        await state.update_data(last_block="vocab")
-        data   = await state.get_data()
-        phases = data["topic"]["vocab"]  # список фаз
-        if not phases:
-            new_phase = await _create_vocab_phase_auto(state)  # 💬 создаём пак автоматически
-            await message.answer(
-                f"Создан: {new_phase['phase_name']}",
-                reply_markup=ReplyKeyboardRemove()
-            )  # 💬 пропускаем ввод названия
-            await send_post_menu(message, state)  # 💬 сразу показываем кнопки добавления словаря
-            return
+        await state.update_data(
+            last_block="vocab",
+            allin_force_new_phase=True  # 💬 каждый вход в словарь = готовим новую фазу под ближайший ALL IN
+        )
 
-        else:
-            # строим кнопки из KeyboardButton
-            buttons = [
-                [KeyboardButton(text=f"{p['phase_id']}. {p['phase_name']}")]
-                for p in phases
-            ]
-            buttons.append([KeyboardButton(text="➕ Новая фаза")])
-            kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-            await message.answer("Выберите фазу или создайте новую:", reply_markup=kb)
-            await state.set_state(NewTopicStates.waiting_phase_choice)
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="↩️ Назад")]],
+            resize_keyboard=True
+        )
+
+        await message.answer(
+            "Вставь ALL IN блок одним сообщением.\n"
+            "Пустые строки игнорируются.\n\n"
+            "[PHRASE]\n"
+            "ES: pagar con tarjeta\n"
+            "RU: платить картой\n"
+            "[POLL]\n"
+            "...\n"
+            "...\n"
+            "...\n"
+            "...\n"
+            "[TEXT]\n"
+            "...\n"
+            "[/PHRASE]",
+            reply_markup=kb
+        )  # 💬 сразу уходим в bulk-вставку, без VOC
+        await state.set_state(NewTopicStates.waiting_vocab_allin_bulk)
         return
+return
 
 
 
-    # ----------------------- Добавить упражнение -----------------------
+    #ть упражнение -----------------------
     if text == "✏️ Добавить упражнение":
         # 💬 Последний блок – «exercise» (общие упражнения)
         await state.update_data(last_block="exercise")
@@ -1522,7 +1528,7 @@ async def handle_main_menu(message: Message, state: FSMContext):
         await state.set_state(NewTopicStates.waiting_ex_title)
         return
 
-    # ----------------------- Добавить видео -----------------------
+    #ть видео -----------------------
     if text == "🎥 Добавить видео":
         # 💬 Последний блок – «video»
         await state.update_data(last_block="video")
@@ -1532,7 +1538,7 @@ async def handle_main_menu(message: Message, state: FSMContext):
         await state.set_state(NewTopicStates.waiting_video_title)
         return
 
-    # ----------------------- Добавить диалог -----------------------
+    #ть диалог -----------------------
     if text == "💬 Добавить диалог":
         await state.update_data(last_block="dialog")
         await message.answer(
@@ -1542,7 +1548,7 @@ async def handle_main_menu(message: Message, state: FSMContext):
         )
         return await state.set_state(NewDialogStates.waiting_dialog_phase_name)
 
-    # ----------------------- Добавить чтение -----------------------
+    #ть чтение -----------------------
     if text == "📖 Добавить чтение":
         await state.update_data(last_block="reading")  # 💬 помечаем текущий раздел
 
@@ -2332,11 +2338,11 @@ async def send_post_menu(message: Message, state: FSMContext):
             ]
 
         else:
-            # 💬 лексика = оставляем режим ALL IN (phrases)
+            # 💬 лексика = VOC выключен, оставляем только ALL IN
             rows = [
-                [KeyboardButton(text="📘VOC")],
                 [KeyboardButton(text="🧩 ALL IN")],
             ]
+
 
 
 
@@ -3056,13 +3062,15 @@ async def handle_post_action(message: Message, state: FSMContext):
             await send_post_menu(message, state)
             return
 
-
         if text == "🧩 ALL IN":
-            await state.update_data(allin_force_new_phase=True)  # 💬 для ALL IN создаём новую фазу именно на следующей вставке текста
-            cp = data.get("current_phase_id")
-            if not cp:
-                await message.answer("⚠️ Сначала выбери фазу через 📘VOC.")  # 💬 защита от вставки без выбранной фазы
-                return
+            await state.update_data(
+                allin_force_new_phase=True  # 💬 для ALL IN создаём новую фазу именно на следующей вставке текста
+            )
+
+            kb = ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="↩️ Назад")]],
+                resize_keyboard=True
+            )
 
             await message.answer(
                 "Вставь ALL IN блок одним сообщением.\n"
@@ -3078,9 +3086,11 @@ async def handle_post_action(message: Message, state: FSMContext):
                 "[TEXT]\n"
                 "...\n"
                 "[/PHRASE]",
+                reply_markup=kb
             )  # 💬 подсказка формата для админа
             await state.set_state(NewTopicStates.waiting_vocab_allin_bulk)
             return
+
 
         if text == "📘VOC":
             data = await state.get_data()
@@ -4828,6 +4838,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
