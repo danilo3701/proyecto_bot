@@ -449,18 +449,29 @@ def get_main_menu(category: str | None = None) -> ReplyKeyboardMarkup:
 
 
 
-
-def get_edit_menu() -> ReplyKeyboardMarkup:
+def get_edit_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="➕ Добавить словарь"), KeyboardButton(text="➕ Добавить упражнение")],
-            [KeyboardButton(text="➕ Добавить видео"),    KeyboardButton(text="➕ Добавить диалог")],
-            # 💬 Убрана кнопка линейного QUIZ
-            [KeyboardButton(text="📝 Добавить ТЕКСТ")],
-            [KeyboardButton(text="➖ Удалить блок"),      KeyboardButton(text="🚫 Отмена")]
+            [
+                KeyboardButton(text="📚 Добавить словарь"),
+                KeyboardButton(text="➕ Добавить QUIZ"),
+            ],
+            [
+                KeyboardButton(text="➕ Добавить видео"),
+                KeyboardButton(text="📝 Добавить ТЕКСТ"),
+            ],
+            [
+                KeyboardButton(text="📚 Добавить чтение"),
+                KeyboardButton(text="➕ Добавить бонус"),
+            ],
+            [
+                KeyboardButton(text="📊 Статус темы"),
+                KeyboardButton(text="✅ Закончить редактирование"),
+            ],
         ],
-        resize_keyboard=True
+        resize_keyboard=True,
     )
+
 
 @router.message(Command("addtopic"))
 async def start_adding_topic(message: Message, state: FSMContext):
@@ -760,21 +771,19 @@ async def admin_topic_edit(cb: CallbackQuery, state: FSMContext):
 
 
 def _adm_scope_buttons(topic_data: dict) -> list:
-    # 💬 Возвращает список: (label, scope_key, insert_kind)
-    category_now = (topic_data.get("category") or "").strip().lower()
+    # 💬 что делает эта часть: единый список разделов для inline-редактирования (без «диалогов»)
+    category_now = ((topic_data.get("category") or "").strip().lower())
 
     if category_now == "gram":
         return [
-            ("📖 Теория", "vocab", "phase_vocab"),
-            ("📝 Практика", "exercises", "exercise"),
+            ("📖 Теория", "theory", "pack"),
+            ("📝 Практика", "practice", "pack"),
             ("🎥 Видео", "videos", "video"),
             ("📚 Читать", "reading", "pack"),
         ]
 
-    # 💬 Lex: добавляем диалоги и перевод
     return [
         ("📚 Словарь", "vocab", "phase_vocab"),
-        ("💬 Диалоги", "dialogs", "phase_dialog"),
         ("🧩 Упражнения", "exercises", "exercise"),
         ("🎥 Видео", "videos", "video"),
         ("📚 Читать", "reading", "pack"),
@@ -912,117 +921,94 @@ async def admin_edit_action_delete(cb: CallbackQuery, state: FSMContext):
     # 💬 Действие delete
     await state.update_data(**{ADMIN_PENDING_ACTION_KEY: "delete"})
     await _adm_show_sections_cb(cb, state)
-@router.callback_query(F.data.startswith("adm:edit_scope:"))
+
+
+
+@admin_inline_router.callback_query(F.data.startswith("adm:edit_scope:"))
 async def admin_edit_scope(cb: CallbackQuery, state: FSMContext):
-    # 💬 Выбор раздела и переход к вводу payload или индекса (1-based)
+    # 💬 что делает эта часть: выбираем раздел и переводим в ввод (add/delete) через inline
     ui_scope = cb.data.split("adm:edit_scope:", 1)[1].strip()
-    scope = ui_scope
+
+    data = await state.get_data()
+    action = (data.get(ADMIN_PENDING_ACTION_KEY) or "insert").strip()
 
     topic_data, topic_path = await _admin_load_topic_from_disk(state)
     if not topic_data or not topic_path:
-        await cb.answer("❌ Тема не загружена", show_alert=True)
+        await cb.answer("❗ Не нашёл файл темы", show_alert=True)
         return
 
-    data = await state.get_data()
-    action = data.get(ADMIN_PENDING_ACTION_KEY) or "insert"
-
-    scopes_map = {s: (lbl, kind) for (lbl, s, kind) in _adm_scope_buttons(topic_data)}
-    label, kind = scopes_map.get(ui_scope, ("Раздел", "pack"))
-
-    # 💬 совместимость: если старая тема хранит packs в translation, не плодим второй ключ
+    # 💬 алиас: если старая тема хранит packs в translation, не плодим второй ключ
+    scope = ui_scope
     if ui_scope == "translate" and "translate" not in topic_data and isinstance(topic_data.get("translation"), list):
         scope = "translation"
 
+    # 💬 подтягиваем label и kind из _adm_scope_buttons
+    label = "Раздел"
+    kind = "pack"
+    for lb, sc, kd in _adm_scope_buttons(topic_data):
+        if sc == ui_scope:
+            label, kind = lb, kd
+            break
+
     await state.update_data(
-        topic=topic_data,
-        topic_path=topic_path,
         **{
             ADMIN_EDIT_SCOPE_KEY: scope,
-            "admin_ui_scope": ui_scope,          # 💬 для корректного label и отчётов
-            "admin_selected_label": label,       # 💬 человекочитаемое имя раздела
+            ADMIN_PENDING_INSERT_KIND_KEY: kind,
+            "admin_selected_label": label,
         }
     )
 
-    st = await state.get_data()
-    tid = st.get(ADMIN_CURRENT_TID_KEY) or ""
-    title = str(topic_data.get("visible_title") or topic_data.get("name") or tid).strip()
+    nav_kb = _adm_nav_kb("adm:edit_sections")
 
     if action == "delete":
         items = topic_data.get(scope) or []
-        if not isinstance(items, list):
-            items = []
-
-        if len(items) == 0:
-            # 💬 нечего удалять
-            await _inline_replace(
-                cb,
-                state,
-                f"🗑 Удаление: <b>{label}</b>\nТема: <b>{_preview_text(title, 80)}</b>\n\nНечего удалять",
-                _adm_nav_kb("adm:edit_sections"),
-            )
-            await cb.answer()
+        if not isinstance(items, list) or not items:
+            await cb.answer("Нечего удалять", show_alert=True)
             return
 
-        await state.set_state(AdminInlineEditStates.waiting_delete_index)
-        await state.update_data(
-            **{
-                ADMIN_PENDING_INSERT_KIND_KEY: None,
-                ADMIN_PENDING_INSERT_PAYLOAD_KEY: None,
-            }
-        )
-
         max_idx_user = len(items)
-        await _inline_replace(
-            cb,
-            state,
-            f"🗑 Удаление: <b>{label}</b>\nТема: <b>{_preview_text(title, 80)}</b>\n\nВведите индекс (1..{max_idx_user})",
-            _adm_nav_kb("adm:edit_sections"),
+        await state.set_state(AdminInlineEditStates.waiting_delete_index)
+
+        text = (
+            f"🗑 Удаление: <b>{label}</b>\n"
+            f"Тема: <b>{topic_data.get('name', '')}</b>\n\n"
+            f"Введите индекс (1..{max_idx_user})\n"
+            f"или напиши Отмена"
         )
+        await _inline_replace(cb, state, text, nav_kb)
         await cb.answer()
         return
 
-    # 💬 insert: просим payload
+    # 💬 default: insert
     await state.set_state(AdminInlineEditStates.waiting_insert_payload)
-    await state.update_data(
-        **{
-            ADMIN_PENDING_INSERT_KIND_KEY: kind,
-            ADMIN_PENDING_INSERT_PAYLOAD_KEY: None,
-            "adm_skipped_count": 0,              # 💬 будет заполнено на шаге payload
-        }
-    )
 
-    if kind == "video":
-        hint = "Пришли 2 строки:\n1) название\n2) ссылка или iframe"
+    if kind == "phase_vocab":
+        hint = "Пришли название фазы\nили '-' для авто"
+    elif kind == "video":
+        hint = "Пришли 2 строки\n1) название\n2) ссылка или iframe"
     elif kind == "exercise":
-        hint = "Пришли 2 строки:\n1) название\n2) ссылка или iframe"
-    elif kind == "phase_vocab":
-        hint = "Пришли название фазы\nили '-' чтобы авто"
-    elif kind == "phase_dialog":
-        hint = "Пришли название фазы диалогов\nили '-' чтобы авто"
+        hint = "Пришли 2 строки\n1) название\n2) ссылка или iframe"
     else:
         hint = "Пришли название пака"
 
-    await _inline_replace(
-        cb,
-        state,
-        f"➕ Добавление: <b>{label}</b>\nТема: <b>{_preview_text(title, 80)}</b>\n\n{hint}",
-        _adm_nav_kb("adm:edit_sections"),
+    text = (
+        f"➕ Добавление: <b>{label}</b>\n"
+        f"Тема: <b>{topic_data.get('name', '')}</b>\n\n"
+        f"{hint}\n\n"
+        f"или напиши Отмена"
     )
+    await _inline_replace(cb, state, text, nav_kb)
     await cb.answer()
 
 
 @router.message(AdminInlineEditStates.waiting_insert_payload)
 async def admin_edit_waiting_insert_payload(message: Message, state: FSMContext):
-    # 💬 Принимаем данные для вставки, потом спрашиваем индекс (1-based)
+    # 💬 что делает эта часть: парсим payload и просим индекс вставки (1-based)
     nav_kb = _adm_nav_kb("adm:edit_sections")
 
     payload_raw = (message.text or "").strip()
     if payload_raw.lower() in {"отмена", "cancel"}:
         await _adm_show_actions_msg(message, state)
-        return
-
-    if not payload_raw:
-        await _inline_edit_by_id(message, state, "❌ Пусто. Пришли данные ещё раз", nav_kb)
         return
 
     data = await state.get_data()
@@ -1031,88 +1017,107 @@ async def admin_edit_waiting_insert_payload(message: Message, state: FSMContext)
 
     topic_data, topic_path = await _admin_load_topic_from_disk(state)
     if not topic_data or not topic_path:
-        await message.answer("❌ Тема не загружена")
+        await _inline_edit_by_id(message, state, "❗ Ошибка: не найден файл темы", nav_kb)
         return
 
-    category_now = (topic_data.get("category") or "").strip().lower()
-
-    lines = [l.strip() for l in payload_raw.splitlines() if l.strip()]
-    new_item = None
-    skipped = 0
+    if not scope or not kind:
+        await _inline_edit_by_id(message, state, "❗ Ошибка: не выбран раздел", nav_kb)
+        return
 
     def _extract_src(raw: str) -> str:
-        # 💬 вытягиваем src из iframe, если нужно
-        if "<iframe" in raw and "src=" in raw:
-            for q in ('"', "'"):
-                token = f"src={q}"
-                if token in raw:
-                    return raw.split(token, 1)[1].split(q, 1)[0]
+        raw = (raw or "").strip()
+        if "<iframe" in raw:
+            # 💬 вытягиваем src из iframe (поддержка ' и ")
+            m = re.search(r"\bsrc\s*=\s*(['\"])(.*?)\1", raw, re.IGNORECASE)
+            if m:
+                return (m.group(2) or "").strip()
         return raw
 
-    if kind == "video":
-        if len(lines) < 2:
-            await _inline_edit_by_id(message, state, "❌ Нужно 2 строки: название и ссылка или iframe", nav_kb)
+    new_item = None
+    skipped = 0  # 💬 сейчас добавляем 1 элемент, пропусков на успехе нет
+
+    if kind == "phase_vocab":
+        items_now = topic_data.get(scope) or []
+        if not isinstance(items_now, list):
+            items_now = []
+        name = payload_raw
+        if name == "-":
+            name = f"Фаза {len(items_now) + 1}"
+        if not name:
+            await _inline_edit_by_id(message, state, "❌ Пусто. Пришли название фазы", nav_kb)
             return
-        skipped = max(0, len(lines) - 2)
-        new_item = {"title": lines[0], "link": _extract_src(lines[1])}
+
+        category_now = ((topic_data.get("category") or "").strip().lower())
+        new_item = {"phase_id": 0, "done": 0, "phase_name": name, "blocks": [], "vocab": []}
+        if category_now != "gram":
+            new_item.setdefault("phrases", [])  # 💬 для лексики храним фразы внутри фазы
+
+    elif kind == "video":
+        lines = [l.strip() for l in payload_raw.splitlines() if l.strip()]
+        if len(lines) < 2:
+            await _inline_edit_by_id(message, state, "❌ Нужно 2 строки: название и ссылка", nav_kb)
+            return
+        title = lines[0]
+        link = _extract_src(lines[1])
+        if not title or not link:
+            await _inline_edit_by_id(message, state, "❌ Пусто. Пришли название и ссылку", nav_kb)
+            return
+        new_item = {"title": title, "link": link}
 
     elif kind == "exercise":
+        lines = [l.strip() for l in payload_raw.splitlines() if l.strip()]
         if len(lines) < 2:
-            await _inline_edit_by_id(message, state, "❌ Нужно 2 строки: название и ссылка или iframe", nav_kb)
+            await _inline_edit_by_id(message, state, "❌ Нужно 2 строки: название и ссылка", nav_kb)
             return
-        skipped = max(0, len(lines) - 2)
-        new_item = {"title": lines[0], "link": _extract_src(lines[1])}
-
-    elif kind == "phase_vocab":
-        if len(lines) == 0:
-            await _inline_edit_by_id(message, state, "❌ Пусто. Пришли название фазы", nav_kb)
+        title = lines[0]
+        link = _extract_src(lines[1])
+        if not title or not link:
+            await _inline_edit_by_id(message, state, "❌ Пусто. Пришли название и ссылку", nav_kb)
             return
-        skipped = max(0, len(lines) - 1)
-        name = lines[0] if lines[0] != "-" else ""
-        new_item = {"phase_id": 0, "phase_name": name, "vocab": []}
-        if category_now != "gram":
-            new_item["phrases"] = []
-
-    elif kind == "phase_dialog":
-        if len(lines) == 0:
-            await _inline_edit_by_id(message, state, "❌ Пусто. Пришли название фазы", nav_kb)
-            return
-        skipped = max(0, len(lines) - 1)
-        name = lines[0] if lines[0] != "-" else ""
-        new_item = {"phase_id": 0, "phase_name": name, "blocks": []}
+        new_item = {"title": title, "link": link}
 
     else:
-        # 💬 pack (reading | translate)
-        if len(lines) == 0:
+        pack_title = payload_raw
+        if not pack_title:
             await _inline_edit_by_id(message, state, "❌ Пусто. Пришли название пака", nav_kb)
             return
-        skipped = max(0, len(lines) - 1)
-        new_item = {"title": lines[0], "fragments": [], "assets": []}
-
-    await state.update_data(**{ADMIN_PENDING_INSERT_PAYLOAD_KEY: new_item, "adm_skipped_count": skipped})
+        new_item = {"title": pack_title, "fragments": [], "assets": []}
 
     items = topic_data.get(scope) or []
     if not isinstance(items, list):
         items = []
+    max_idx_user = max(1, len(items) + 1)
 
-    max_idx_user = len(items) + 1
+    await state.update_data(
+        **{
+            ADMIN_PENDING_INSERT_PAYLOAD_KEY: new_item,
+            "adm_skipped_count": skipped,
+        }
+    )
     await state.set_state(AdminInlineEditStates.waiting_insert_index)
 
-    await _inline_edit_by_id(
-        message,
-        state,
-        f"Введите индекс вставки (1..{max_idx_user})\nили 'end' чтобы в конец",
-        nav_kb,
+    section_label = data.get("admin_selected_label") or "Раздел"
+    text = (
+        f"✅ Payload принят: <b>{section_label}</b>\n\n"
+        f"Введите индекс (1..{max_idx_user})\n"
+        f"или напиши Отмена"
     )
+    await _inline_edit_by_id(message, state, text, nav_kb)
 
 @router.message(AdminInlineEditStates.waiting_insert_index)
 async def admin_edit_waiting_insert_index(message: Message, state: FSMContext):
-    # 💬 Вставляем элемент и сохраняем сразу в Railway (1-based)
+    # 💬 что делает эта часть: вставляем элемент и сохраняем сразу в Railway (1-based)
     nav_kb = _adm_nav_kb("adm:edit_sections")
 
     idx_raw = (message.text or "").strip()
     if idx_raw.lower() in {"отмена", "cancel"}:
         await _adm_show_actions_msg(message, state)
+        return
+
+    try:
+        insert_idx_user = int(idx_raw)
+    except Exception:
+        await _inline_edit_by_id(message, state, "❌ Индекс должен быть числом", nav_kb)
         return
 
     data = await state.get_data()
@@ -1121,69 +1126,68 @@ async def admin_edit_waiting_insert_index(message: Message, state: FSMContext):
 
     topic_data, topic_path = await _admin_load_topic_from_disk(state)
     if not topic_data or not topic_path:
-        await message.answer("❌ Тема не загружена")
+        await _inline_edit_by_id(message, state, "❗ Ошибка: не найден файл темы", nav_kb)
         return
 
-    items = topic_data.setdefault(scope, [])
+    if not scope or new_item is None:
+        await _inline_edit_by_id(message, state, "❗ Ошибка: нет данных для вставки", nav_kb)
+        return
+
+    items = topic_data.get(scope) or []
     if not isinstance(items, list):
         items = []
         topic_data[scope] = items
 
-    if not idx_raw or idx_raw.lower() in {"end", "в конец"}:
-        insert_idx = len(items)
-        insert_idx_user = len(items) + 1
-    else:
-        try:
-            insert_idx_user = int(idx_raw)
-        except Exception:
-            await _inline_edit_by_id(message, state, "❌ Индекс должен быть числом или 'end'", nav_kb)
-            return
+    max_idx_user = max(1, len(items) + 1)
+    if not (1 <= insert_idx_user <= max_idx_user):
+        await _inline_edit_by_id(message, state, f"❌ Индекс должен быть 1..{max_idx_user}", nav_kb)
+        return
 
-        max_user = len(items) + 1
-        if insert_idx_user < 1 or insert_idx_user > max_user:
-            await _inline_edit_by_id(message, state, f"❌ Индекс вне диапазона (1..{max_user})", nav_kb)
-            return
+    _insert_or_append(items, new_item, insert_idx_user)  # 💬 вставка по индексу или append
 
-        insert_idx = insert_idx_user - 1
-
-    items.insert(insert_idx, new_item)
-
-    # 💬 Нормализация фаз после вставки
-    category_now = (topic_data.get("category") or "").strip().lower()
-
-    if scope in {"vocab", "dialogs"}:
+    # 💬 нормализуем только фазы словаря
+    if scope == "vocab":
+        category_now = ((topic_data.get("category") or "").strip().lower())
         for i, ph in enumerate(items, start=1):
             ph["phase_id"] = i
+            ph.setdefault("done", 0)
+            ph.setdefault("blocks", [])
+            ph.setdefault("vocab", [])
+            if category_now != "gram":
+                ph.setdefault("phrases", [])
+            if not ph.get("phase_name"):
+                ph["phase_name"] = f"📦 Пак слов {i}"
 
-            if scope == "vocab":
-                ph.setdefault("vocab", [])
-                if category_now != "gram":
-                    ph.setdefault("phrases", [])
-                if not ph.get("phase_name"):
-                    ph["phase_name"] = f"📦 Пак слов {i}"
-            else:
-                ph.setdefault("blocks", [])
-                if not ph.get("phase_name"):
-                    ph["phase_name"] = f"💬 Пак диалогов {i}"
-
+    topic_data[scope] = items
     atomic_save_json(topic_path, topic_data)  # 💬 сохранение моментально в Railway
 
     section_label = data.get("admin_selected_label") or "Раздел"
-    skipped = int(data.get("adm_skipped_count") or 0)
     total_now = len(items)
 
     note_text = (
         f"✅ Добавлено: <b>{section_label}</b>\n"
+        f"Добавлено: 1\n"
         f"Индекс: {insert_idx_user}\n"
         f"Всего в разделе: {total_now}\n"
-        f"Пропущено: {skipped}"
+        f"Пропущено: 0"
     )
 
-    await state.update_data(topic=topic_data, topic_path=topic_path, **{"adm_skipped_count": 0})
+    await state.update_data(
+        topic=topic_data,
+        topic_path=topic_path,
+        **{
+            "adm_skipped_count": 0,
+            ADMIN_PENDING_INSERT_PAYLOAD_KEY: None,
+            ADMIN_PENDING_INSERT_KIND_KEY: None,
+        },
+    )
     await _adm_show_actions_msg(message, state, note_text=note_text)
+
+
+
 @router.message(AdminInlineEditStates.waiting_delete_index)
 async def admin_edit_waiting_delete_index(message: Message, state: FSMContext):
-    # 💬 Удаляем элемент и сохраняем сразу в Railway (1-based)
+    # 💬 что делает эта часть: удаляем элемент и сохраняем сразу в Railway (1-based)
     nav_kb = _adm_nav_kb("adm:edit_sections")
 
     idx_raw = (message.text or "").strip()
@@ -1202,38 +1206,38 @@ async def admin_edit_waiting_delete_index(message: Message, state: FSMContext):
 
     topic_data, topic_path = await _admin_load_topic_from_disk(state)
     if not topic_data or not topic_path:
-        await message.answer("❌ Тема не загружена")
+        await _inline_edit_by_id(message, state, "❗ Ошибка: не найден файл темы", nav_kb)
+        return
+
+    if not scope:
+        await _inline_edit_by_id(message, state, "❗ Ошибка: не выбран раздел", nav_kb)
         return
 
     items = topic_data.get(scope) or []
-    if not isinstance(items, list):
-        items = []
-
-    max_user = len(items)
-    if idx_user < 1 or idx_user > max_user:
-        await _inline_edit_by_id(message, state, f"❌ Индекс вне диапазона (1..{max_user})", nav_kb)
+    if not isinstance(items, list) or not items:
+        await _inline_edit_by_id(message, state, "Нечего удалять", nav_kb)
         return
 
-    idx = idx_user - 1
-    items.pop(idx)
+    max_idx_user = len(items)
+    if not (1 <= idx_user <= max_idx_user):
+        await _inline_edit_by_id(message, state, f"❌ Индекс должен быть 1..{max_idx_user}", nav_kb)
+        return
 
-    # 💬 Нормализация фаз после удаления
-    category_now = (topic_data.get("category") or "").strip().lower()
+    idx0 = idx_user - 1
+    items.pop(idx0)
 
-    if scope in {"vocab", "dialogs"}:
+    # 💬 нормализуем только фазы словаря
+    if scope == "vocab":
+        category_now = ((topic_data.get("category") or "").strip().lower())
         for i, ph in enumerate(items, start=1):
             ph["phase_id"] = i
-
-            if scope == "vocab":
-                ph.setdefault("vocab", [])
-                if category_now != "gram":
-                    ph.setdefault("phrases", [])
-                if not ph.get("phase_name"):
-                    ph["phase_name"] = f"📦 Пак слов {i}"
-            else:
-                ph.setdefault("blocks", [])
-                if not ph.get("phase_name"):
-                    ph["phase_name"] = f"💬 Пак диалогов {i}"
+            ph.setdefault("done", 0)
+            ph.setdefault("blocks", [])
+            ph.setdefault("vocab", [])
+            if category_now != "gram":
+                ph.setdefault("phrases", [])
+            if not ph.get("phase_name"):
+                ph["phase_name"] = f"📦 Пак слов {i}"
 
     topic_data[scope] = items
     atomic_save_json(topic_path, topic_data)  # 💬 сохранение моментально в Railway
@@ -1243,6 +1247,7 @@ async def admin_edit_waiting_delete_index(message: Message, state: FSMContext):
 
     note_text = (
         f"✅ Удалено: <b>{section_label}</b>\n"
+        f"Удалено: 1\n"
         f"Индекс: {idx_user}\n"
         f"Всего в разделе: {total_now}\n"
         f"Пропущено: 0"
@@ -2009,16 +2014,6 @@ async def handle_main_menu(message: Message, state: FSMContext):
         # Переходим в состояние, где ждём title видео
         await state.set_state(NewTopicStates.waiting_video_title)
         return
-
-    #ть диалог -----------------------
-    if text == "💬 Добавить диалог":
-        await state.update_data(last_block="dialog")
-        await message.answer(
-            "💬 Введите НАЗВАНИЕ ФАЗЫ диалогов:\n"
-            "Например: «Fase 1 — ir al médico (pack 1)».",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return await state.set_state(NewDialogStates.waiting_dialog_phase_name)
 
     #ть чтение -----------------------
     if text == "📖 Добавить чтение":
@@ -4726,34 +4721,31 @@ async def save_reading_photo(message: Message, state: FSMContext):
 
 
 
-
-# 🎨 Утилита: меню действий в режиме редактирования
-async def send_edit_menu(chat_id: int, bot: Bot, state: FSMContext):
+async def send_edit_menu(message: Message, state: FSMContext):
     data = await state.get_data()
-    topic = data.get("topic") or {}
-    category_now = ((topic.get("category") or "").strip().lower())
+    selected_id = data.get("selected_topic_id")
+    selected_cat = data.get("selected_category")
 
-    if category_now.startswith("lex"):
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="➕ Новая фаза словаря"), KeyboardButton(text="🗑 Удалить фазу словаря")],
-                [KeyboardButton(text="➕ Новая фаза диалогов"), KeyboardButton(text="🗑 Удалить фазу диалогов")],
-                [KeyboardButton(text="➕ Добавить видео"), KeyboardButton(text="🗑 Удалить видео")],
-                [KeyboardButton(text="➕ Добавить чтение"), KeyboardButton(text="🗑 Удалить пак чтения")],
-                [KeyboardButton(text="↩️ Вернуться в Главное меню")],
-            ],
-            resize_keyboard=True,
-        )  # 💬 единое меню редактирования лексики через фазы
-    else:
-        kb = make_kb([
-            ["➕ Добавить словарь",    "➕ Добавить упражнение"],
-            ["➕ Добавить видео",      "➕ Добавить диалог"],
-            ["➕ Добавить QUIZ",       "📝 Добавить ТЕКСТ"],
-            ["↩️ Вернуться в Главное меню"]
-        ])  # 💬 старое меню для не-лексики
+    topic = load_topic(selected_id, selected_cat)
+    if not topic:
+        await message.answer("❗ Тема не найдена.")
+        return
 
-    await bot.send_message(chat_id, "✏️ Режим редактирования. Что вы хотите сделать?", reply_markup=kb)
-    await state.set_state(EditTopicStates.choose_action)
+    make_kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📚 Добавить фазу слов"), KeyboardButton(text="🗑 Удалить фазу слов")],
+            [KeyboardButton(text="➕ Добавить видео"), KeyboardButton(text="🗑 Удалить видео")],
+            [KeyboardButton(text="📚 Добавить чтение"), KeyboardButton(text="🗑 Удалить чтение")],
+            [KeyboardButton(text="📊 Статус темы"), KeyboardButton(text="✅ Закончить редактирование")],
+            [KeyboardButton(text="⬅️ Вернуться в меню темы")],
+        ],
+        resize_keyboard=True,
+    )
+
+    await message.answer(
+        f"✏️ Редактирование темы: <b>{topic.get('name', '')}</b>\nВыбери действие",
+        reply_markup=make_kb,
+    )
 
 # 🎨 Хендлер: выбор действия в режиме редактирования
 @router.message(EditTopicStates.choose_action)
@@ -5345,6 +5337,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
