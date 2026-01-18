@@ -5317,10 +5317,12 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
         # 💬 поддерживаем и dict, и просто строку-ссылку
         if isinstance(video_item, dict):
             link = video_item.get("link") or video_item.get("url") or ""
-            title = video_item.get("title") or f"Видео {idx + 1}"
         else:
             link = str(video_item)
-            title = f"Видео {idx + 1}"
+
+        # 💬 title всегда авто, не используем сохранённый title
+        title = f"📺 Video {idx + 1}"
+
 
         if not link:
             # 💬 если ссылки нет, считаем поток недоступным
@@ -5885,7 +5887,8 @@ async def handle_video_next(callback: CallbackQuery, state: FSMContext):
         return await lesson_menu_handler(callback.message, state)
 
     cta = random.choice(link_cta_phrases)
-    text = f"🎬 <b>{title}</b>\n\n👉 <a href=\"{link}\">{cta}</a>"
+    text = f"{title}\n\n👉 <a href=\"{link}\">{cta}</a>"
+
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -9807,10 +9810,18 @@ async def start_video_viewing(message: Message, state: FSMContext):
         dv_idx = 0
 
     video = videos[dv_idx]
-    title = video.get("title") or "Видео"
-    link  = video.get("link") or ""
 
-    text = f"🎬 <b>{title}</b>"
+    # 💬 title всегда авто: 📺 Video N
+    title = f"📺 Video {dv_idx + 1}"
+
+    link = ""
+    if isinstance(video, dict):
+        link = video.get("link") or video.get("url") or ""
+    else:
+        link = str(video or "")
+
+    text = f"{title}"
+
     if link:
         text += f"\n{link}"
 
