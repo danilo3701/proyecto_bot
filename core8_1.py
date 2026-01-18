@@ -1634,7 +1634,7 @@ SLEEP_BEFORE_FEEDBACK_S  = 0.35   # ⏸ пауза между показом «�
 SLEEP_AFTER_FEEDBACK_S   = 0.35    # 📖 даём дочитать XP/фидбек перед удалением
 
 AUTO_DELETE_TEXT_DELAY_S = 0.35   # 🧹 авто-удаление сервисных сообщений («Время вышло!», «✅ …»)
-TEXTQUIZ_FB_OK_S          = 0.3   # 💬 сколько держим фидбэк на ✅ в text_quiz
+TEXTQUIZ_FB_OK_S          = 1.0   # 💬 сколько держим фидбэк на ✅ в text_quiz
 TEXTQUIZ_FB_WRONG_S       = 1.5   # 💬 сколько держим правильный ответ на ❌ в text_quiz
 TEXTQUIZ_NEGATIVE_REACTS  = ["💩", "🤮", "🤢"]  # 💬 случайная негативная реакция на ответ пользователя
 
@@ -6269,6 +6269,14 @@ async def topic_phase_chosen(cb: CallbackQuery, state: FSMContext):
             total_quizzes_phase     = total_quizzes_phase,  # 💬 total квизов именно в этой фазе
             quiz_correct_phase      = 0,                     # 💬 правильные poll-quiz внутри фазы
             textquiz_correct_phase  = 0,                     # 💬 правильные textquiz внутри фазы
+            pending_textquiz = [],          # 💬 сбрасываем очередь textquiz, чтобы не тянуло из прошлой фазы
+            redo_stack_text = [],           # 💬 сбрасываем redo для textquiz (ошибки прошлого сета)
+            redo_active_text = False,       # 💬 выключаем redo-режим textquiz
+            lex_round = 0,                  # 💬 сброс раунда (poll-сеты)
+            lex_textquiz_done_round = False,# 💬 сброс флага "текстовый раунд пройден"
+            current_poll_id = None,         # 💬 гасим активный poll, чтобы не пересекались ответы/таймеры
+            current_poll_message_id = None, # 💬 гасим id сообщения poll
+
         )
 
     else:
@@ -9710,8 +9718,9 @@ async def handle_failed_textquiz(message: Message, state: FSMContext):
 
 
 
-    # 💬 Ждём 1.5 секунды перед удалением
-    await asyncio.sleep(SLEEP_AFTER_FEEDBACK_S)  # 💬 единая пауза перед зачисткой
+    # 💬 Ждём подольше, чтобы пользователь реально успел увидеть реакцию
+    await asyncio.sleep(1.0)
+
 
 
     # …после sleep…
