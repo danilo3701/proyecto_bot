@@ -4852,6 +4852,12 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
     today = int(user.get("words_learned_today", 0) or 0)  # 💬 слова сегодня
 
+    # 💬 daily limit из xp_data (он синхронизируется из настроек)
+    daily_limit = int(user.get("words_daily_limit", 20) or 0)
+    if daily_limit <= 0:
+        daily_limit = 20  # 💬 безопасный дефолт, чтобы всегда было today / limit
+
+
     # 💬 звёзды по фазам = done True только по ➡️ на последнем фрагменте
     reading_packs = topic.get("reading", []) or []
     translate_packs = topic.get("translate", []) or []
@@ -4932,7 +4938,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         "\n".join([
             f"🏆 <b><i>Опыт по теме: +{topic_xp} XP</i></b>",
             f"💯 <b><i>Блоков пройдено: +{blocks_done} ⭐️</i></b>",
-            f"🍪 <b><i>Слов выучено сегодня: {today}</i></b>",
+            f"🍪 <b><i>Слов выучено сегодня: {today} / {daily_limit}</i></b>",
         ])
     )
 
