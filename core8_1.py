@@ -2091,10 +2091,10 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
     # 📚 УЧИТЬСЯ — показываем выбор уровня (категорию выберем позже внутри уровня)
     if action == "learn":
         inline_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🐥 Новичок",     callback_data="level:A0"),
-             InlineKeyboardButton(text="😤 Начальный",    callback_data="level:A1-A2")],
-            [InlineKeyboardButton(text="😼 Средний",      callback_data="level:B1-B2"),
-             InlineKeyboardButton(text="🤓 Продвинутый",  callback_data="level:C1")],
+            [InlineKeyboardButton(text="🐣 Новичок",      callback_data="level:A0"),
+             InlineKeyboardButton(text="🪴 Начальный",    callback_data="level:A1-A2")],
+            [InlineKeyboardButton(text="💃🏼 Средний",     callback_data="level:B1-B2"),
+             InlineKeyboardButton(text="🧙🏼‍♀️ Продвинутый", callback_data="level:C1")],
             [InlineKeyboardButton(text="⬅️ Назад",        callback_data="level:back")]
         ])  # 💬 человеко-читаемые названия уровней без A1/B2
 
@@ -2126,10 +2126,10 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
             ])  # 💬 грамматика без A0
         else:
             inline_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🐥 Новичок",     callback_data="level:A0"),
-                 InlineKeyboardButton(text="😤 Начальный",    callback_data="level:A1-A2")],
-                [InlineKeyboardButton(text="😼 Средний",      callback_data="level:B1-B2"),
-                 InlineKeyboardButton(text="🤓 Продвинутый",  callback_data="level:C1")],
+                [InlineKeyboardButton(text="🐣 Новичок",      callback_data="level:A0"),
+                 InlineKeyboardButton(text="🪴 Начальный",    callback_data="level:A1-A2")],
+                [InlineKeyboardButton(text="💃🏼 Средний",     callback_data="level:B1-B2"),
+                 InlineKeyboardButton(text="🧙🏼‍♀️ Продвинутый", callback_data="level:C1")],
                 [InlineKeyboardButton(text="⬅️ Назад",        callback_data="level:back")]
             ])  # 💬 человеко-читаемые названия уровней без A1/B2
 
@@ -2321,10 +2321,10 @@ async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
     # Если по какой-то причине уровень не сохранён — возвращаемся к выбору уровня
     if not level:
         inline_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🐥 Новичок",      callback_data="level:A0"),
-             InlineKeyboardButton(text="😤 Начальный",    callback_data="level:A1-A2")],
-            [InlineKeyboardButton(text="😼 Средний",      callback_data="level:B1-B2"),
-             InlineKeyboardButton(text="🤓 Продвинутый",  callback_data="level:C1")],
+            [InlineKeyboardButton(text="🐣 Новичок",      callback_data="level:A0"),
+             InlineKeyboardButton(text="🪴 Начальный",    callback_data="level:A1-A2")],
+            [InlineKeyboardButton(text="💃🏼 Средний",     callback_data="level:B1-B2"),
+             InlineKeyboardButton(text="🧙🏼‍♀️ Продвинутый", callback_data="level:C1")],
             [InlineKeyboardButton(text="⬅️ Назад",        callback_data="level:back")]
         ])  # 💬 человеко-читаемые уровни, лексика
 
@@ -2353,10 +2353,10 @@ async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
             ])  # 💬 выбор уровня для грамматики без буквенных уровней
         else:
             inline_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🐥 Новичок",     callback_data="level:A0"),
-                 InlineKeyboardButton(text="😤 Начальный",   callback_data="level:A1-A2")],
-                [InlineKeyboardButton(text="😼 Средний",     callback_data="level:B1-B2"),
-                 InlineKeyboardButton(text="🤓 Продвинутый", callback_data="level:C1")],
+                [InlineKeyboardButton(text="🐣 Новичок",      callback_data="level:A0"),
+                 InlineKeyboardButton(text="🪴 Начальный",    callback_data="level:A1-A2")],
+                [InlineKeyboardButton(text="💃🏼 Средний",     callback_data="level:B1-B2"),
+                 InlineKeyboardButton(text="🧙🏼‍♀️ Продвинутый", callback_data="level:C1")],
                 [InlineKeyboardButton(text="⬅️ Назад",       callback_data="level:back")]
             ])  # 💬 выбор уровня для лексики без буквенных уровней
 
@@ -3539,10 +3539,10 @@ async def topic_back_to_level(callback: CallbackQuery, state: FSMContext):
     """
     # 💬 Собираем клавиатуру уровней так же, как при выборе категории
     inline_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🐥 Новичок",      callback_data="level:A0"),
-         InlineKeyboardButton(text="😤 Начальный",    callback_data="level:A1-A2")],
-        [InlineKeyboardButton(text="😼 Средний",      callback_data="level:B1-B2"),
-         InlineKeyboardButton(text="🤓 Продвинутый",  callback_data="level:C1")],
+        [InlineKeyboardButton(text="🐣 Новичок",      callback_data="level:A0"),
+         InlineKeyboardButton(text="🪴 Начальный",    callback_data="level:A1-A2")],
+        [InlineKeyboardButton(text="💃🏼 Средний",     callback_data="level:B1-B2"),
+         InlineKeyboardButton(text="🧙🏼‍♀️ Продвинутый", callback_data="level:C1")],
         [InlineKeyboardButton(text="⬅️ Назад",        callback_data="level:back")]
     ])  # 💬 возврат к выбору уровня
 
