@@ -2800,6 +2800,12 @@ async def import_vocab_allin_bulk(message: Message, state: FSMContext):
     invalid = (meta or {}).get("invalid", 0)
     truncated = (meta or {}).get("truncated", 0)
 
+    # 💬 если сообщение НЕ обрезано, то следующий ALL IN должен идти в новую фазу
+    # 💬 (если обрезано = пользователь пришлёт продолжение и оно должно попасть в ТУ ЖЕ фазу)
+    if (not truncated) and added_cnt > 0:
+        await state.update_data(allin_force_new_phase=True)
+
+
     kb = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="↩️ Назад")]],
         resize_keyboard=True
@@ -4822,6 +4828,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
