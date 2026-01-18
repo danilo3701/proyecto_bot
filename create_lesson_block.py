@@ -924,7 +924,7 @@ async def admin_edit_action_delete(cb: CallbackQuery, state: FSMContext):
 
 
 
-@admin_inline_router.callback_query(F.data.startswith("adm:edit_scope:"))
+@router.callback_query(F.data.startswith("adm:edit_scope:"))  # 💬 используем общий router, чтобы не падало на импорте
 async def admin_edit_scope(cb: CallbackQuery, state: FSMContext):
     # 💬 что делает эта часть: выбираем раздел и переводим в ввод (add/delete) через inline
     ui_scope = cb.data.split("adm:edit_scope:", 1)[1].strip()
@@ -5104,6 +5104,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
