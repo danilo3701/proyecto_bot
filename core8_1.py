@@ -8437,7 +8437,6 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     # 💬 что делает эта часть: убираем текущий idx из pending, чтобы очередь двигалась
     if idx in pending:
         pending = [p for p in pending if p != idx]
-
     if not is_correct:
         # 💬 неверно = добавляем в redo_stack_text для повтора, правильный ответ покажем единым фидбэком ниже
         if idx not in redo_text:
@@ -8453,6 +8452,25 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
             action="words_learned",
             action_amount=2
         )  # 💬 +2 слова сегодня за 1 правильный textquiz
+
+    # 💬 фикс: обязательно сохраняем обновлённые очереди, иначе последний textquiz может зациклиться
+    await state.update_data(
+        pending_textquiz=pending,
+        redo_stack_text=redo_text
+    )
+
+    # 💬 что делает эта часть: если это финальная textquiz-сессия и всё закрыли = финалим и уходим в меню
+    if data.get("textquiz_session_active") and (not pending) and (not redo_text):
+        await smart_reply(message, "🎉 Это конец блока. Молодец!")
+        await state.update_data(
+            textquiz_session_active=False,
+            pending_textquiz=[],
+            redo_stack_text=[],
+            resume_vocab_index=None,
+            last_main_quiz_index=None,
+        )
+        return await lesson_menu_handler(message, state)
+
 
         await state.update_data(
             textquiz_correct=data.get("textquiz_correct", 0) + 1,
