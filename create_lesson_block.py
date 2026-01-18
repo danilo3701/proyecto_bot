@@ -3593,9 +3593,20 @@ async def handle_post_action(message: Message, state: FSMContext):
             return await state.set_state(NewTopicStates.waiting_ex_photo_text)
     # ─── БЛОК «ВИДЕО» ───
     if last_block == "video" and text == "🔄 Создать ещё видео":
-        await message.answer("Введите ЗАГОЛОВОК видео:")
-        await state.set_state(NewTopicStates.waiting_video_title)
+        data = await state.get_data()
+        topic = data.get("topic") or {}
+
+        # 💬 авто-тайтл по количеству уже добавленных видео
+        existing_videos = topic.get("videos") or []
+        auto_title = f"Video {len(existing_videos) + 1}"
+
+        await state.update_data(current_video_title=auto_title, last_block="video")
+
+        # 💬 сразу просим ссылку, без шага ввода названия
+        await message.answer("Пришли ссылку на видео (или iframe):", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(NewTopicStates.waiting_video_link)
         return
+
 
 
     if data.get("edit_insert_mode") and text == "↩️ Назад":
@@ -4250,8 +4261,9 @@ async def get_video_link(message: Message, state: FSMContext):
     with open(topic_path, "w", encoding="utf-8") as f:
         json.dump(topic_data, f, ensure_ascii=False, indent=2)
 
-    # Удаляем временную переменную
-    await state.update_data(current_video_title=None)
+    # Удаляем временную переменную + фиксируем обновлённую тему в state
+    await state.update_data(topic=topic_data, current_video_title=None, last_block="video")
+
 
     # Показываем пост-блоковое меню
     keyboard = ReplyKeyboardMarkup(
@@ -4303,17 +4315,33 @@ async def get_reading_title(message: Message, state: FSMContext):
     )
 
 
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🧩 Ассет блоки"), KeyboardButton(text="🖼 Фото")],
-            [KeyboardButton(text="🔄 Создать ещё"), KeyboardButton(text="↩️ Назад")]  # 💬 запускаем создание следующего пакета без выхода
+    # ✅ после названия сразу переходим к вводу ассет-блоков
+    pack_label = "перевода" if pack_key == "translate" else "чтения"
 
-        ],
-        resize_keyboard=True
-    )
-    label = "перевод" if pack_key == "translate" else "чтение"  # 💬 корректный текст в зависимости от режима
-    await message.answer(f"Что добавляем в {label}?", reply_markup=kb)
-    return await state.set_state(NewTopicStates.waiting_reading_action)
+    if pack_key == "translate":
+        await message.answer(
+            f"Отправь ассет блоки для {pack_label} парами строк.\n"
+            "Пример:\n"
+            "Мы уже у кассы, я хочу <b>платить картой</b>\n"
+            "[[👩: bueno mira oye <b>pagar con tarjeta</b>, digo no, espera]]\n\n"
+            "Да, vale, но сначала я хочу <b>купить хлеб</b>\n"
+            "[[🧑: pues venga vale <b>comprar pan</b>, pero oye, rápido]]",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+    else:
+        await message.answer(
+            f"Отправь ассет блоки для {pack_label} текстом.\n"
+            "Формат каждой строки: ES | RU | hint (опц.)\n"
+            "Минимум 2 поля: ES | RU\n"
+            "Символ | внутри полей запрещён\n\n"
+            "Пример:\n"
+            "Estoy listo. | Я готов. | 💡 listo = готовый\n"
+            "¿Qué tal? | Как дела?",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+
+    return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
+
 
 
 @router.message(NewTopicStates.waiting_reading_action)
@@ -5140,6 +5168,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
