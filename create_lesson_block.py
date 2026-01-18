@@ -1000,10 +1000,9 @@ async def admin_edit_scope(cb: CallbackQuery, state: FSMContext):
     await _inline_replace(cb, state, text, nav_kb)
     await cb.answer()
 
-
 @router.message(AdminInlineEditStates.waiting_insert_payload)
 async def admin_edit_waiting_insert_payload(message: Message, state: FSMContext):
-    # 💬 что делает эта часть: парсим payload и просим индекс вставки (1-based)
+    # 💬 принимает payload, считает пропуски, затем спрашивает индекс вставки (1-based)
     nav_kb = _adm_nav_kb("adm:edit_sections")
 
     payload_raw = (message.text or "").strip()
@@ -1024,68 +1023,47 @@ async def admin_edit_waiting_insert_payload(message: Message, state: FSMContext)
         await _inline_edit_by_id(message, state, "❗ Ошибка: не выбран раздел", nav_kb)
         return
 
-    def _extract_src(raw: str) -> str:
-        raw = (raw or "").strip()
-        if "<iframe" in raw:
-            # 💬 вытягиваем src из iframe (поддержка ' и ")
-            m = re.search(r"\bsrc\s*=\s*(['\"])(.*?)\1", raw, re.IGNORECASE)
-            if m:
-                return (m.group(2) or "").strip()
-        return raw
+    category_now = ((topic_data.get("category") or "").strip().lower())
 
+    lines = [l.strip() for l in payload_raw.splitlines() if l.strip()]
+    skipped = 0
     new_item = None
-    skipped = 0  # 💬 сейчас добавляем 1 элемент, пропусков на успехе нет
 
     if kind == "phase_vocab":
-        items_now = topic_data.get(scope) or []
-        if not isinstance(items_now, list):
-            items_now = []
-        name = payload_raw
-        if name == "-":
-            name = f"Фаза {len(items_now) + 1}"
-        if not name:
+        if not lines:
             await _inline_edit_by_id(message, state, "❌ Пусто. Пришли название фазы", nav_kb)
             return
-
-        category_now = ((topic_data.get("category") or "").strip().lower())
+        skipped = max(0, len(lines) - 1)
+        name = lines[0] if lines[0] != "-" else ""
         new_item = {"phase_id": 0, "done": 0, "phase_name": name, "blocks": [], "vocab": []}
         if category_now != "gram":
-            new_item.setdefault("phrases", [])  # 💬 для лексики храним фразы внутри фазы
+            new_item.setdefault("phrases", [])
 
     elif kind == "video":
-        lines = [l.strip() for l in payload_raw.splitlines() if l.strip()]
         if len(lines) < 2:
-            await _inline_edit_by_id(message, state, "❌ Нужно 2 строки: название и ссылка", nav_kb)
+            await _inline_edit_by_id(message, state, "❌ Нужно 2 строки: название и ссылка или iframe", nav_kb)
             return
-        title = lines[0]
-        link = _extract_src(lines[1])
-        if not title or not link:
-            await _inline_edit_by_id(message, state, "❌ Пусто. Пришли название и ссылку", nav_kb)
-            return
-        new_item = {"title": title, "link": link}
+        skipped = max(0, len(lines) - 2)
+        new_item = {"title": lines[0], "link": _extract_src(lines[1])}
 
     elif kind == "exercise":
-        lines = [l.strip() for l in payload_raw.splitlines() if l.strip()]
         if len(lines) < 2:
-            await _inline_edit_by_id(message, state, "❌ Нужно 2 строки: название и ссылка", nav_kb)
+            await _inline_edit_by_id(message, state, "❌ Нужно 2 строки: название и ссылка или iframe", nav_kb)
             return
-        title = lines[0]
-        link = _extract_src(lines[1])
-        if not title or not link:
-            await _inline_edit_by_id(message, state, "❌ Пусто. Пришли название и ссылку", nav_kb)
-            return
-        new_item = {"title": title, "link": link}
+        skipped = max(0, len(lines) - 2)
+        new_item = {"title": lines[0], "link": _extract_src(lines[1])}
 
     else:
-        pack_title = payload_raw
-        if not pack_title:
+        if not lines:
             await _inline_edit_by_id(message, state, "❌ Пусто. Пришли название пака", nav_kb)
             return
-        new_item = {"title": pack_title, "fragments": [], "assets": []}
+        skipped = max(0, len(lines) - 1)
+        new_item = {"title": lines[0], "fragments": [], "assets": []}
 
     items = topic_data.get(scope) or []
     if not isinstance(items, list):
         items = []
+
     max_idx_user = max(1, len(items) + 1)
 
     await state.update_data(
@@ -1097,16 +1075,18 @@ async def admin_edit_waiting_insert_payload(message: Message, state: FSMContext)
     await state.set_state(AdminInlineEditStates.waiting_insert_index)
 
     section_label = data.get("admin_selected_label") or "Раздел"
-    text = (
+    await _inline_edit_by_id(
+        message,
+        state,
         f"✅ Payload принят: <b>{section_label}</b>\n\n"
         f"Введите индекс (1..{max_idx_user})\n"
-        f"или напиши Отмена"
+        f"или напиши Отмена",
+        nav_kb,
     )
-    await _inline_edit_by_id(message, state, text, nav_kb)
 
 @router.message(AdminInlineEditStates.waiting_insert_index)
 async def admin_edit_waiting_insert_index(message: Message, state: FSMContext):
-    # 💬 что делает эта часть: вставляем элемент и сохраняем сразу в Railway (1-based)
+    # 💬 вставляет элемент по индексу (1-based), сохраняет, показывает отчёт
     nav_kb = _adm_nav_kb("adm:edit_sections")
 
     idx_raw = (message.text or "").strip()
@@ -1143,9 +1123,8 @@ async def admin_edit_waiting_insert_index(message: Message, state: FSMContext):
         await _inline_edit_by_id(message, state, f"❌ Индекс должен быть 1..{max_idx_user}", nav_kb)
         return
 
-    _insert_or_append(items, new_item, insert_idx_user)  # 💬 вставка по индексу или append
+    _insert_or_append(items, new_item, insert_idx_user)  # 💬 вставка по индексу
 
-    # 💬 нормализуем только фазы словаря
     if scope == "vocab":
         category_now = ((topic_data.get("category") or "").strip().lower())
         for i, ph in enumerate(items, start=1):
@@ -1159,17 +1138,18 @@ async def admin_edit_waiting_insert_index(message: Message, state: FSMContext):
                 ph["phase_name"] = f"📦 Пак слов {i}"
 
     topic_data[scope] = items
-    atomic_save_json(topic_path, topic_data)  # 💬 сохранение моментально в Railway
+    atomic_save_json(topic_path, topic_data)  # 💬 моментально в Railway
 
     section_label = data.get("admin_selected_label") or "Раздел"
+    skipped = int(data.get("adm_skipped_count") or 0)
     total_now = len(items)
 
     note_text = (
-        f"✅ Добавлено: <b>{section_label}</b>\n"
+        f"✅ Сохранено: <b>{section_label}</b>\n"
         f"Добавлено: 1\n"
         f"Индекс: {insert_idx_user}\n"
         f"Всего в разделе: {total_now}\n"
-        f"Пропущено: 0"
+        f"Пропущено: {skipped}"
     )
 
     await state.update_data(
@@ -1187,12 +1167,12 @@ async def admin_edit_waiting_insert_index(message: Message, state: FSMContext):
 
 @router.message(AdminInlineEditStates.waiting_delete_index)
 async def admin_edit_waiting_delete_index(message: Message, state: FSMContext):
-    # 💬 что делает эта часть: удаляем элемент и сохраняем сразу в Railway (1-based)
+    # 💬 удаляет элемент по индексу (1-based), сохраняет, показывает отчёт
     nav_kb = _adm_nav_kb("adm:edit_sections")
 
     idx_raw = (message.text or "").strip()
     if idx_raw.lower() in {"отмена", "cancel"}:
-        await _adm_show_sections_msg(message, state)
+        await _adm_show_actions_msg(message, state)
         return
 
     try:
@@ -1209,10 +1189,6 @@ async def admin_edit_waiting_delete_index(message: Message, state: FSMContext):
         await _inline_edit_by_id(message, state, "❗ Ошибка: не найден файл темы", nav_kb)
         return
 
-    if not scope:
-        await _inline_edit_by_id(message, state, "❗ Ошибка: не выбран раздел", nav_kb)
-        return
-
     items = topic_data.get(scope) or []
     if not isinstance(items, list) or not items:
         await _inline_edit_by_id(message, state, "Нечего удалять", nav_kb)
@@ -1223,10 +1199,8 @@ async def admin_edit_waiting_delete_index(message: Message, state: FSMContext):
         await _inline_edit_by_id(message, state, f"❌ Индекс должен быть 1..{max_idx_user}", nav_kb)
         return
 
-    idx0 = idx_user - 1
-    items.pop(idx0)
+    items.pop(idx_user - 1)
 
-    # 💬 нормализуем только фазы словаря
     if scope == "vocab":
         category_now = ((topic_data.get("category") or "").strip().lower())
         for i, ph in enumerate(items, start=1):
@@ -1240,13 +1214,13 @@ async def admin_edit_waiting_delete_index(message: Message, state: FSMContext):
                 ph["phase_name"] = f"📦 Пак слов {i}"
 
     topic_data[scope] = items
-    atomic_save_json(topic_path, topic_data)  # 💬 сохранение моментально в Railway
+    atomic_save_json(topic_path, topic_data)  # 💬 моментально в Railway
 
     section_label = data.get("admin_selected_label") or "Раздел"
     total_now = len(items)
 
     note_text = (
-        f"✅ Удалено: <b>{section_label}</b>\n"
+        f"✅ Сохранено: <b>{section_label}</b>\n"
         f"Удалено: 1\n"
         f"Индекс: {idx_user}\n"
         f"Всего в разделе: {total_now}\n"
@@ -1255,6 +1229,7 @@ async def admin_edit_waiting_delete_index(message: Message, state: FSMContext):
 
     await state.update_data(topic=topic_data, topic_path=topic_path)
     await _adm_show_actions_msg(message, state, note_text=note_text)
+
 
 
 
@@ -2194,51 +2169,11 @@ async def handle_main_menu(message: Message, state: FSMContext):
 
     # ----------------------- Редактировать тему -----------------------
     if text == "✏️ Редактировать":
-        data = await state.get_data()
-        topic = data.get("topic")
-        path  = data.get("topic_path")
-        category_now = (topic or {}).get("category")
-        if category_now == "gram":
-            # 💬 отдельное редактирование для грамматики
-            kb = ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="📖 Теория"), KeyboardButton(text="📝 Практика")],
-                    [KeyboardButton(text="🎥 Видео"), KeyboardButton(text="📚 Читать")],
-                    [KeyboardButton(text="🚫 Отмена")],
-                ],
-                resize_keyboard=True,
-            )
-            await message.answer("✏️ Редактирование грамматики. Выберите раздел:", reply_markup=kb)
-            await state.set_state(EditGrammarStates.waiting_section)
-            return
-
-        if not topic or not path:
-            await message.answer("❗ Ошибка: тема не загружена. Пожалуйста, создайте или откройте тему заново.")
-            return
-
-        # — 1) Выбор раздела для редактирования —
-        # 💬 лексика: открываем рабочее меню действий (без внешних импортов, чтобы кнопка реально работала)
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="➕ Новая фаза словаря"), KeyboardButton(text="🗑 Удалить фазу словаря")],
-                [KeyboardButton(text="➕ Новая фаза диалогов"), KeyboardButton(text="🗑 Удалить фазу диалогов")],
-                [KeyboardButton(text="➕ Добавить видео"), KeyboardButton(text="🗑 Удалить видео")],
-                [KeyboardButton(text="➕ Добавить чтение"), KeyboardButton(text="🗑 Удалить пак чтения")],
-                [KeyboardButton(text="↩️ Вернуться в Главное меню")],
-            ],
-            resize_keyboard=True,
-        )
-
-        await message.answer("✏️ Режим редактирования. Что вы хотите сделать?", reply_markup=kb)
-        await state.set_state(EditTopicStates.choose_action)
+        # 💬 единая точка редактирования через inline
+        await state.set_state(AdminInlineEditStates.idle)
+        await _adm_show_actions_msg(message, state, note_text="ℹ️ Редактирование через inline-кнопки")
         return
 
-
-
-
-    # ----------------------- Обработка ввода не из списка -----------------------
-    # Если сообщение не соответствует ни одной кнопке, просим выбрать ещё раз
-    await message.answer("❗ Выберите, пожалуйста, одну из кнопок Главного меню.")
 
 @router.message(NewTopicStates.waiting_delete_topic_confirm)
 async def confirm_delete_topic(message: Message, state: FSMContext):
@@ -4746,179 +4681,11 @@ async def send_edit_menu(message: Message, state: FSMContext):
         f"✏️ Редактирование темы: <b>{topic.get('name', '')}</b>\nВыбери действие",
         reply_markup=make_kb,
     )
-
-# 🎨 Хендлер: выбор действия в режиме редактирования
 @router.message(EditTopicStates.choose_action)
 async def handle_edit_action(message: Message, state: FSMContext):
-    text = (message.text or "").strip()
-
-    def _lex_edit_kb() -> ReplyKeyboardMarkup:
-        # 💬 единое меню редактирования лексики, чтобы возвращаться сюда после add delete
-        return ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="➕ Новая фаза словаря"), KeyboardButton(text="🗑 Удалить фазу словаря")],
-                [KeyboardButton(text="➕ Новая фаза диалогов"), KeyboardButton(text="🗑 Удалить фазу диалогов")],
-                [KeyboardButton(text="➕ Добавить видео"), KeyboardButton(text="🗑 Удалить видео")],
-                [KeyboardButton(text="➕ Добавить чтение"), KeyboardButton(text="🗑 Удалить пак чтения")],
-                [KeyboardButton(text="↩️ Вернуться в Главное меню")],
-            ],
-            resize_keyboard=True,
-        )
-
-    # 💬 выход из режима редактирования
-    if text in {"↩️ Вернуться в Главное меню", "🚫 Отмена"}:
-        data = await state.get_data()
-        topic = data.get("topic") or {}
-        category_now = ((topic.get("category") or "").strip().lower())
-        await message.answer("С чего начнём?", reply_markup=get_main_menu(category_now))
-        await state.set_state(NewTopicStates.waiting_first_choice)
-        return
-
-    # ----------------------- ЛЕКСИКА: только фазы и списки -----------------------
-
-    # 💬 создать фазу словаря
-    if text == "➕ Новая фаза словаря":
-        await state.update_data(last_block="vocab")  # 💬 чтобы после создания фазы открыть меню добавления блоков
-        await state.update_data(edit_mode=True)  # 💬 помечаем, что добавление идёт из режима редактирования
-        new_phase = await _create_vocab_phase_auto(state)  # 💬 создаём пак автоматически
-        await message.answer(
-            f"Создан: {new_phase['phase_name']}",
-            reply_markup=ReplyKeyboardRemove()
-        )  # 💬 пропускаем ввод названия
-        await send_post_menu(message, state)  # 💬 сразу показываем кнопки словаря
-        return
-
-
-    # 💬 удалить фазу словаря
-    if text == "🗑 Удалить фазу словаря":
-        data = await state.get_data()
-        topic = data.get("topic") or {}
-        phases = topic.get("vocab") or []
-        if not phases:
-            await message.answer("⚠️ Список фаз словаря пуст.", reply_markup=_lex_edit_kb())
-            await state.set_state(EditTopicStates.choose_action)
-            return
-
-        buttons = [[KeyboardButton(text=f"{i}. {(p.get('phase_name') or f'Фаза {i}')}")] for i, p in enumerate(phases, 1)]
-        buttons.append([KeyboardButton(text="↩️ Назад")])
-        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-        await message.answer("🗑 Выбери фазу словаря для удаления:", reply_markup=kb)
-        await state.set_state(EditTopicStates.waiting_vocab_phase_delete_index)
-        return
-
-    # 💬 создать фазу диалогов
-    if text in {"➕ Новая фаза диалогов", "➕ Добавить диалог"}:
-        await message.answer("Введите НАЗВАНИЕ новой фазы диалогов:", reply_markup=ReplyKeyboardRemove())
-        await state.set_state(NewDialogStates.waiting_dialog_phase_name)  # 💬 переиспользуем создание фазы диалогов
-        return
-
-    # 💬 удалить фазу диалогов
-    if text == "🗑 Удалить фазу диалогов":
-        data = await state.get_data()
-        topic = data.get("topic") or {}
-        dialogs = topic.get("dialogs") or []
-        if not dialogs:
-            await message.answer("⚠️ Список фаз диалогов пуст.", reply_markup=_lex_edit_kb())
-            await state.set_state(EditTopicStates.choose_action)
-            return
-
-        buttons = [[KeyboardButton(text=f"{i}. {(d.get('phase_name') or f'Фаза {i}')}")] for i, d in enumerate(dialogs, 1)]
-        buttons.append([KeyboardButton(text="↩️ Назад")])
-        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-        await message.answer("🗑 Выбери фазу диалогов для удаления:", reply_markup=kb)
-        await state.set_state(EditTopicStates.waiting_dialog_phase_delete_index)
-        return
-
-    # 💬 добавить видео
-    if text == "➕ Добавить видео":
-        await message.answer("Введите ЗАГОЛОВОК видео:", reply_markup=ReplyKeyboardRemove())
-        await state.set_state(NewTopicStates.waiting_video_title)  # 💬 используем стандартный поток видео
-        return
-
-    # 💬 удалить видео
-    if text == "🗑 Удалить видео":
-        data = await state.get_data()
-        topic = data.get("topic") or {}
-        videos = topic.get("videos") or []
-        if not videos:
-            await message.answer("⚠️ Список видео пуст.", reply_markup=_lex_edit_kb())
-            await state.set_state(EditTopicStates.choose_action)
-            return
-
-        buttons = []
-        for i, v in enumerate(videos, 1):
-            title = (v.get("title") or f"Видео {i}")
-            buttons.append([KeyboardButton(text=f"{i}. {title}")])
-        buttons.append([KeyboardButton(text="↩️ Назад")])
-        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-        await message.answer("🗑 Выбери видео для удаления:", reply_markup=kb)
-        await state.set_state(EditTopicStates.waiting_video_delete_index)
-        return
-
-    # 💬 добавить чтение
-    if text in {"➕ Добавить чтение", "📖 Добавить чтение", "➕ Добавить перевод", }:
-        await state.update_data(last_block="reading")  # 💬 чтобы не путать меню после сохранения
-
-        data = await state.get_data()
-        topic = data.get("topic") or {}
-        category_now = ((topic.get("category") or "").strip().lower())
-        category_now = "gram" if category_now.startswith("gram") else "lex"  # 💬 нормализуем категорию
-
-        prompt = "📚 Впишите название фазы чтения:" if category_now == "gram" else "Введите ЗАГОЛОВОК пака чтения:"  # 💬 в грамматике заголовок = фаза
-        await message.answer(prompt, reply_markup=ReplyKeyboardRemove())
-
-        await state.set_state(NewTopicStates.waiting_reading_title)  # 💬 стандартный поток reading
-        return
-
-
-    # 💬 удалить пак чтения
-    if text == "🗑 Удалить пак чтения":
-        data = await state.get_data()
-        topic = data.get("topic") or {}
-        packs = topic.get("reading") or []
-        if not packs:
-            await message.answer("⚠️ Список чтения пуст.", reply_markup=_lex_edit_kb())
-            await state.set_state(EditTopicStates.choose_action)
-            return
-
-        buttons = []
-        for i, p in enumerate(packs, 1):
-            title = (p.get("title") or f"Пак {i}")
-            buttons.append([KeyboardButton(text=f"{i}. {title}")])
-        buttons.append([KeyboardButton(text="↩️ Назад")])
-        kb = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-        await message.answer("🗑 Выбери пак чтения для удаления:", reply_markup=kb)
-        await state.set_state(EditTopicStates.waiting_reading_delete_index)
-        return
-
-    # ----------------------- BACKWARD COMPAT = старые кнопки (если где-то ещё всплывут) -----------------------
-    if text == "➕ Добавить словарь":
-        await message.answer("Введите НАЗВАНИЕ словаря:", reply_markup=ReplyKeyboardRemove())
-        await state.set_state(EditTopicStates.waiting_vocab_title)
-        return
-
-    if text == "➕ Добавить упражнение":
-        await message.answer("Введите НАЗВАНИЕ упражнения:", reply_markup=ReplyKeyboardRemove())
-        await state.set_state(EditTopicStates.waiting_ex_title)
-        return
-
-    if text == "➕ Добавить QUIZ":
-        await message.answer("Вставьте QUIZ-блок:", reply_markup=ReplyKeyboardRemove())
-        await state.set_state(EditTopicStates.waiting_quiz_block)
-        return
-
-    if text == "📝 Добавить ТЕКСТ":
-        await message.answer("Вставьте текстовый блок:", reply_markup=ReplyKeyboardRemove())
-        await state.set_state(EditTopicStates.waiting_text_block)
-        return
-
-    # 💬 fallback
-    await message.answer("⚠️ Выберите действие кнопкой.", reply_markup=_lex_edit_kb())
-    await state.set_state(EditTopicStates.choose_action)
+    # 💬 старое reply-меню выключаем, чтобы не было разных меню
+    await state.set_state(AdminInlineEditStates.idle)
+    await _adm_show_actions_msg(message, state, note_text="ℹ️ Редактирование теперь через inline-кнопки")
 
 
 # --- Хендлеры удаления фаз и блоков ---
@@ -5337,6 +5104,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
