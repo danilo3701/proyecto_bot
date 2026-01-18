@@ -912,7 +912,6 @@ async def admin_edit_action_delete(cb: CallbackQuery, state: FSMContext):
     # 💬 Действие delete
     await state.update_data(**{ADMIN_PENDING_ACTION_KEY: "delete"})
     await _adm_show_sections_cb(cb, state)
-
 @router.callback_query(F.data.startswith("adm:edit_scope:"))
 async def admin_edit_scope(cb: CallbackQuery, state: FSMContext):
     # 💬 Выбор раздела и переход к вводу payload или индекса (1-based)
@@ -5346,6 +5345,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
