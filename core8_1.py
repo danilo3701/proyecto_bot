@@ -1841,6 +1841,13 @@ async def _safe_delete_message(chat_id: int, message_id: int | None):
     except Exception:
         pass
 
+async def _delete_messages_after_delay(chat_id: int, message_ids: list, delay: float = 10.0) -> None:
+    # 💬 что делает эта часть: через delay секунд удаляет список сообщений (если они есть)
+    await asyncio.sleep(delay)
+    for mid in message_ids:
+        await _safe_delete_message(chat_id, mid)
+
+
 
 async def _lex_cleanup_last_bot_message(chat_id: int, state: FSMContext):
     # 💬 держим чат чистым: удаляем прошлое сообщение бота в потоке «Учить слова»
@@ -8401,10 +8408,27 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     vocab_list = get_vocab_list(data)
 
     # 💬 что делает эта часть: защита от выхода за границы списка
-    if idx < 0 or idx >= len(vocab_list):
-        await state.update_data(textquiz_session_active=False, pending_textquiz=[], redo_stack_text=[])
-        await smart_reply(message, "🎉 Это конец блока. Молодец!")
+    if idx >= len(vocab_list):
+        # 💬 что делает эта часть: на финале тоже чистим последний вопрос и ответ
+        prompt_id = data.get("last_prompt_id")
+        extra_fb_id = data.get("last_textquiz_extra_fb_id")
+
+        await _safe_delete_message(message.chat.id, prompt_id)
+        await _safe_delete_message(message.chat.id, extra_fb_id)
+        await _safe_delete_message(message.chat.id, message.message_id)
+
+        end_msg = await smart_reply(message, "🎉 Это конец блока. Молодец!")
+        asyncio.create_task(_delete_messages_after_delay(message.chat.id, [end_msg.message_id], delay=10.0))
+
+        await state.update_data(
+            textquiz_session_active=False,
+            pending_textquiz=[],
+            redo_stack_text=[],
+            resume_vocab_index=None,
+            last_main_quiz_index=None,
+        )
         return await lesson_menu_handler(message, state)
+
 
     block = vocab_list[idx]
     user_norm = normalize_textquiz(message.text)
@@ -8479,7 +8503,17 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
     # 💬 что делает эта часть: если это финальная textquiz-сессия и всё закрыли = финалим и уходим в меню
     if data.get("textquiz_session_active") and (not pending) and (not redo_text):
-        await smart_reply(message, "🎉 Это конец блока. Молодец!")
+        # 💬 что делает эта часть: удаляем последний вопрос и ответ перед выходом в меню
+        prompt_id = data.get("last_prompt_id")
+        extra_fb_id = data.get("last_textquiz_extra_fb_id")
+
+        await _safe_delete_message(message.chat.id, prompt_id)
+        await _safe_delete_message(message.chat.id, extra_fb_id)
+        await _safe_delete_message(message.chat.id, message.message_id)
+
+        end_msg = await smart_reply(message, "🎉 Это конец блока. Молодец!")
+        asyncio.create_task(_delete_messages_after_delay(message.chat.id, [end_msg.message_id], delay=10.0))
+
         await state.update_data(
             textquiz_session_active=False,
             pending_textquiz=[],
@@ -8488,6 +8522,7 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
             last_main_quiz_index=None,
         )
         return await lesson_menu_handler(message, state)
+
 
 
     # 💬 что делает эта часть: чистим вопрос + ответ пользователя (если бот имеет права)
@@ -8511,7 +8546,9 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
     if next_idx is None:
         # 💬 что делает эта часть: все textquiz закрыты = финал и сразу меню
-        await smart_reply(message, "🎉 Это конец блока. Молодец!")
+        end_msg = await smart_reply(message, "🎉 Это конец блока. Молодец!")
+        asyncio.create_task(_delete_messages_after_delay(message.chat.id, [end_msg.message_id], delay=10.0))
+
         await state.update_data(
             textquiz_session_active=False,
             pending_textquiz=[],
