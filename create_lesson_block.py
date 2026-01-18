@@ -1514,17 +1514,14 @@ async def handle_main_menu(message: Message, state: FSMContext):
         )  # 💬 сразу уходим в bulk-вставку, без VOC
         await state.set_state(NewTopicStates.waiting_vocab_allin_bulk)
         return
-return
 
 
 
-    #ть упражнение -----------------------
+    # ----------------------- Добавить упражнение -----------------------
     if text == "✏️ Добавить упражнение":
-        # 💬 Последний блок – «exercise» (общие упражнения)
+        # 💬 Последний блок = exercise
         await state.update_data(last_block="exercise")
-        # Просим ввести название упражнения
         await message.answer("Введите НАЗВАНИЕ упражнения:")
-        # Переходим в состояние, где ждём title упражнения
         await state.set_state(NewTopicStates.waiting_ex_title)
         return
 
@@ -4838,6 +4835,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
