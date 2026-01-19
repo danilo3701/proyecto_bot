@@ -8876,6 +8876,9 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     user_id = message.from_user.id  # 💬 id пользователя для чтения/записи xp_data
     topic_key = data.get("selected_topic", "unknown")  # 💬 ключ темы для topic_xp и логики разблокировки
 
+    xp_fb = None  # 💬 чтобы не было NameError, если XP-фидбэк не создаём (оставили только реакцию)
+    extra_fb = None  # 💬 чтобы не было NameError, если доп-фидбэк не создался из-за раннего выхода/исключения
+
 
     # 💬 что делает эта часть: защита от выхода за границы списка
     if idx >= len(vocab_list):
