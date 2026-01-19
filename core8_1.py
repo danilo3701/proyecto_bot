@@ -2236,9 +2236,12 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
         title = info.get("visible_title", key)
 
         if pct >= 100:
-            title = f"✅ {_strike(title)} {pct}%"
+            title = f"✅ {_strike(title)} {pct}%"  # 💬 100% = зачёркнутая тема и процент
+        elif pct > 0:
+            title = f"{title} {pct}%"  # 💬 показываем проценты только если > 0
         else:
-            title = f"{title} {pct}%"
+            title = f"{title}"  # 💬 0% = без процентов
+
 
         buttons.append(InlineKeyboardButton(text=title, callback_data=f"topic:{key}"))
 
