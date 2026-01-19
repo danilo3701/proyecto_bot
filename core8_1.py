@@ -4667,6 +4667,29 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     total_usr = xp_json.get(str(message.chat.id), {})
     topic_xp  = total_usr.get("by_topic", {}).get(topic_key, 0)
 
+
+    # 💬 что делает эта часть: достаём сохранённый прогресс по теме (переживает выход и /start)
+    topic_summary = total_usr.get("topic_summary", {}) if isinstance(total_usr, dict) else {}
+    if not isinstance(topic_summary, dict):
+        topic_summary = {}
+
+    saved_row = topic_summary.get(topic_key, {})
+    if not isinstance(saved_row, dict):
+        saved_row = {}
+
+    saved_vocab_pct = float(saved_row.get("vocab_pct", 0.0) or 0.0)
+    if saved_vocab_pct < 0:
+        saved_vocab_pct = 0.0
+    if saved_vocab_pct > 1:
+        saved_vocab_pct = 1.0
+
+    saved_blocks_done = int(saved_row.get("blocks_done", 0) or 0)
+    if saved_blocks_done < 0:
+        saved_blocks_done = 0
+
+    saved_unlocked = bool(saved_row.get("unlocked", False))
+
+
     # 💬 Считаем ВСЕ квизы по теме:
     #    • top-level в фазах,
     #    • inline у text/photo (block.get("quiz")),
@@ -4744,10 +4767,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     # 💬 прогресс 📖 = частичный (по юнитам), чтобы рос после каждого раунда
     vocab_pct = (vocab_done_units / vocab_total_units) if vocab_total_units else 0.0  # 💬 0 если нет фаз
 
-    # 💬 70% фаз словаря пройдено = разблокируем остальные разделы (логика разблокировки остаётся по закрытым фазам)
-    vocab_unlock_percent = (completed_phases / total_phases_for_unlock * 100) if total_phases_for_unlock else 0  # 💬 нет фаз = 0%
-    unlocked = vocab_unlock_percent >= 70
-    await state.update_data(unlocked=unlocked)
+ 70% фаз словаря пройд
 
     stars = "⭐" * completed_phases + "☆" * (total_phases_for_unlock - completed_phases)
 
@@ -4946,6 +4966,47 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         blocks_done += 1  # 💬 читать закрыто на 100%
     if total_video and vid_pct >= 0.999999:
         blocks_done += 1  # 💬 видео закрыто на 100%
+
+    # 💬 что делает эта часть: blocks_done и unlocked не должны уменьшаться при повторном входе в тему
+    if saved_blocks_done > blocks_done:
+        blocks_done = saved_blocks_done
+
+    if saved_unlocked and not unlocked:
+        unlocked = True
+        await state.update_data(unlocked=True)
+
+    # 💬 что делает эта часть: сохраняем лучший прогресс по теме в xp_data.json
+    try:
+        best_pct = float(vocab_pct or 0.0)
+        if best_pct < 0:
+            best_pct = 0.0
+        if best_pct > 1:
+            best_pct = 1.0
+
+        best_blocks = int(blocks_done or 0)
+        if best_blocks < 0:
+            best_blocks = 0
+
+        best_unlocked = bool(unlocked)
+
+        if (abs(best_pct - saved_vocab_pct) > 1e-12) or (best_blocks != saved_blocks_done) or (best_unlocked != saved_unlocked):
+            usr = xp_json.get(str(message.chat.id), {})
+            if not isinstance(usr, dict):
+                usr = {}
+
+            ts = usr.setdefault("topic_summary", {})
+            if not isinstance(ts, dict):
+                ts = {}
+                usr["topic_summary"] = ts
+
+            ts[topic_key] = {"vocab_pct": best_pct, "blocks_done": best_blocks, "unlocked": best_unlocked}
+            usr["topic_summary"] = ts
+            xp_json[str(message.chat.id)] = usr
+            save_xp_data(xp_json)
+
+    except Exception:
+        logging.exception("lesson_menu_handler: persist topic_summary failed")
+
 
     # 💬 блок статистики без лишних пустых строк (как ты нарисовал)
     parts.append(
