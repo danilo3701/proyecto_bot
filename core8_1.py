@@ -9957,7 +9957,9 @@ async def handle_feedback_difficulty_vocab(message: Message, state: FSMContext):
 @track_handler
 async def handle_offer_continue_vocab(message: Message, state: FSMContext):
     # 💬 Стираем старую клавиатуру сразу после нажатия
-    await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    blank_rm = await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    await _safe_delete_message(message.chat.id, blank_rm.message_id)  # 💬 убираем пустую строку после снятия клавиатуры
+
 
     data = await state.get_data()
     scene = data["current_scene"]
@@ -10015,34 +10017,32 @@ async def handle_offer_continue_vocab(message: Message, state: FSMContext):
         vocab_list = get_vocab_list(data)
 
         # --- 1️⃣ ищем первый quiz следующего сета ---
-        # 💬 ВАЖНО: Ищем относительно последнего пройденного ОБЫЧНОГО квиза (якоря), а не текущего TextQuiz
         last_quiz_idx = data.get("last_main_quiz_index", -1)
-        
+
         q_positions = [i for i, b in enumerate(vocab_list) if b.get("type") == "quiz"]
+        block_size = int(data.get("lex_round_block_size", 6) or 6)
+        block_size = max(1, block_size)  # 💬 защита от 0/None
+
         next_quiz_set_start = None
 
         if q_positions:
-            # Пытаемся найти позицию последнего квиза в списке всех квизов
             try:
                 if last_quiz_idx == -1:
-                    # Если якоря нет (первый запуск или баг), берем начало списка
                     current_q_pos_index = -1
                 else:
                     current_q_pos_index = q_positions.index(last_quiz_idx)
-                
-                # Нам нужен следующий сет. Просто берем СЛЕДУЮЩИЙ квиз по списку.
-                # Так как мы идем блоками по 6, следующий после последнего пройденного — это начало нового блока.
-                if current_q_pos_index + 1 < len(q_positions):
-                    next_quiz_set_start = q_positions[current_q_pos_index + 1]
-                    
+
+                # 💬 что делает эта часть: прыгаем к старту СЛЕДУЮЩЕГО блока квизов (сета), а не к следующему quiz
+                next_block_start_pos = ((current_q_pos_index // block_size) + 1) * block_size
+                if 0 <= next_block_start_pos < len(q_positions):
+                    next_quiz_set_start = q_positions[next_block_start_pos]
+
             except ValueError:
-                # Если вдруг индекс потерялся, ищем первый квиз, который больше последнего сохраненного
+                # 💬 если якорь потерялся = берём первый quiz строго после last_quiz_idx
                 next_val = next((p for p in q_positions if p > last_quiz_idx), None)
                 if next_val is not None:
                     next_quiz_set_start = next_val
-                elif last_quiz_idx == 0:
-                    # 💬 если последний был самый первый, пробуем взять следующий (если он есть)
-                    next_quiz_set_start = q_positions[1] if len(q_positions) > 1 else None
+
 
 
         # 💬 Fallback: если якорь last_main_quiz_index не сохранён,
@@ -10103,7 +10103,9 @@ async def handle_offer_continue_vocab(message: Message, state: FSMContext):
 @dp.message(LessonStates.showing_vocab, is_refusal_vocab)
 @track_handler
 async def handle_refusal_vocab(message: Message, state: FSMContext):
-    await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    blank_rm = await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    await _safe_delete_message(message.chat.id, blank_rm.message_id)  # 💬 убираем пустую строку после снятия клавиатуры
+
     data = await state.get_data()
     scene = data["current_scene"]
 
@@ -10843,7 +10845,9 @@ async def handle_subscription_invalid_input(message: Message, state: FSMContext)
     required     = [required_ch] if required_ch else []
 
     # убираем reply-кейборд (лексика/грамматика)
-    await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    blank_rm = await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    await _safe_delete_message(message.chat.id, blank_rm.message_id)  # 💬 убираем пустую строку после снятия клавиатуры
+
     await message.answer(
         "Пожалуйста, нажмите кнопку «Проверить подписку».",
         reply_markup=check_subscription_kb(topic_key, required)  # 💬 та же инлайн-клавиатура с каналом
