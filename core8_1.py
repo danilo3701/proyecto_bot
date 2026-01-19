@@ -5324,7 +5324,11 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
             "rd_pct": float(rd_pct),
             "tr_pct": float(tr_pct),
             "vid_pct": float(vid_pct),
-            "total_pct": float(total_pct),
+
+            "overall_pct": float(overall_pct),          # 💬 сохраняем общий %, чтобы не сбрасывался
+            "total_pct": float(overall_pct),            # 💬 legacy-ключ, чтобы старые места не ломались
+            "video_index": int(dv_idx or 0),             # 💬 сохраняем индекс видео для переживания выхода
+
             "blocks_done": int(blocks_done or 0),
             "unlocked": bool(unlocked),
             "completed": bool(completed),
