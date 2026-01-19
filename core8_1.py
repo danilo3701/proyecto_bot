@@ -11101,17 +11101,18 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
                 poll_total = max(0, lex_total - 1) if lex_total else 4  # 💬 poll-раунды (обычно 4)
                 poll_done = int(data.get("lex_round", 0) or 0)          # 💬 индекс текущего poll-раунда (0..poll_total)
 
-                # 💬 что делает эта часть: в Offer Continue мы только что ЗАКРЫЛИ poll-раунд → двигаем прогресс, чтобы 📚 обновился в меню
+                # 💬 что делает эта часть: считаем прогресс закрытого poll-раунда, но НЕ двигаем lex_round
+                # lex_round = индекс текущего раунда, его двигаем только при старте следующего раунда
+                completed_poll = poll_done
                 if lex_total and not data.get("lex_textquiz_done_round") and poll_total:
                     if 0 <= poll_done < poll_total:
-                        poll_done += 1
-                        await state.update_data(lex_round=poll_done)
-                        data["lex_round"] = poll_done
+                        completed_poll = poll_done + 1  # 💬 закрыли текущий poll-раунд
 
-                poll_done = max(0, min(poll_done, poll_total))
+                completed_poll = max(0, min(completed_poll, poll_total))
 
                 text_done = 1 if data.get("lex_textquiz_done_round") else 0  # 💬 text-раунд
-                done_rounds = poll_done + text_done
+                done_rounds = completed_poll + text_done  # 💬 прогресс для меню, без влияния на порядок раундов
+
                 total_rounds = poll_total + 1
 
 
