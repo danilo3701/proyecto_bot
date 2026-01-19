@@ -4868,6 +4868,9 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     # 💬 звёзды по фазам = done True только по ➡️ на последнем фрагменте
     reading_packs = topic.get("reading", []) or []
     translate_packs = topic.get("translate", []) or []
+    if not translate_packs and isinstance(topic.get("translation"), list):
+        translate_packs = topic.get("translation", []) or []  # 💬 совместимость со старым ключом
+
 
     rd_all = data.get("lex_read_progress") or {}
     rd_topic = rd_all.get(topic_key, {}) if isinstance(rd_all, dict) else {}
@@ -4922,11 +4925,15 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
     lines_pb = [
         _line("📖", vocab_pct),   # 💬 учить слова
-        _line("📝", tr_pct),      # 💬 переводить
         _line("🙊", rd_pct),      # 💬 читать
     ]
+    
+    if tr_total > 0:
+        lines_pb.append(_line("📝", tr_pct))  # 💬 переводить только если есть паки
+    
     if total_video > 0:
-        lines_pb.insert(2, _line("🎬", vid_pct))  # 💬 видео между переводом и чтением
+        lines_pb.append(_line("🎬", vid_pct))  # 💬 видео только если есть
+
 
     progress_block = "<blockquote>" + "\n".join(lines_pb) + "</blockquote>"  # 💬 общий блок прогресса
 
