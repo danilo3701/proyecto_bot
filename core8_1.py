@@ -2210,11 +2210,38 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
     """
     message = callback.message  # 💬 работаем через message, чтобы не плодить NameError
 
-    buttons = [
-        InlineKeyboardButton(text=info["visible_title"], callback_data=f"topic:{key}")
-        for key, info in topics.items()
-        if info.get("category") == category and info.get("level") == level
-    ]
+    # 💬 что делает эта часть: добавляем % выполнения темы прямо в кнопку списка тем
+    xp_json = load_xp_data()
+    usr = xp_json.get(str(message.from_user.id), {})
+    topic_summary = usr.get("topic_summary", {}) if isinstance(usr, dict) else {}
+    if not isinstance(topic_summary, dict):
+        topic_summary = {}
+
+    def _strike(s: str) -> str:
+        return "".join(ch + "\u0336" for ch in s)  # 💬 зачёркивание кнопки без HTML
+
+    buttons = []
+    for key, info in topics.items():
+        if info.get("category") != category or info.get("level") != level:
+            continue
+
+        row_raw = topic_summary.get(key, {})
+        row = row_raw if isinstance(row_raw, dict) else {}
+
+        pct_val = float(row.get("overall_pct", row.get("vocab_pct", 0.0)) or 0.0)
+        pct_val = max(0.0, min(1.0, pct_val))
+        pct = int(round(pct_val * 100))
+        pct = max(0, min(pct, 100))  # 💬 защита от мусорных значений
+
+        title = info.get("visible_title", key)
+
+        if pct >= 100:
+            title = f"✅ {_strike(title)} {pct}%"
+        else:
+            title = f"{title} {pct}%"
+
+        buttons.append(InlineKeyboardButton(text=title, callback_data=f"topic:{key}"))
+
 
     if not buttons:
         await message.edit_text("🤷‍♂️ Тем пока нет на уровне. Скоро добавим!")
@@ -3320,6 +3347,52 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
     # 💬 В грамматике обычно редактируем это же сообщение (edit_text) = не удаляем его заранее
     is_gram = topics.get(topic_key, {}).get("category") == "gram"
 
+    # 💬 что делает эта часть: если тема уже 100% = предупреждаем и не удаляем список тем
+    try:
+        xp_json = load_xp_data()
+        total_usr = xp_json.get(str(query.from_user.id), {})
+        ts = total_usr.get("topic_summary", {}) if isinstance(total_usr, dict) else {}
+        row = ts.get(topic_key, {}) if isinstance(ts, dict) else {}
+        is_completed = bool(row.get("completed", False))
+    except Exception:
+        is_completed = False
+
+    if is_completed:
+        warn_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Пройти заново", callback_data=f"topic_restart:{topic_key}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="topic_restart_back")],
+        ])
+        await query.message.answer(
+            "⚠️ Эта тема уже выполнена\n\n"
+            "Если нажмёшь «Пройти заново» = прогресс по теме будет сброшен до 0",
+            reply_markup=warn_kb
+        )
+        return
+
+
+
+    # 💬 что делает эта часть: если тема уже 100% = предупреждаем и не удаляем список тем
+    try:
+        xp_json = load_xp_data()
+        total_usr = xp_json.get(str(query.from_user.id), {})
+        ts = total_usr.get("topic_summary", {}) if isinstance(total_usr, dict) else {}
+        row = ts.get(topic_key, {}) if isinstance(ts, dict) else {}
+        is_completed = bool(row.get("completed", False))
+    except Exception:
+        is_completed = False
+
+    if is_completed:
+        warn_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Пройти заново", callback_data=f"topic_restart:{topic_key}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="topic_restart_back")],
+        ])
+        await query.message.answer(
+            "⚠️ Эта тема уже выполнена\n\n"
+            "Если нажмёшь «Пройти заново» = прогресс по теме будет сброшен до 0",
+            reply_markup=warn_kb
+        )
+        return
+
     # 💬 Удаляем экран со списком тем сразу после выбора (и для грамматики тоже)
     try:
         await query.message.delete()
@@ -3362,6 +3435,29 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
             unlocked=False,                   # 💬 новый топик стартует закрытым до 70%
             lex_mode_active=False,
         )  # 💬 сбрасываем прогресс, чтобы новый топик не наследовал 100%
+
+
+    # 💬 если тема уже выполнена — предлагаем сбросить прогресс
+    xp_json = load_xp_data()
+    usr = xp_json.get(str(query.from_user.id), {})
+    ts = usr.get("topic_summary", {}) if isinstance(usr, dict) else {}
+    row = ts.get(topic_key, {}) if isinstance(ts, dict) else {}
+
+    done_pct = float(row.get("overall_pct", row.get("vocab_pct", 0.0)) or 0.0)
+    done_pct = max(0.0, min(1.0, done_pct))
+
+    if done_pct >= 0.999999:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Пройти заново", callback_data=f"topic_reset:{topic_key}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="topic_back")],
+        ])
+        await query.message.edit_text(
+            "✅ Эта тема уже выполнена.\n\n"
+            "Если ты нажмёшь «Пройти заново», весь прогресс по теме сбросится до нуля.",
+            reply_markup=kb
+        )
+        await query.answer()
+        return
 
 
     # 💬 Сохраняем выбранную тему в FSM
@@ -3508,6 +3604,127 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
     # 💬 Переводим FSM в состояние ожидания проверки подписки
     await state.set_state(LessonStates.waiting_subscription)
 
+
+
+
+@dp.callback_query(lambda c: c.data == "topic_restart_back", StateFilter(LessonStates.choosing_topic))
+@track_handler
+async def topic_restart_back(query: CallbackQuery, state: FSMContext):
+    await query.answer()
+    try:
+        await query.message.delete()
+    except TelegramBadRequest:
+        pass  # 💬 если уже удалено = игнор
+
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("topic_restart:"), StateFilter(LessonStates.choosing_topic))
+@track_handler
+async def topic_restart_confirm(query: CallbackQuery, state: FSMContext):
+    await query.answer()
+
+    topic_key = query.data.split(":", 1)[1]
+
+    # 💬 что делает эта часть: обнуляем прогресс по теме в xp_data (и topic XP), не трогаем total_xp
+    try:
+        xp_json = load_xp_data()
+        uid = str(query.from_user.id)
+        total_usr = xp_json.get(uid, {})
+        if not isinstance(total_usr, dict):
+            total_usr = {}
+
+        ts = total_usr.get("topic_summary", {})
+        if not isinstance(ts, dict):
+            ts = {}
+
+        ts[topic_key] = {
+            "vocab_pct": 0.0,
+            "rd_pct": 0.0,
+            "tr_pct": 0.0,
+            "vid_pct": 0.0,
+            "total_pct": 0.0,
+            "blocks_done": 0,
+            "unlocked": False,
+            "completed": False,
+        }
+        total_usr["topic_summary"] = ts
+
+        by_topic = total_usr.get("by_topic", {})
+        if isinstance(by_topic, dict):
+            by_topic[topic_key] = 0
+            total_usr["by_topic"] = by_topic
+
+        xp_json[uid] = total_usr
+        save_xp_data(xp_json)
+    except Exception:
+        pass
+
+    # 💬 удаляем предупреждение, список тем остаётся = пользователь нажимает тему ещё раз
+    try:
+        await query.message.delete()
+    except TelegramBadRequest:
+        pass
+
+
+
+
+
+@dp.callback_query(
+    lambda c: c.data and c.data.startswith("topic_reset:"),
+    StateFilter(LessonStates.choosing_topic)
+)
+@track_handler
+async def cb_topic_reset(callback: CallbackQuery, state: FSMContext):
+    # 💬 сбрасываем прогресс по теме (xp + blocks + progress-bars + unlock)
+    topic_key = callback.data.split(":", 1)[1]
+    user_id_str = str(callback.from_user.id)
+
+    xp_json = load_xp_data()
+    usr = xp_json.get(user_id_str, {})
+    if not isinstance(usr, dict):
+        usr = {}
+
+    by_topic = usr.get("by_topic", {})
+    if not isinstance(by_topic, dict):
+        by_topic = {}
+
+    prev_topic_xp = int(by_topic.get(topic_key, 0) or 0)
+    if prev_topic_xp > 0:
+        usr["total_xp"] = max(0, int(usr.get("total_xp", 0) or 0) - prev_topic_xp)  # 💬 минусуем опыт по теме
+
+    by_topic.pop(topic_key, None)
+    usr["by_topic"] = by_topic
+
+    ts = usr.get("topic_summary", {})
+    if isinstance(ts, dict):
+        ts.pop(topic_key, None)
+        usr["topic_summary"] = ts
+
+    xp_json[user_id_str] = usr
+    save_xp_data(xp_json)
+
+    # 💬 убираем разблокировку темы в user_data
+    data = load_user_data()
+    u = data.get(user_id_str, {})
+    if isinstance(u, dict):
+        unlocked = u.get("unlocked_topics", [])
+        if isinstance(unlocked, list) and topic_key in unlocked:
+            unlocked.remove(topic_key)
+            u["unlocked_topics"] = unlocked
+            data[user_id_str] = u
+            save_user_data(data)
+
+    # 💬 сброс FSM по теме
+    await state.update_data(
+        selected_topic=topic_key,
+        vocab_done_per_phase={},
+        vocab_index=0,
+        video_index=0,
+        ex_index=0,
+        unlocked=False,
+    )
+
+    await callback.answer("🔄 Прогресс сброшен")
+    return await lesson_menu_handler(callback.message, state)
 
 
 @dp.callback_query(
@@ -4678,16 +4895,48 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         saved_row = {}
 
     saved_vocab_pct = float(saved_row.get("vocab_pct", 0.0) or 0.0)
-    if saved_vocab_pct < 0:
-        saved_vocab_pct = 0.0
-    if saved_vocab_pct > 1:
-        saved_vocab_pct = 1.0
+    saved_vocab_pct = max(0.0, min(1.0, saved_vocab_pct))
+
+    saved_tr_pct = float(saved_row.get("translate_pct", 0.0) or 0.0)
+    saved_tr_pct = max(0.0, min(1.0, saved_tr_pct))
+
+    saved_rd_pct = float(saved_row.get("read_pct", 0.0) or 0.0)
+    saved_rd_pct = max(0.0, min(1.0, saved_rd_pct))
+
+    saved_vid_pct = float(saved_row.get("video_pct", 0.0) or 0.0)
+    saved_vid_pct = max(0.0, min(1.0, saved_vid_pct))
+
+    saved_overall_pct = float(saved_row.get("overall_pct", 0.0) or 0.0)
+    saved_overall_pct = max(0.0, min(1.0, saved_overall_pct))
+
+    saved_video_index = int(saved_row.get("video_index", 0) or 0)
+    if saved_video_index < 0:
+        saved_video_index = 0  # 💬 защита
 
     saved_blocks_done = int(saved_row.get("blocks_done", 0) or 0)
-    if saved_blocks_done < 0:
-        saved_blocks_done = 0
+    saved_blocks_done = max(0, min(4, saved_blocks_done))  # 💬 защита от переполнения
 
     saved_unlocked = bool(saved_row.get("unlocked", False))
+
+    saved_rd_pct = float(saved_row.get("rd_pct", 0.0) or 0.0)
+    if saved_rd_pct < 0:
+        saved_rd_pct = 0.0
+    if saved_rd_pct > 1:
+        saved_rd_pct = 1.0
+
+    saved_tr_pct = float(saved_row.get("tr_pct", 0.0) or 0.0)
+    if saved_tr_pct < 0:
+        saved_tr_pct = 0.0
+    if saved_tr_pct > 1:
+        saved_tr_pct = 1.0
+
+    saved_vid_pct = float(saved_row.get("vid_pct", 0.0) or 0.0)
+    if saved_vid_pct < 0:
+        saved_vid_pct = 0.0
+    if saved_vid_pct > 1:
+        saved_vid_pct = 1.0
+
+
 
 
     # 💬 Считаем ВСЕ квизы по теме:
@@ -4938,6 +5187,45 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     rd_pct = (done_read / rd_total) if rd_total else 0.0
     vid_pct = (dv_idx / total_video) if total_video else 0.0
 
+    # 💬 что делает эта часть: не даём % “обнуляться” после выхода из темы = берём максимум с сохранённым
+    vocab_pct = max(vocab_pct, float(saved_vocab_pct or 0.0))
+    rd_pct = max(rd_pct, float(saved_rd_pct or 0.0))
+    tr_pct = max(tr_pct, float(saved_tr_pct or 0.0))
+    vid_pct = max(vid_pct, float(saved_vid_pct or 0.0))
+
+    # 💬 что делает эта часть: общий % по теме = среднее по активным прогресс-барам
+    active_pcts = [vocab_pct, rd_pct]
+    if tr_total > 0:
+        active_pcts.append(tr_pct)
+    if total_video > 0:
+        active_pcts.append(vid_pct)
+
+    total_pct = (sum(active_pcts) / len(active_pcts)) if active_pcts else 0.0
+    completed = bool(active_pcts) and all(float(p) >= 0.999999 for p in active_pcts)
+
+
+    # 💬 подмешиваем сохранённые проценты, чтобы прогресс-бары не откатывались после выхода/перезапуска
+    vocab_pct = max(vocab_pct, saved_vocab_pct)
+    tr_pct = max(tr_pct, saved_tr_pct)
+    rd_pct = max(rd_pct, saved_rd_pct)
+    vid_pct = max(vid_pct, saved_vid_pct)
+
+    # 💬 общий % по теме = среднее по активным прогресс-барам
+    active_pcts = []
+    if total_phases:
+        active_pcts.append(vocab_pct)
+    if tr_total:
+        active_pcts.append(tr_pct)
+    if rd_total:
+        active_pcts.append(rd_pct)
+    if total_video:
+        active_pcts.append(vid_pct)
+
+    overall_pct = (sum(active_pcts) / len(active_pcts)) if active_pcts else 0.0
+    overall_pct = max(0.0, min(1.0, overall_pct))
+    overall_pct = max(overall_pct, saved_overall_pct)  # 💬 не уменьшаем общий прогресс
+
+
     lines_pb = [
         _line("📖", vocab_pct),   # 💬 учить слова
         _line("🙊", rd_pct),      # 💬 читать
@@ -4994,7 +5282,18 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
                 ts = {}
                 usr["topic_summary"] = ts
 
-            ts[topic_key] = {"vocab_pct": best_pct, "blocks_done": best_blocks, "unlocked": best_unlocked}
+            # 💬 сохраняем все прогресс-бары + общий % по теме
+            ts[topic_key] = {
+                "vocab_pct": float(vocab_pct or 0.0),
+                "translate_pct": float(tr_pct or 0.0),
+                "read_pct": float(rd_pct or 0.0),
+                "video_pct": float(vid_pct or 0.0),
+                "overall_pct": float(overall_pct or 0.0),
+                "blocks_done": int(best_blocks or 0),
+                "unlocked": bool(best_unlocked),
+                "video_index": int(dv_idx or 0),  # 💬 для продолжения видео
+            }
+
             usr["topic_summary"] = ts
             xp_json[str(message.chat.id)] = usr
             save_xp_data(xp_json)
@@ -5013,6 +5312,30 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     )
 
     parts.append(progress_block)
+
+    # 💬 что делает эта часть: сохраняем проценты прогресс-баров по теме, чтобы они переживали выход и /start
+    try:
+        ts = total_usr.get("topic_summary", {})
+        if not isinstance(ts, dict):
+            ts = {}
+
+        ts[topic_key] = {
+            "vocab_pct": float(vocab_pct),
+            "rd_pct": float(rd_pct),
+            "tr_pct": float(tr_pct),
+            "vid_pct": float(vid_pct),
+            "total_pct": float(total_pct),
+            "blocks_done": int(blocks_done or 0),
+            "unlocked": bool(unlocked),
+            "completed": bool(completed),
+        }
+
+        total_usr["topic_summary"] = ts
+        xp_json[str(message.chat.id)] = total_usr
+        save_xp_data(xp_json)
+    except Exception:
+        pass
+
 
     # 💬 блокировка внизу + компактно (и только если ещё не unlocked)
     if not unlocked:
@@ -6364,11 +6687,19 @@ async def topic_phase_chosen(cb: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     prev_phase = data.get("selected_phase_id")
 
+    done_per_phase = data.get("vocab_done_per_phase", {}) or {}
+    resume_idx = int(done_per_phase.get(str(phase_id), done_per_phase.get(phase_id, 0)) or 0)
+    if resume_idx < 0:
+        resume_idx = 0
+    if resume_idx > total_quizzes_phase:
+        resume_idx = total_quizzes_phase  # 💬 защита от перепрыга
+
+
     # Если переключаемся на новую фазу — инициализируем счётчики
     if prev_phase != phase_id:
         await state.update_data(
             selected_phase_id       = phase_id,
-            vocab_index             = 0,
+            vocab_index = resume_idx,
             failed_vocab            = [],
             total_quizzes_phase     = total_quizzes_phase,  # 💬 total квизов именно в этой фазе
             quiz_correct_phase      = 0,                     # 💬 правильные poll-quiz внутри фазы
@@ -6376,7 +6707,7 @@ async def topic_phase_chosen(cb: CallbackQuery, state: FSMContext):
             pending_textquiz = [],          # 💬 сбрасываем очередь textquiz, чтобы не тянуло из прошлой фазы
             redo_stack_text = [],           # 💬 сбрасываем redo для textquiz (ошибки прошлого сета)
             redo_active_text = False,       # 💬 выключаем redo-режим textquiz
-            lex_round = 0,                  # 💬 сброс раунда (poll-сеты)
+            lex_round = resume_idx,  # 💬 продолжаем фазу с места, где остановились
             lex_textquiz_done_round = False,# 💬 сброс флага "текстовый раунд пройден"
             current_poll_id = None,         # 💬 гасим активный poll, чтобы не пересекались ответы/таймеры
             current_poll_message_id = None, # 💬 гасим id сообщения poll
