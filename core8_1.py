@@ -4766,12 +4766,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
     # 💬 прогресс 📖 = частичный (по юнитам), чтобы рос после каждого раунда
     vocab_pct = (vocab_done_units / vocab_total_units) if vocab_total_units else 0.0  # 💬 0 если нет фаз
-
- 70% фаз словаря пройд
-
     stars = "⭐" * completed_phases + "☆" * (total_phases_for_unlock - completed_phases)
-
-
 
 
     # Упражнения
@@ -8652,15 +8647,8 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
 
 
-    # 💬 что делает эта часть: чистим вопрос + ответ пользователя (если бот имеет права)
+    # 💬 что делает эта часть: НЕ удаляем сразу = удаление будет после фидбэка и задержки ниже (шаг 5)
     prompt_id = data.get("last_prompt_id")
-    for mid in (prompt_id, message.message_id):
-        if not mid:
-            continue
-        try:
-            await bot.delete_message(message.chat.id, mid)
-        except Exception:
-            pass
 
     # 💬 что делает эта часть: выбираем следующий textquiz = сначала pending, потом redo_stack_text
     next_idx = None
