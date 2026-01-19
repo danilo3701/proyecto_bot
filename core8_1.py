@@ -10635,13 +10635,23 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
                 per_phase = data.get("vocab_done_per_phase") or {}
 
                 # 💬 что делает эта часть: PHRASE PACK v2 = прогресс по раундам (1–5)
-                poll_total = int(data.get("lex_round_total", 4) or 4)  # 💬 4 poll-раунда
-                poll_done = int(data.get("lex_round", 0) or 0)         # 💬 сколько раундов уже закрыто
+                lex_total = int(data.get("lex_round_total", 0) or 0)  # 💬 всего раундов в сессии (poll + text)
+                poll_total = max(0, lex_total - 1) if lex_total else 4  # 💬 poll-раунды (обычно 4)
+                poll_done = int(data.get("lex_round", 0) or 0)          # 💬 индекс текущего poll-раунда (0..poll_total)
+
+                # 💬 что делает эта часть: в Offer Continue мы только что ЗАКРЫЛИ poll-раунд → двигаем прогресс, чтобы 📚 обновился в меню
+                if lex_total and not data.get("lex_textquiz_done_round") and poll_total:
+                    if 0 <= poll_done < poll_total:
+                        poll_done += 1
+                        await state.update_data(lex_round=poll_done)
+                        data["lex_round"] = poll_done
+
                 poll_done = max(0, min(poll_done, poll_total))
 
-                text_done = 1 if data.get("lex_textquiz_done_round") else 0  # 💬 5-й раунд
+                text_done = 1 if data.get("lex_textquiz_done_round") else 0  # 💬 text-раунд
                 done_rounds = poll_done + text_done
                 total_rounds = poll_total + 1
+
 
                 prev = per_phase.get(str(phase_id), per_phase.get(phase_id, 0))
                 per_phase[str(phase_id)] = max(int(prev or 0), int(done_rounds))  # 💬 сохраняем частичный прогресс
