@@ -6132,7 +6132,10 @@ async def show_phase_menu(message: Message, state: FSMContext):
 
         )
     )
-    kb = InlineKeyboardMarkup(inline_keyboard=[[btn] for btn in buttons])
+    kb_rows = [[btn] for btn in buttons]
+    kb_rows.append([InlineKeyboardButton(text="🏠 Домой", callback_data="vocab_phase:menu")])  # 💬 быстрый выход в меню урока
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+
 
     # 💬 Легенда по цветам книг и выбор фазы
     await message.answer(
@@ -6141,6 +6144,27 @@ async def show_phase_menu(message: Message, state: FSMContext):
     )
 
     await state.set_state(LessonStates.waiting_vocab_phase)
+
+
+@dp.callback_query(LessonStates.waiting_vocab_phase, F.data == "vocab_phase:menu")
+@track_handler
+async def vocab_phase_back_to_menu(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+
+    # 💬 что делает эта часть: убираем сообщение со списком блоков, чтобы не висело
+    try:
+        await cb.message.delete()
+    except Exception:
+        try:
+            await cb.message.edit_reply_markup()
+        except Exception:
+            pass
+
+    # 💬 что делает эта часть: сбрасываем выбор фазы, чтобы не залипнуть в waiting_vocab_phase
+    await state.update_data(selected_phase=None)
+    await state.set_state(LessonStates.waiting_lesson_action)  # 💬 корректный state перед меню
+    return await lesson_menu_handler(cb.message, state)
+
 
 # ─────────────────────────────────────────────────────────
 @dp.callback_query(LessonStates.waiting_vocab_phase, F.data.startswith("topic_phase_done:"))
