@@ -7197,6 +7197,8 @@ async def lex_phrases_back(cb: CallbackQuery, state: FSMContext):
         lex_phrases_chat_id=None,
         phrase_select_msg_id=None,
         phrase_select_chat_id=None,
+        menu_hidden=False,  # 💬 принудительно даём show_phase_menu
+
     )
 
     # 💬 что делает эта часть: шаг назад к папкам (фазам) в "Учить слова"
