@@ -10896,8 +10896,10 @@ async def _show_offer_continue_after_textquiz(message: Message, state: FSMContex
     )
     await state.set_state(LessonStates.showing_vocab)
 
+    st = await state.get_data()  # 💬 фикс: st обязателен, иначе NameError в offer_continue после textquiz
+
     # 💬 что делает эта часть: закрываем фазу после полного прохождения textquiz-сета (чтобы нельзя было фармить XP)
-    topic_key = st.get("selected_topic_key")
+    topic_key = st.get("selected_topic_key") or st.get("selected_topic")  # 💬 поддержка обоих ключей
     phase_id = st.get("selected_phase_id")
     if topic_key is not None and phase_id is not None:
         topic = topics.get(topic_key, {})
