@@ -8205,6 +8205,12 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
     await award_xp(delta, state)
 
+    # 💬 что делает эта часть: сохраняем XP по теме в xp_data.json, чтобы "Опыт по теме" не сбрасывался после выхода/перезахода
+    user_id = poll_answer.user.id
+    topic_key = data.get("selected_topic", "unknown")
+    await add_xp(user_id, topic_key, delta)
+
+
     # 💬 Уникальный прогресс poll-квизов: redo не накручивает прогресс повторно
     if is_correct:
         done_ids = data.get("poll_done_ids")
