@@ -6445,9 +6445,11 @@ async def send_one_vocab(message: Message, state: FSMContext):
         data_now = await state.get_data()
         text = _lex_render_phrase_list(data_now.get("lex_active_phrases", []))
 
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="✅ Готово", callback_data="lex_phrases_done")]]
-        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Готово", callback_data="lex_phrases_done")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="lex_phrases_back")]  # 💬 шаг назад к выбору папок (фаз)
+        ])
+
         msg = await smart_reply(message, text, reply_markup=kb)
 
         await state.update_data(
@@ -7109,9 +7111,11 @@ async def handle_vocab_phrase_select(message: Message, state: FSMContext):
     chat_id = data.get("lex_phrases_chat_id", message.chat.id)
     msg_id = data.get("lex_phrases_msg_id")
     if msg_id:
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="✅ Готово", callback_data="lex_phrases_done")]]
-        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Готово", callback_data="lex_phrases_done")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="lex_phrases_back")]  # 💬 шаг назад к выбору папок (фаз)
+        ])
+
         try:
             await bot.edit_message_text(
                 chat_id=chat_id,
@@ -7168,6 +7172,35 @@ async def handle_vocab_phrase_select(message: Message, state: FSMContext):
     if phrases_msg_id:
         await _lex_update_phrase_list(message.chat.id, phrases_msg_id, state)  # 💬 перерисовываем список + кнопку "Готово"
 
+@dp.callback_query(F.data == "lex_phrases_back", StateFilter(LessonStates.vocab_phrase_select))
+@track_handler
+async def lex_phrases_back(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+
+    # 💬 что делает эта часть: удаляем сообщение разминки с кнопками, чтобы не висело в чате
+    try:
+        await cb.message.delete()
+    except Exception:
+        try:
+            await cb.message.edit_reply_markup()
+        except Exception:
+            pass
+
+    # 💬 что делает эта часть: чистим данные разминки, чтобы при возврате не "залипало" в старом списке
+    await state.update_data(
+        lex_active_phrases=None,
+        lex_round=0,
+        lex_round_total=0,
+        lex_mode_active=False,
+        current_stage=None,
+        lex_phrases_msg_id=None,
+        lex_phrases_chat_id=None,
+        phrase_select_msg_id=None,
+        phrase_select_chat_id=None,
+    )
+
+    # 💬 что делает эта часть: шаг назад к папкам (фазам) в "Учить слова"
+    return await show_phase_menu(cb.message, state)
 
 
 @dp.callback_query(F.data == "lex_phrases_done", StateFilter(LessonStates.vocab_phrase_select))
