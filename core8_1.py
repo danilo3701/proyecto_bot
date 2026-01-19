@@ -5006,7 +5006,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
                     [InlineKeyboardButton(text="🎬 Видео", callback_data="lex_menu:video")]
                 )
             rows.append(
-                [InlineKeyboardButton(text="🔄 Сменить тему", callback_data="lex_menu:change_topic")]
+                [InlineKeyboardButton(text="🔄 Сменить", callback_data="lex_menu:change_topic")]
             )
 
             inline_kb = InlineKeyboardMarkup(inline_keyboard=rows)
@@ -5030,7 +5030,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
                     [InlineKeyboardButton(text="🔒 Видео", callback_data="lex_menu:locked_video")]
                 )
             rows.append(
-                [InlineKeyboardButton(text="🔄 Сменить тему", callback_data="lex_menu:change_topic")]
+                [InlineKeyboardButton(text="🔄 Сменить", callback_data="lex_menu:change_topic")]
             )
 
             inline_kb = InlineKeyboardMarkup(inline_keyboard=rows)
@@ -5038,7 +5038,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         # 💬 В результате, если translate/videos пустые, соответствующие кнопки не показываем
 
         # 💬 В результате, если videos пустой, в меню останутся только:
-        #     «Учить слова», «Читать» и «Сменить тему»
+        #     «Учить слова», «Читать» и «Сменить»
 
         # Финальный follow-up
         choice_text = random.choice(follow_up_phrases)
@@ -5081,7 +5081,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
             KeyboardButton(text="🔒 Видео"),
             KeyboardButton(text="🔒 Читать"),
         ])
-    buttons.append([KeyboardButton(text="🔄 Сменить тему")])
+    buttons.append([KeyboardButton(text="🔄 Сменить")])
     keyboard = ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
     # Финальный follow-up
@@ -5114,7 +5114,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
 
 # ─────────────────────────────────────────────────────────
-@dp.message(LessonStates.waiting_lesson_action, lambda m: m.text == "🔄 Сменить тему")
+@dp.message(LessonStates.waiting_lesson_action, lambda m: m.text == "🔄 Сменить")
 @track_handler
 async def change_topic(message: Message, state: FSMContext):
     # Сбрасываем все индексы и возвращаемся к выбору категории, но сохраняем done_dialog и xp
@@ -5160,7 +5160,7 @@ async def change_topic(message: Message, state: FSMContext):
 @dp.callback_query(LessonStates.waiting_lesson_action, F.data.startswith("lex_menu:"))
 @track_handler
 async def lex_lesson_menu_router(callback: CallbackQuery, state: FSMContext):
-    # 💬 маршрутизатор инлайн-кнопок меню «Лексика» (Учить слова / Читать / Видео / Сменить тему)
+    # 💬 маршрутизатор инлайн-кнопок меню «Лексика» (Учить слова / Читать / Видео / Сменить)
     return await lex_lesson_menu_inline(callback, state)
 
 
@@ -5225,7 +5225,7 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
         await state.update_data(menu_hidden=True)  # 💬 фиксируем, что меню спрятали
         return await show_phase_menu(callback.message, state)
 
-    # 🔄 Сменить тему — тот же хендлер, что и у ReplyKeyboard
+    # 🔄 Сменить — тот же хендлер, что и у ReplyKeyboard
     if action == "change_topic":
         await callback.answer()
 
