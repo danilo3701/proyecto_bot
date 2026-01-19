@@ -9015,9 +9015,9 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
             redo_active=False,
         )
         return await lesson_menu_handler(message, state)
+    # 💬 что делает эта часть: НЕ прыгаем сразу к следующему блоку
+    # 💬 сначала ниже отрабатываем фидбэк (правильный/мотивация), await asyncio.sleep и удаление сообщений
 
-    await state.update_data(vocab_index=next_idx)
-    return await send_one_vocab(message, state)
 
 
 
@@ -10855,14 +10855,9 @@ async def _show_offer_continue_after_textquiz(message: Message, state: FSMContex
 
     # 💬 что делает эта часть: удаляем вопрос textquiz и ответ пользователя перед offer_continue
     prompt_id = data.get("vocab_textquiz_prompt_id") or data.get("last_prompt_id")
-    to_delete = [prompt_id, getattr(message, "message_id", None)]
-    for mid in to_delete:
-        if not mid:
-            continue
-        try:
-            await bot.delete_message(message.chat.id, mid)
-        except TelegramBadRequest:
-            pass
+    # 💬 что делает эта часть: не удаляем тут сразу
+    # 💬 удаление вопроса/ответа делается в handle_vocab_textquiz_answer ПОСЛЕ задержки
+
 
     oc_scene = random.choice(scenarios["offer_continue"])
 
