@@ -4538,13 +4538,16 @@ async def save_reading_fragments(message: Message, state: FSMContext):
             })
             i += 2
 
-        if bad_idx:
+        if bad_idx and not parsed:
             await message.answer(
                 "⛔ Формат неверный. Проверь пары (RU+ES).\n"
                 f"Проблемные пары: {', '.join(map(str, bad_idx))}",
                 reply_markup=ReplyKeyboardRemove(),
             )
-            return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
+            return await state.set_state(NewTopicStates.waiting_reading_fragments_text)  # 💬 нет валидных пар = остаёмся в вводе
+
+        # 💬 есть валидные пары и ошибки = сохраняем валидные, ошибки посчитаем в итоговой статистике
+
 
     else:
         # 💬 формат "чтение" = ES | RU | hint(опц.)
@@ -4569,7 +4572,7 @@ async def save_reading_fragments(message: Message, state: FSMContext):
                 "hint": hint,
             })
 
-        if bad_idx:
+        if bad_idx and not parsed:
             await message.answer(
                 "⛔ Формат неверный. Исправь и пришли заново.\n"
                 f"Проблемные строки: {', '.join(map(str, bad_idx))}\n\n"
@@ -4579,7 +4582,10 @@ async def save_reading_fragments(message: Message, state: FSMContext):
                 "¿Qué tal? | Как дела?",
                 reply_markup=ReplyKeyboardRemove(),
             )
-            return await state.set_state(NewTopicStates.waiting_reading_fragments_text)
+            return await state.set_state(NewTopicStates.waiting_reading_fragments_text)  # 💬 нет валидных строк = остаёмся в вводе
+
+        # 💬 есть валидные строки и ошибки = сохраняем валидные, ошибки посчитаем в итоговой статистике
+
 
 
     data = await state.get_data()
@@ -4604,9 +4610,36 @@ async def save_reading_fragments(message: Message, state: FSMContext):
 
     pack = packs[pack_index]
     pack.setdefault("fragments", [])
-    pack["fragments"].extend(parsed)  # 💬 сохраняем только валидные структурированные фрагменты
 
+    # 💬 считаем статистику строк: добавлено/пропущено/ошибочные
+    line_unit = 2 if pack_key_pre == "translate" else 1  # 💬 в «переводе» считаем строками пары
+    empty_skipped = sum(1 for ln in (raw.splitlines() if raw else []) if not (ln or "").strip())  # 💬 пустые строки
 
+    def _frag_key(x: dict) -> tuple:
+        return (
+            (x.get("type") or "").strip(),
+            (x.get("es") or "").strip(),
+            (x.get("ru") or "").strip(),
+            (x.get("hint") or "").strip(),
+        )
+
+    existing_keys = {_frag_key(x) for x in (pack.get("fragments") or [])}
+    to_add: list = []
+    dup_count = 0
+
+    for frag in (parsed or []):
+        k = _frag_key(frag)
+        if k in existing_keys:
+            dup_count += 1
+            continue
+        existing_keys.add(k)
+        to_add.append(frag)
+
+    pack["fragments"].extend(to_add)  # 💬 добавляем только новые фрагменты (без дублей)
+
+    added_lines = len(to_add) * line_unit
+    skipped_lines = empty_skipped + (dup_count * line_unit)
+    error_lines = len(bad_idx) * line_unit
 
     import json
 
@@ -4622,8 +4655,15 @@ async def save_reading_fragments(message: Message, state: FSMContext):
         ],
         resize_keyboard=True,
     )
-    await message.answer("✅ Фрагменты добавлены. Что ещё добавить?", reply_markup=kb)
+
+    await message.answer(
+        f"✅ Добавлено строк: {added_lines}\n"
+        f"⏭️ Пропущено строк: {skipped_lines}\n"
+        f"❗Ошибочные строки: {error_lines}",
+        reply_markup=kb,
+    )
     return await state.set_state(NewTopicStates.waiting_reading_action)
+
 
 
 
@@ -5168,6 +5208,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
