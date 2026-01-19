@@ -8790,6 +8790,13 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
             parse_mode="HTML"
         )
 
+    # 💬 страховка: если по ❌ почему-то не создали extra_fb, всё равно показываем правильный ответ
+    if (not is_correct) and (not isinstance(extra_fb, Message)):
+        correct_str = str(block.get("correct_answer", "")).strip().upper() or " / ".join(variants).upper()
+        extra_fb = await message.answer(f"👉 {correct_str}", parse_mode="HTML")  # 💬 показываем правильный ответ
+        await state.update_data(last_textquiz_extra_fb_id=extra_fb.message_id)  # 💬 запомним id для удаления
+
+
 
     # 💬 что делает эта часть: даём увидеть реакцию и на ✅ и на ❌ (иначе ❌ исчезает слишком быстро)
     # 💬 отдельные тайминги именно для text_quiz
@@ -8810,10 +8817,14 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         if not mid:
             continue
         try:
-            await bot.delete_message(chat_id, mid)
+            await message.bot.delete_message(chat_id, mid)  # 💬 удаляем через message.bot (актуальный инстанс бота)
         except TelegramBadRequest:
-            # например, уже удалили
+            # 💬 например: message can't be deleted / уже удалили / нет прав
             pass
+        except Exception:
+            # 💬 страховка от других ошибок удаления, чтобы не рвать FSM
+            pass
+
 
 
 
