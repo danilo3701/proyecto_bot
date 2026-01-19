@@ -8873,6 +8873,10 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     idx = data.get("vocab_index", 0)
     vocab_list = get_vocab_list(data)
 
+    user_id = message.from_user.id  # 💬 id пользователя для чтения/записи xp_data
+    topic_key = data.get("selected_topic", "unknown")  # 💬 ключ темы для topic_xp и логики разблокировки
+
+
     # 💬 что делает эта часть: защита от выхода за границы списка
     if idx >= len(vocab_list):
         # 💬 что делает эта часть: на финале тоже чистим последний вопрос и ответ
