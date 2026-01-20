@@ -9,6 +9,7 @@
 import os                           # Работа с файлами и папками
 
 # ⛔ Проверка отключения бота через переменную
+
 if (os.getenv("DISABLED") or "").strip().lower() == "true":
     print("🚫 DISABLED=true → бот не запускаем", flush=True)  # 💬 чтобы это точно попало в Railway logs
     raise SystemExit(0)
