@@ -1749,17 +1749,34 @@ async def get_level_for_topic(message: Message, state: FSMContext):
 @router.message(NewTopicStates.waiting_topic_name)
 async def get_topic_name(message: Message, state: FSMContext):
     import os, re
+    from pathlib import Path  # 💬 нужен для exists() и работы с путями
 
     raw = (message.text or "").strip()
     clean = re.sub(r"[^\w\s]", "", raw).lower().replace(" ", "_")
 
-    # 💬 что делает эта часть: запрещаем “локальное сохранение”, чтобы темы не пропадали после редеплоя
+    # 💬 запрещаем локаль и проверяем что /data/topics реально writable
     topics_dir = get_topics_dir()
-    topics_dir_str = str(topics_dir)
-    if not topics_dir_str.startswith("/data/topics"):
+    if str(topics_dir) != "/data/topics":
         await message.answer(
-            "❗ Volume /data/topics недоступен или не writable.\n"
-            "Тема не будет сохранена после перезапуска. Проверь Railway Volume mount.",
+            "❗ Volume /data/topics недоступен.\n"
+            "Тема не будет сохранена после редеплоя. Проверь Railway Volume mount.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await state.clear()
+        return
+
+    try:
+        topics_dir.mkdir(parents=True, exist_ok=True)  # 💬 гарантируем что папка есть
+        test_path = topics_dir / ".write_test"  # 💬 тест записи в volume
+        test_path.write_text("ok", encoding="utf-8")
+        try:
+            test_path.unlink()
+        except Exception:
+            pass
+    except Exception:
+        await message.answer(
+            "❗ Volume /data/topics не writable.\n"
+            "Тема не будет сохранена после редеплоя. Проверь права и mount.",
             reply_markup=ReplyKeyboardRemove(),
         )
         await state.clear()
@@ -5300,6 +5317,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
