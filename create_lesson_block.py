@@ -1651,6 +1651,19 @@ async def get_level_for_topic(message: Message, state: FSMContext):
     # Нормализация: кнопка с эмодзи -> чистое значение уровня
     level = LEVEL_FROM_BUTTON.get(raw, raw)
 
+    # 💬 что делает эта часть: приводим "B1"/"B2"/"B1/B2" к единому формату "B1-B2" (и так же для A1/A2)
+    _lvl = str(level).strip().upper().replace("–", "-").replace("—", "-")
+    _lvl = _lvl.replace(" ", "")
+    if _lvl in ("A1", "A2", "A1/A2", "A1A2"):
+        level = "A1-A2"
+    elif _lvl in ("B1", "B2", "B1/B2", "B1B2"):
+        level = "B1-B2"
+    elif _lvl == "C1":
+        level = "C1"
+    elif _lvl == "A0":
+        level = "A0"
+
+
     if level == "A0":
         data_tmp = await state.get_data()
         category_tmp = (data_tmp.get("topic") or {}).get("category")
@@ -5210,6 +5223,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
