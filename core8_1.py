@@ -11224,8 +11224,7 @@ if __name__ == '__main__':
         # 💬 Регистрируем команды бота (в меню Telegram: /start, /addtopic, /edittopic, /menu)
         # 💬 Обычному пользователю показываем только эти команды
         await bot.set_my_commands([
-            BotCommand(command="start", description="Запустить бота"),
-            BotCommand(command="menu",  description="Главное меню")
+            BotCommand(command="start", description="Запустить бота")
         ])
 
         migrate_runtime_files_to_volume()  # 💬 выполняется один раз при старте
