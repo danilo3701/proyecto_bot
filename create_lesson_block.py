@@ -2143,7 +2143,8 @@ async def handle_main_menu(message: Message, state: FSMContext):
                 for p_idx, ph in enumerate(vocab_phases[:20], start=1):
                     ph_name = str(ph.get("phase_name") or f"Фаза {p_idx}")
                     phrases = ph.get("phrases") or []  # 💬 для лексики считаем именно фразы внутри пака
-                    lines.append(f"  {i}) 📦 {name} (фраз: {len(phrases)})")  # 💬 показываем корректный счётчик
+                    lines.append(f"  {p_idx}) 📦 {ph_name} (фраз: {len(phrases)})")  # 💬 показываем корректный счётчик
+
 
             lines.append("")
         
@@ -5223,6 +5224,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
