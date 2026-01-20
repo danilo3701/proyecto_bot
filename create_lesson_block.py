@@ -1789,7 +1789,7 @@ async def get_topic_name(message: Message, state: FSMContext):
             candidate_filename = str(topics_dir / f"{candidate_clean}.json")
             if not Path(candidate_filename).exists():
                 clean = candidate_clean  # 💬 обновляем машинное имя темы
-                raw = f"{base_raw} {suffix}"  # 💬 обновляем отображаемое имя, чтобы было видно 1,2,3
+                raw = base_raw  # 💬 отображаемое имя не меняем, суффикс только для файла и системного title
                 filename = candidate_filename  # 💬 обновляем путь файла
                 break
             suffix += 1
@@ -1800,7 +1800,7 @@ async def get_topic_name(message: Message, state: FSMContext):
     topic = {
         "title": clean,
         "visible_title": raw,
-
+        "visible_title": base_raw,  # 💬 в боте всегда исходное название, без суффиксов
         "category": category,
         "level": data.get("topic_level"),  # 💬 добавляем выбранный уровень
         "vocab": [],
@@ -5312,6 +5312,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
