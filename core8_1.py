@@ -2222,8 +2222,21 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
 
     buttons = []
     for key, info in topics.items():
-        if info.get("category") != category or info.get("level") != level:
+        # 💬 что делает эта часть: нормализуем уровни, чтобы "B1"/"B2" совпадали с "B1-B2"
+        def _norm_level(v) -> str:
+            s = str(v or "").strip().upper().replace("–", "-").replace("—", "-")
+            s = s.replace(" ", "")
+            if s in ("A1", "A2", "A1/A2", "A1A2"):
+                return "A1-A2"
+            if s in ("B1", "B2", "B1/B2", "B1B2"):
+                return "B1-B2"
+            if s in ("A0", "A1-A2", "B1-B2", "C1"):
+                return s
+            return s  # 💬 оставляем как есть на случай кастомных значений
+
+        if info.get("category") != category or _norm_level(info.get("level")) != _norm_level(level):
             continue
+
 
         row_raw = topic_summary.get(key, {})
         row = row_raw if isinstance(row_raw, dict) else {}
