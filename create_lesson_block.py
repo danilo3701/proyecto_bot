@@ -1765,7 +1765,22 @@ async def get_topic_name(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    filename = str(topics_dir / f"{clean}.json")  # 💬 сохраняем путь темы строго в Volume (/data/topics)
+    # 💬 что делает эта часть: если файл уже существует, добавляем суффикс 1,2,3 чтобы не затирать тему
+    base_clean = clean
+    base_raw = raw
+
+    filename = str(topics_dir / f"{base_clean}.json")  # 💬 базовый путь в /data/topics
+    if Path(filename).exists():
+        suffix = 1
+        while True:
+            candidate_clean = f"{base_clean}_{suffix}"
+            candidate_filename = str(topics_dir / f"{candidate_clean}.json")
+            if not Path(candidate_filename).exists():
+                clean = candidate_clean  # 💬 обновляем машинное имя темы
+                raw = f"{base_raw} {suffix}"  # 💬 обновляем отображаемое имя, чтобы было видно 1,2,3
+                filename = candidate_filename  # 💬 обновляем путь файла
+                break
+            suffix += 1
 
     # 💬 Собираем базовую структуру темы
     data = await state.get_data()
@@ -1773,6 +1788,7 @@ async def get_topic_name(message: Message, state: FSMContext):
     topic = {
         "title": clean,
         "visible_title": raw,
+
         "category": category,
         "level": data.get("topic_level"),  # 💬 добавляем выбранный уровень
         "vocab": [],
@@ -5284,6 +5300,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
