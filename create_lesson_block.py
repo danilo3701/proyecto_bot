@@ -52,22 +52,17 @@ def _insert_or_append(target_list: list, item, insert_index):
 
 
 def get_topics_dir() -> Path:
-    # 💬 что делает эта часть: выбираем папку topics в Railway Volume (/data/topics); если нельзя = падаем обратно на локальную
-    candidates = [Path("/data/topics"), Path(__file__).parent / "topics", Path("topics")]
-    for d in candidates:
-        try:
-            d.mkdir(parents=True, exist_ok=True)
-            # тест записи, чтобы понять что директория реально writable
-            test = d / ".write_test"
-            test.write_text("ok", encoding="utf-8")
-            try:
-                test.unlink()
-            except Exception:
-                pass
-            return d
-        except Exception:
-            continue
-    return Path("topics")
+    # 💬 что делает эта часть: работаем только с Railway Volume (/data/topics), без локального fallback
+    d = Path("/data/topics")
+    d.mkdir(parents=True, exist_ok=True)
+    test = d / ".write_test"
+    test.write_text("ok", encoding="utf-8")
+    try:
+        test.unlink()
+    except Exception:
+        pass
+    return d
+
 
 def _is_railway_topics_file(path: str | Path) -> bool:
     # 💬 проверяем что файл реально лежит в Railway Volume (/data/topics)
@@ -5317,6 +5312,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
