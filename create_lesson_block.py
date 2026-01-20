@@ -1784,7 +1784,23 @@ async def get_topic_name(message: Message, state: FSMContext):
     }
 
     # 💾 Сохраняем в файл (уже в Volume)
-    atomic_save_json(filename, topic)
+    try:
+        atomic_save_json(filename, topic)  # 💬 сохраняем тему на диск
+    except Exception:
+        await message.answer(
+            "❗ Не удалось сохранить тему. Проверь, что /data/topics доступен и writable.",
+            reply_markup=ReplyKeyboardRemove()
+        )  # 💬 показываем причину вместо “тишины”
+        await state.clear()
+        return
+
+    # 💬 Обновляем состояние
+    await state.update_data(topic=topic, topic_path=filename)  # 💬 сохраняем в FSM путь и данные темы
+
+    # 💬 Запрос описания темы
+    await message.answer("Теперь введи ОПИСАНИЕ темы:", reply_markup=ReplyKeyboardRemove())  # 💬 идём дальше по flow
+    await state.set_state(NewTopicStates.waiting_topic_description)
+    return
 
 
 
@@ -5266,6 +5282,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
