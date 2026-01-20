@@ -2061,8 +2061,9 @@ async def handle_main_menu(message: Message, state: FSMContext):
             else:
                 for p_idx, ph in enumerate(phases, start=1):
                     ph_name = str(ph.get("phase_name") or f"Фаза {p_idx}")
-                    items = ph.get("vocab") or []
-                    lines.append(f"  {p_idx}) <b>{_preview_text(ph_name, 40)}</b> (элементов: {len(items)})")
+                    phrases = ph.get("phrases") or []  # 💬 для лексики считаем именно фразы внутри пака
+                    lines.append(f"  {i}) 📦 {name} (фраз: {len(phrases)})")  # 💬 показываем корректный счётчик
+
                     for i_idx, it in enumerate(items[:8], start=1):
                         lines.append(f"      {p_idx}.{i_idx}) {_preview_item(it)}")
                     if len(items) > 8:
@@ -2128,8 +2129,9 @@ async def handle_main_menu(message: Message, state: FSMContext):
             else:
                 for p_idx, ph in enumerate(vocab_phases[:20], start=1):
                     ph_name = str(ph.get("phase_name") or f"Фаза {p_idx}")
-                    items = ph.get("vocab") or []
-                    lines.append(f"  {p_idx}) <b>{_preview_text(ph_name, 40)}</b> (элементов: {len(items)})")
+                    phrases = ph.get("phrases") or []  # 💬 для лексики считаем именно фразы внутри пака
+                    lines.append(f"  {i}) 📦 {name} (фраз: {len(phrases)})")  # 💬 показываем корректный счётчик
+
             lines.append("")
         
             ex_list = topic_data.get("exercises") or []
@@ -5208,6 +5210,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
