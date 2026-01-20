@@ -1746,17 +1746,27 @@ async def get_level_for_topic(message: Message, state: FSMContext):
 
 
 # === Шаг 2: название темы ===
-
 @router.message(NewTopicStates.waiting_topic_name)
 async def get_topic_name(message: Message, state: FSMContext):
-    import os, re, json
+    import os, re
 
-    raw = message.text.strip()
+    raw = (message.text or "").strip()
     clean = re.sub(r"[^\w\s]", "", raw).lower().replace(" ", "_")
-    
+
+    # 💬 что делает эта часть: запрещаем “локальное сохранение”, чтобы темы не пропадали после редеплоя
     topics_dir = get_topics_dir()
-    filename = str(topics_dir / f"{clean}.json")  # 💬 что делает эта часть: сохраняем путь темы в Volume (/data/topics)
-    
+    topics_dir_str = str(topics_dir)
+    if not topics_dir_str.startswith("/data/topics"):
+        await message.answer(
+            "❗ Volume /data/topics недоступен или не writable.\n"
+            "Тема не будет сохранена после перезапуска. Проверь Railway Volume mount.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await state.clear()
+        return
+
+    filename = str(topics_dir / f"{clean}.json")  # 💬 сохраняем путь темы строго в Volume (/data/topics)
+
     # 💬 Собираем базовую структуру темы
     data = await state.get_data()
     category = data["topic"]["category"]
@@ -1769,24 +1779,13 @@ async def get_topic_name(message: Message, state: FSMContext):
         "exercises": [],
         "videos": [],
         "dialogs": [],
-        "reading": [],  # 💬 что делает эта часть: хранит пакеты чтения (фрагменты как в подкастах)
+        "reading": [],  # 💬 хранит пакеты чтения
         "translate": [],  # 💬 отдельные пакеты для кнопки «Переводи»
-
-
     }
-    
+
     # 💾 Сохраняем в файл (уже в Volume)
-    atomic_save_json(filename, topic)  # 💬 сet_topic_nameохраняем в volume Railway безопасно (atomic)
+    atomic_save_json(filename, topic)
 
-    
-    # 💬 Обновляем состояние
-    await state.update_data(topic=topic, topic_path=filename)
-
-
-    # 💬 Запрос описания темы
-    await message.answer("Теперь введи ОПИСАНИЕ темы:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(NewTopicStates.waiting_topic_description)
-    return
 
 
 @router.message(NewTopicStates.waiting_topic_description)
@@ -5224,6 +5223,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
