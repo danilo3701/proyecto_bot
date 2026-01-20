@@ -1921,6 +1921,8 @@ def _preview_item(item: dict) -> str:
 async def handle_main_menu(message: Message, state: FSMContext):
     text = message.text.strip()
     data = await state.get_data()
+    topic_path = data.get("topic_path")  # 💬 вытаскиваем путь темы заранее, чтобы не ловить UnboundLocalError
+
     tp = data.get("topic")
     path = data.get("topic_path")
 
@@ -5282,6 +5284,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
