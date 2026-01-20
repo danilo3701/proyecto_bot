@@ -440,7 +440,7 @@ def get_main_menu(category: str | None = None) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="📚 словарь"), KeyboardButton(text="✏️ Добавить упражнение")],
-                [KeyboardButton(text="🎥 Добавить видео")],
+                [KeyboardButton(text="🎥 Добавить видео"), KeyboardButton(text="💾 Сохранить")], 
                 [KeyboardButton(text="📖 Добавить чтение"), KeyboardButton(text="📝 Добавить перевод")],  # 💬 два разных режима
                 [KeyboardButton(text="👁 Просмотреть"),       KeyboardButton(text="✏️ Редактировать")]
             ],
@@ -1993,6 +1993,49 @@ async def handle_main_menu(message: Message, state: FSMContext):
         await state.set_state(NewTopicStates.waiting_vocab_allin_bulk)
         return
 
+    if text == "💾 Сохранить":
+        topic = data.get("topic") or {}  # 💬 берём текущую тему из state
+        if not topic_path:
+            await message.answer("❗ Не вижу путь темы. Открой или создай тему заново.")  # 💬 защита от пустого topic_path
+            return
+
+        file_topic = None
+        if os.path.exists(topic_path):
+            try:
+                with open(topic_path, "r", encoding="utf-8") as f:
+                    file_topic = json.load(f) or {}
+            except Exception:
+                file_topic = None
+
+        try:
+            cur_dump = json.dumps(topic, ensure_ascii=False, sort_keys=True)
+            file_dump = json.dumps(file_topic, ensure_ascii=False, sort_keys=True) if isinstance(file_topic, dict) else None
+        except Exception:
+            cur_dump = None
+            file_dump = None
+
+        if file_dump is not None and cur_dump is not None and file_dump == cur_dump:
+            await message.answer("✅ Уже сохранено")  # 💬 верификация: файл уже совпадает со state
+        else:
+            try:
+                with open(topic_path, "w", encoding="utf-8") as f:
+                    json.dump(topic, f, ensure_ascii=False, indent=2)  # 💬 принудительно перезаписываем файл без дублей
+                await message.answer("✅ А вот теперь сохранено")  # 💬 верификация: файл обновили
+            except Exception:
+                await message.answer("❗ Не смог сохранить файл темы. Проверь права на /data/topics.")  # 💬 защита от падений
+
+        # 💬 возвращаем клавиатуру главного меню и остаёмся в том же состоянии
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📚 Добавить словарь"), KeyboardButton(text="✏️ Добавить упражнение")],
+                [KeyboardButton(text="🎥 Добавить видео"), KeyboardButton(text="💾 Сохранить"), KeyboardButton(text="💬 Добавить диалог")],
+                [KeyboardButton(text="👁 Просмотреть"), KeyboardButton(text="✏️ Редактировать")]
+            ],
+            resize_keyboard=True
+        )
+        await message.answer("С чего начнём?", reply_markup=keyboard)
+        await state.set_state(NewTopicStates.waiting_first_choice)
+        return
 
 
     # ----------------------- Добавить упражнение -----------------------
@@ -5223,6 +5266,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
