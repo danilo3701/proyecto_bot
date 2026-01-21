@@ -10306,23 +10306,40 @@ async def handle_failed_textquiz(message: Message, state: FSMContext):
     # 💬 Дополнительный фидбэк:  
     #   – 🍪 +1 если правильно  
     #   – ❌ ПРАВИЛЬНЫЙ_ОТВЕТ (заглавными) если нет  
-    # 💬 Сколько уже дали за этот урок?
+    # 💬 Сколько уже дали за эту фазу? (cap на 2 🍪 за 1 textquiz)
     data = await state.get_data()
-    given = (load_xp_data()
-             .get(str(user_id), {})
-             .get("stats", {})
-             .get("words_learned", 0)
-         ) - data.get("initial_cookies", 0)
+    max_cookies = int(data.get("max_cookies", 0) or 0)
 
-    max_cookies = data.get("max_cookies", 0)
-    to_give = min(2, max(0, max_cookies - given))  # 💬 даём 2 🍪 за 1 текстквиз, но не превышаем лимит
+    ph_key = str(phase_id) if phase_id is not None else "unknown"  # 💬 ключ фазы для капа
+
+    xp_all = load_xp_data()
+    user_xp = xp_all.get(str(user_id), {}) or {}
+    lex_caps = user_xp.get("lex_phase_caps", {}) or {}
+    topic_caps = lex_caps.get(topic_key, {}) or {}
+    phase_caps = topic_caps.get(ph_key, {}) or {}
+
+    already_cookies = int(phase_caps.get("cookies_earned", 0) or 0)  # 💬 сколько 🍪 уже дали в этой фазе
+    remain = max(0, max_cookies - already_cookies)
+    to_give = min(2, remain)  # 💬 2 🍪 за 1 правильный ответ, но не выше лимита фазы
 
     if is_correct and to_give > 0:
-        # 📌 начисляем «слова выучено» как печеньки (1 слово = 1 🍪)
-        for _ in range(to_give):
-            await add_xp(user_id, topic_key, 0, action="words_learned")  # 💬 +1 слово (🍪)
+        await add_xp(
+            user_id,
+            topic_key,
+            0,
+            action="words_learned",
+            action_amount=to_give
+        )  # 💬 +слова сегодня (2 🍪 за 1 textquiz)
 
-        given_after = given + to_give
+        # 💬 сохраняем кап печенек по фазе, чтобы перезаход не давал “фарм”
+        user_xp.setdefault("lex_phase_caps", {}).setdefault(topic_key, {}).setdefault(ph_key, {})[
+            "cookies_earned"
+        ] = already_cookies + to_give
+
+        xp_all[str(user_id)] = user_xp
+        save_xp_data(xp_all)
+
+        given_after = already_cookies + to_give  # 💬 для прогресс-сообщения
 
         # 💬 редко показываем прогресс внутри фазы и удаляем (каждые 6 слов = 3 фразы)
         if given_after % 6 == 0:
@@ -10336,9 +10353,8 @@ async def handle_failed_textquiz(message: Message, state: FSMContext):
                 )
             )
 
-        # 💬 показываем сколько «печенька» дала слов за этот текстквиз
+        # 💬 показываем сколько «печенька» дала слов за этот textquiz
         extra_fb = await message.answer(f"🍪 +{to_give}\n📚 +{to_give} слов", parse_mode="HTML")
-
 
     elif not is_correct:
         # 📌 показываем все допустимые ответы заглавными, через «или»
