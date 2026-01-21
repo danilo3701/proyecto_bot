@@ -8845,6 +8845,24 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
             )  # 💬 остаёмся в redo
             return await send_one_vocab(_fake_msg(), state)
         else:
+
+            redo_text = data.get("redo_stack_text", []) or []
+            if redo_text and not data.get("redo_active_text", False):
+                nxt_t = redo_text.pop(0)
+                await state.update_data(
+                    vocab_index=nxt_t,
+                    redo_stack_text=redo_text,
+                    redo_active_text=True,
+                    current_poll_id=None
+                )  # 💬 запускаем пересдачу textquiz внутри того же сета, до offer_continue
+                return await send_one_vocab(_fake_msg(), state)
+
+            failed = data.get("failed_vocab", []) or []
+            if failed:
+                await state.update_data(current_poll_id=None)  # 💬 сбрасываем poll id перед пересдачей
+                await state.set_state(LessonStates.review_failed_vocab)  # 💬 пересдача ошибок до offer_continue
+                return await send_failed_vocab(poll_answer.user.id, state)
+
             # 💬 textquiz тоже нет — обычный offer_continue
             # 💬 textquiz тоже нет — показываем inline offer_continue (единый формат с cb_scenario_vocab)
             oc = random.choice(scenarios["offer_continue"])
@@ -9390,7 +9408,8 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
                 redo_active_text=True,
             )
             # ВАЖНО: vocab_index не меняем — остаёмся на этом же idx
-            return await _show_offer_continue_after_textquiz(message, state, target_idx=idx)  # 💬 перебивка перед повтором
+            return await send_one_vocab(message, state)  # 💬 повторяем этот же textquiz сразу, без offer_continue
+
 
 
     # 7) Линейный проход (redo_active_text == False): сначала проходим сет, потом пересдачи
