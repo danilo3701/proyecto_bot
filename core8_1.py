@@ -1269,15 +1269,12 @@ async def add_xp(user_id: int, topic: str, amount: int, action: str = None, acti
 
     # 3. words_learned сегодня + лимит
     if action == "words_learned":
-        # 💬 daily-limit учитываем только в xp_data, вывод в меню делается отдельно
-        # 💬 daily-limit учитываем только в xp_data, вывод в меню делается отдельно
-        limit = int(user.get("words_daily_limit", 10) or 0)
+        # 💬 words_daily_limit = это план на день (для строки X / Y), но обучение не ограничиваем
         cur_today = int(user.get("words_learned_today", 0) or 0)
 
-        # 💬 что делает эта часть: не даём превысить лимит, но учитываем action_amount (например +2)
+        # 💬 что делает эта часть: прибавляем ровно action_amount, без потолка
         inc = int(action_amount or 0)
-        if limit > 0:
-            inc = max(0, min(inc, max(0, limit - cur_today)))
+
 
         if inc > 0:
             user["words_learned_today"] = cur_today + inc  # 💬 +inc сегодня (если не превышен лимит)
@@ -8555,12 +8552,45 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
     delta = 30 if is_correct else -10  # 💬 фиксированные значения для vocab quiz
 
-    await award_xp(delta, state)
-
-    # 💬 что делает эта часть: сохраняем XP по теме в xp_data.json, чтобы "Опыт по теме" не сбрасывался после выхода/перезахода
+    # 💬 что делает эта часть: лимит XP по фазе, чтобы перезаход не давал бесконечный фарм
     user_id = poll_answer.user.id
     topic_key = data.get("selected_topic", "unknown")
-    await add_xp(user_id, topic_key, delta)
+    phase_id = data.get("selected_phase_id")
+
+    vocab_list_tmp = get_vocab_list(data)
+    max_phase_xp = sum(30 for b in (vocab_list_tmp or []) if b.get("type") in ("quiz", "textquiz"))  # 💬 верхняя граница фазы
+
+    xp_all_tmp = load_xp_data()
+    u_tmp = xp_all_tmp.get(str(user_id), {}) or {}
+    caps_tmp = (u_tmp.get("lex_phase_caps", {}) or {}).get(topic_key, {}) or {}
+    ph_key = str(phase_id) if phase_id is not None else "unknown"
+    already_xp = int((caps_tmp.get(ph_key, {}) or {}).get("xp_earned", 0) or 0)
+    remain_xp = max(0, int(max_phase_xp or 0) - already_xp)
+
+    delta_effective = delta
+    if delta > 0:
+        delta_effective = min(delta, remain_xp)  # 💬 режем выдачу, если лимит фазы уже выбран
+
+    await award_xp(delta_effective, state)  # 💬 в сессии показываем реальную выдачу
+
+    # 💬 сохраняем XP по теме в xp_data.json (только реальную выдачу)
+    if delta_effective != 0:
+        await add_xp(user_id, topic_key, delta_effective)
+
+    # 💬 фиксируем, сколько XP уже “оплачено” в этой фазе (только плюс)
+    if delta_effective > 0:
+        xp_all_upd = load_xp_data()
+        u_upd = xp_all_upd.get(str(user_id), {}) or {}
+        lex_caps = u_upd.get("lex_phase_caps", {}) or {}
+        t_caps = lex_caps.get(topic_key, {}) or {}
+        ph_caps = t_caps.get(ph_key, {}) or {}
+        ph_caps["xp_earned"] = int(ph_caps.get("xp_earned", 0) or 0) + int(delta_effective)
+        t_caps[ph_key] = ph_caps
+        lex_caps[topic_key] = t_caps
+        u_upd["lex_phase_caps"] = lex_caps
+        xp_all_upd[str(user_id)] = u_upd
+        save_xp_data(xp_all_upd)
+
 
 
     # 💬 Уникальный прогресс poll-квизов: redo не накручивает прогресс повторно
@@ -10204,18 +10234,47 @@ async def handle_failed_textquiz(message: Message, state: FSMContext):
     norm_variants = [normalize_textquiz(v) for v in variants]
     is_correct = user_ans in norm_variants
 
-
-    # 💬 Начисляем XP в сессии
     delta = random.randint(15, 25) if is_correct else -10
+
+    # 💬 что делает эта часть: лимит XP по фазе, чтобы перезаход не давал фарм через review
+    user_id = message.from_user.id
+    topic_key = data.get("selected_topic", "unknown")
+    phase_id = data.get("selected_phase_id")
+
+    max_phase_xp = sum(30 for b in (vocab_list or []) if b.get("type") in ("quiz", "textquiz"))  # 💬 верхняя граница фазы
+
+    xp_all_tmp = load_xp_data()
+    u_tmp = xp_all_tmp.get(str(user_id), {}) or {}
+    caps_tmp = (u_tmp.get("lex_phase_caps", {}) or {}).get(topic_key, {}) or {}
+    ph_key = str(phase_id) if phase_id is not None else "unknown"
+    already_xp = int((caps_tmp.get(ph_key, {}) or {}).get("xp_earned", 0) or 0)
+    remain_xp = max(0, int(max_phase_xp or 0) - already_xp)
+
+    if delta > 0:
+        delta = min(delta, remain_xp)  # 💬 режем выдачу, если лимит фазы уже выбран
+
     await award_xp(delta, state)
 
     # 🔥 Level-Up: предыдущий глобальный XP
-    user_id = message.from_user.id
     xp_before = load_xp_data().get(str(user_id), {}).get("total_xp", 0)
-    topic_key = data.get("selected_topic", "unknown")
 
-    # 💬 Запись XP в общее накопление
-    await add_xp(user_id, topic_key, delta)  # 💬 XP; слова считаем отдельно (ниже)
+    # 💬 Запись XP в общее накопление (только реальную выдачу)
+    if delta != 0:
+        await add_xp(user_id, topic_key, delta)
+
+    # 💬 фиксируем, сколько XP уже “оплачено” в этой фазе (только плюс)
+    if delta > 0:
+        xp_all_upd = load_xp_data()
+        u_upd = xp_all_upd.get(str(user_id), {}) or {}
+        lex_caps = u_upd.get("lex_phase_caps", {}) or {}
+        t_caps = lex_caps.get(topic_key, {}) or {}
+        ph_caps = t_caps.get(ph_key, {}) or {}
+        ph_caps["xp_earned"] = int(ph_caps.get("xp_earned", 0) or 0) + int(delta)
+        t_caps[ph_key] = ph_caps
+        lex_caps[topic_key] = t_caps
+        u_upd["lex_phase_caps"] = lex_caps
+        xp_all_upd[str(user_id)] = u_upd
+        save_xp_data(xp_all_upd)
 
 
     # 🔥 Проверка перехода на новый уровень
