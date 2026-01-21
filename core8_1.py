@@ -9276,18 +9276,28 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
         await state.update_data(
             redo_stack_text=redo_t,
             pending_textquiz=pending,
-            redo_active_text=False,  # 💬 пересдачи textquiz — только между сетами, не внутри пары
-        )
+        )  # 💬 сохраняем очереди мини-сессии
 
         if pending:
             # 💬 есть ещё один textquiz в текущей мини-сессии → показываем его
             next_idx = pending[0]
-            await state.update_data(vocab_index=next_idx)
+            await state.update_data(vocab_index=next_idx, redo_active_text=False)
             return await send_one_vocab(message, state)
-        else:
-            if data.get("lex_mode_active"):
-                await state.update_data(vocab_index=idx + 1)  # 💬 ALL IN: сдвигаем индекс за textquiz, чтобы send_one_vocab собрал следующий раунд
-                return await send_one_vocab(message, state)
+
+        if redo_t:
+            # 💬 есть ошибки textquiz → пересдаём ИМЕННО ВНУТРИ ЭТОГО ЖЕ СЕТА, до offer_continue
+            nxt_t = redo_t.pop(0)
+            await state.update_data(
+                vocab_index=nxt_t,
+                redo_stack_text=redo_t,
+                redo_active_text=True,
+                current_poll_id=None
+            )  # 💬 пересдача textquiz без переноса в следующий сет
+            return await send_one_vocab(message, state)
+
+        if data.get("lex_mode_active"):
+            await state.update_data(vocab_index=idx + 1)  # 💬 индекс за textquiz, чтобы send_one_vocab собрал следующий раунд
+            return await send_one_vocab(message, state)
 
             # 💬 мини-сессия textquiz закончилась → обычный offer_continue
             oc_scene = random.choice(scenarios["offer_continue"])
