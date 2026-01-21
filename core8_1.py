@@ -6622,12 +6622,13 @@ async def start_vocab(message: Message, state: FSMContext):
         await smart_reply(message, "🎉 Все задания в этой фазе пройдены!", reply_markup=ReplyKeyboardRemove())
         return await lesson_menu_handler(message, state)
         
-    # 6) Сохраняем в state stats по текст-квизам (печеньки)
+# 6) Сохраняем в state stats по текст-квизам (печеньки)
     max_cookies = sum(1 for b in vocab_list if b.get("type") == "textquiz") * 2  # 💬 1 фраза = 2 слова = 2 🍪
-    xp_all = load_xp_data().get(str(message.chat.id), {})
-    initial_cookies = xp_all.get("stats", {}).get("words_learned", 0)
-    await state.update_data(max_cookies=max_cookies,
-                            initial_cookies=initial_cookies)
+    await state.update_data(
+        max_cookies=max_cookies,
+        initial_cookies=0,  # 💬 больше не используем initial_cookies, держим только для совместимости
+    )
+
 
 
 
@@ -9011,15 +9012,9 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
             redo_text.append(idx)
 
     else:
-        # 💬 что делает эта часть: верно = засчитываем прогресс textquiz
-        await award_xp(30, state)
-        await add_xp(
-            message.from_user.id,
-            data.get("selected_topic", "") or "",
-            0,
-            action="words_learned",
-            action_amount=2
-        )  # 💬 +2 слова сегодня за 1 правильный textquiz
+            # 💬 что делает эта часть: верно = засчитываем прогресс textquiz
+            await award_xp(30, state)  # 💬 XP за правильный ответ
+            # 💬 печеньки начисляем ниже через cap по фазе, чтобы не было дубля
 
     # 💬 что делает эта часть: при верном ответе увеличиваем счётчики и ОБЯЗАТЕЛЬНО чистим redo_stack_text
     if is_correct:
@@ -9146,26 +9141,44 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
 
     # 💬 4) Дополнительный фидбэк: печенька или правильный ответ
-    # 💬 Сколько уже дали за этот урок?
+# 💬 Сколько уже дали за эту фазу? (cap на 2 🍪 за 1 textquiz)
     data = await state.get_data()
-    given = (load_xp_data()
-             .get(str(user_id), {})
-             .get("stats", {})
-             .get("words_learned", 0)
-         ) - data.get("initial_cookies", 0)
+    max_cookies = int(data.get("max_cookies", 0) or 0)
 
-    max_cookies = data.get("max_cookies", 0)
-    to_give = min(2, max(0, max_cookies - given))  # 💬 даём 2 🍪 за 1 текстквиз, но не превышаем лимит
+    phase_id = data.get("selected_phase_id")
+    ph_key = str(phase_id) if phase_id is not None else "unknown"  # 💬 ключ фазы для капа
 
-    if is_correct and to_give > 0:
-        # 📌 начисляем «слова выучено» как печеньки (1 слово = 1 🍪)
-        for _ in range(to_give):
-            await add_xp(user_id, topic_key, 0, action="words_learned")  # 💬 +1 слово (🍪)
+    xp_all = load_xp_data()
+    user_xp = xp_all.get(str(user_id), {})
+    lex_caps = user_xp.get("lex_phase_caps", {})
+    topic_caps = lex_caps.get(topic_key, {})
+    phase_caps = topic_caps.get(ph_key, {})
 
-        given_after = given + to_give
+    already_cookies = int(phase_caps.get("cookies_earned", 0) or 0)  # 💬 сколько 🍪 уже дали в этой фазе раньше
+    remain = max(0, max_cookies - already_cookies)
+    to_give = min(2, remain)  # 💬 2 🍪 за 1 правильный textquiz, но не выше лимита фазы
+
+    if is_correct:
+        if to_give > 0:
+            await add_xp(
+                user_id,
+                topic_key,
+                0,
+                action="words_learned",
+                action_amount=to_give
+            )  # 💬 +слова сегодня (печеньки)
+
+            user_xp.setdefault("lex_phase_caps", {}).setdefault(topic_key, {}).setdefault(ph_key, {})[
+                "cookies_earned"
+            ] = already_cookies + to_give  # 💬 сохраняем кап по фазе
+
+            xp_all[str(user_id)] = user_xp
+            save_xp_data(xp_all)
+
+        given_after = already_cookies + to_give  # 💬 для прогресс-сообщения
 
         # 💬 редко показываем прогресс внутри фазы и удаляем (каждые 6 слов = 3 фразы)
-        if given_after % 6 == 0:
+        if to_give > 0 and given_after % 6 == 0:
             asyncio.create_task(
                 send_and_auto_delete_text(
                     bot,
@@ -9176,9 +9189,10 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
                 )
             )
 
-        # 💬 показываем мотивацию + сколько «печенька» дала слов за этот текстквиз
+        # 💬 показываем мотивацию, печеньки показываем только если реально начислили
+        extra_lines = f"\n🍪 +{to_give}\n📚 +{to_give} слов" if to_give > 0 else ""
         extra_fb = await message.answer(
-            f"{random.choice(vocab_quiz_success_phrases)}\n🍪 +{to_give}\n📚 +{to_give} слов",
+            f"{random.choice(vocab_quiz_success_phrases)}{extra_lines}",
             parse_mode="HTML"
         )
 
