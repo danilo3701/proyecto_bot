@@ -5739,10 +5739,9 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
                 except Exception:
                     pass
 
-        try:
-            await callback.message.delete()  # 💬 удаляем меню с кнопками (если оно другое)
-        except Exception:
-            pass
+        # 💬 НЕ удаляем callback.message: мы будем редактировать его в экран видео,
+        # иначе edit_text даст "message to edit not found"
+
 
         await state.update_data(menu_hidden=True)  # 💬 меню спрятано перед показом видео
 
@@ -5774,6 +5773,16 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
         else:
             link = str(video_item)
 
+        # 💬 нормализуем ссылку: iframe → src, чистим теги/кавычки
+        raw_link = (link or "").strip()
+        if "<iframe" in raw_link:
+            m = re.search(r'src="([^"]+)"', raw_link)
+            raw_link = (m.group(1).strip() if m else "")
+        raw_link = re.sub(r"<[^>]+>", "", raw_link).strip()
+        raw_link = raw_link.replace('"', "").replace("'", "")
+        link = raw_link  # 💬 итоговая ссылка для href
+
+
         # 💬 title всегда авто, не используем сохранённый title
         title = f"📺 Video {idx + 1}"
 
@@ -5798,7 +5807,17 @@ async def lex_lesson_menu_inline(callback: CallbackQuery, state: FSMContext):
         )
 
 
-        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        if not link.startswith("http"):
+            # 💬 если ссылка кривая = не падаем, показываем причину и возвращаем в меню
+            await callback.message.answer("❌ Ссылка на видео некорректна")
+            return await lesson_menu_handler(callback.message, state)
+
+        try:
+            await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            # 💬 fallback: если edit невозможен — отправляем новым сообщением
+            await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
+
         # 💬 состояние остаётся LessonStates.waiting_lesson_action,
         # прогресс по видео обновим при нажатии на «✅»
         return
