@@ -6224,6 +6224,18 @@ async def lex_read_nav(cb: CallbackQuery, state: FSMContext):
 
     await state.update_data(lex_rd_item_idx=idx)
     await cb.message.edit_text(_lex_render_read_fragment(frags[idx]), reply_markup=_lex_kb_read_controls(), parse_mode="HTML")
+    if idx == len(frags) - 1:
+        try:
+            emoji = random.choice(["👏", "🙊", "⚡️", "🔥", "🐸", "💩", "☕️", "🍩","🍺"])
+            await bot.set_message_reaction(
+                chat_id=cb.message.chat.id,
+                message_id=cb.message.message_id,
+                reaction=[ReactionTypeEmoji(emoji=emoji)],
+                is_big=True
+            )  # 💬 реакция = маркер конца чтения
+        except Exception:
+            pass
+
 
 @dp.callback_query(LessonStates.waiting_lesson_action, F.data == "lex_rd:menu")
 @track_handler
