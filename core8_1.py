@@ -3063,6 +3063,22 @@ async def menu_handler(message: Message, state: FSMContext):
     # 💬 Возвращает пользователя к выбору категории
     await start_handler(message, state)
 
+@dp.message(Command("lex_unlock"))
+@track_handler
+async def lex_unlock_handler(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return  # 💬 чит-код только для админа
+
+    data = load_user_data()
+    u = data.setdefault(str(message.from_user.id), {})
+    cur = bool(u.get("lex_admin_unlock", False))
+    u["lex_admin_unlock"] = not cur  # 💬 тумблер: включить или выключить
+    save_user_data(data)
+
+    if u["lex_admin_unlock"]:
+        await message.answer("✅ Админ-доступ включён = разделы в лексике открыты без 70%")  # 💬 подтверждение
+    else:
+        await message.answer("🔒 Админ-доступ выключен = снова работает ограничение 70%")  # 💬 подтверждение
 
 
 @dp.message(Command("stats"))
@@ -3617,7 +3633,7 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
 
     await query.message.answer(
         "🔒 Для бесплатного доступа\n"
-        "👇🏼 Подпишись на спонсорские каналы:",  # 💬 оффер 3-дневного доступа
+        "☺️ Подпишись на канал и открой доступ к темам:",  # 💬 дружеский оффер доступа
         reply_markup=check_subscription_kb(topic_key, required),
     )
 
@@ -4990,6 +5006,12 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     # 💬 Разблокирование считаем ниже по прогрессу «Учить слова» (фазы)
     unlocked = data.get("unlocked", False)
 
+    # 💬 админ-override: открывает locked-разделы, но НЕ сохраняет unlocked в topic_summary
+    _ud = load_user_data()
+    admin_unlock = bool((_ud.get(str(message.chat.id), {}) or {}).get("lex_admin_unlock", False))
+    unlocked_ui = unlocked or admin_unlock  # 💬 только для отображения и кнопок
+
+
 
     # 💬 Для отображения
     display_threshold = (xp_threshold // 10) * 10
@@ -5363,7 +5385,8 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
 
     # 💬 блокировка внизу + компактно (и только если ещё не unlocked)
-    if not unlocked:
+    if not unlocked_ui:  # 💬 учитываем админ-override
+
         tail_lines: list[str] = [
             "🔐 <b><i>Набери минимум 70% 📖</i></b>",
             "🎀 <b><i>И разблокируй остальные</i></b>",
@@ -5390,7 +5413,8 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         has_videos = total_video > 0
         has_translate = len(topic.get("translate", []) or []) > 0  # 💬 если нет раздела «Переводить» = кнопку не показываем
 
-        if unlocked:
+        if unlocked_ui:  # 💬 учитываем админ-override
+
             # 💬 Строим ряды так, чтобы КАЖДАЯ кнопка была на своей строке (полная ширина)
             rows = [
                 [InlineKeyboardButton(text="📖 Учить слова", callback_data="lex_menu:learn")],
