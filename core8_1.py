@@ -1893,6 +1893,10 @@ async def start_handler(message: Message, state: FSMContext):
     # 💬 Получаем или создаём запись для этого user_id
     u         = user_data.setdefault(user_id, {})
 
+    if message.from_user.id == ADMIN_CHAT_ID:
+        u["lex_admin_unlock"] = False  # 💬 при /start сбрасываем админ-разблокировку (чтобы не оставалась навсегда)
+
+
     # 💬 Сохраняем полное имя
     u.setdefault("name", message.from_user.full_name or "")
     # 💬 Сохраняем Telegram-username
@@ -3079,6 +3083,8 @@ async def lex_unlock_handler(message: Message, state: FSMContext):
         await message.answer("✅ Админ-доступ включён = разделы в лексике открыты без 70%")  # 💬 подтверждение
     else:
         await message.answer("🔒 Админ-доступ выключен = снова работает ограничение 70%")  # 💬 подтверждение
+
+    await lesson_menu_handler(message, state)  # 💬 сразу перерисовываем меню темы с учётом lex_admin_unlock
 
 
 @dp.message(Command("stats"))
