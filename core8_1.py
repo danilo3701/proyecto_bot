@@ -2174,6 +2174,13 @@ async def level_chosen(callback: CallbackQuery, state: FSMContext):
 
     await state.update_data(chosen_level=level)
 
+    # 💬 Временно отключаем грамматику: после выбора уровня сразу показываем темы лексики
+    await state.update_data(chosen_category="lex")  # 💬 фиксируем категорию, чтобы дальше не было «Лексика/Грамматика»
+    await show_topics_for_category_level(callback, state, category="lex", level=level)  # 💬 сразу экран тем
+    await callback.answer()
+    return
+
+    '''
     # 💬 После выбора уровня показываем выбор «Лексика / Грамматика» внутри этого уровня
     inline_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -2199,7 +2206,7 @@ async def level_chosen(callback: CallbackQuery, state: FSMContext):
 
     await state.set_state(LessonStates.choosing_subcategory)
     await callback.answer()
-
+    '''
 
 
 async def show_topics_for_category_level(callback: CallbackQuery, state: FSMContext, category: str, level: str):
