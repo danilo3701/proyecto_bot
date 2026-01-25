@@ -2451,9 +2451,8 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
         return await bonuses_open(callback.message, state)  # 💬 открываем «Бонусы»
 
     if action == "podcasts":
-        await callback.answer()  # 💬 обязательно отвечаем на callback, чтобы не было Telegram timeout
-        await podcasts_open(callback.message, state)  # 💬 открываем подкасты (авторы -> эпизоды)
-        return
+        return await podcasts_open(callback, state)  # 💬 открываем подкасты (авторы -> эпизоды)
+
 
 
 
