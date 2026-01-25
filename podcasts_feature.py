@@ -237,12 +237,33 @@ def _ensure_podcasts_file() -> None:
 
 
 def _read_podcasts() -> Dict[str, Any]:
-    _ensure_podcasts_file()
+    # 💬 Всегда возвращаем dict правильной формы, чтобы нигде не падало на .get(...)
     try:
-        with PODCASTS_FILE.open("r", encoding="utf-8") as f:
-            return json.load(f)
+        if not os.path.exists(PODCASTS_JSON_PATH):
+            return {"authors": {}, "episodes": {}}
+
+        with open(PODCASTS_JSON_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+
+        if not isinstance(raw, dict):
+            # 💬 если вдруг файл стал списком или строкой
+            return {"authors": {}, "episodes": {}}
+
+        raw.setdefault("authors", {})
+        raw.setdefault("episodes", {})
+
+        # 💬 защита от некорректных типов внутри
+        if not isinstance(raw.get("authors"), dict):
+            raw["authors"] = {}
+        if not isinstance(raw.get("episodes"), dict):
+            raw["episodes"] = {}
+
+        return raw
+
     except Exception:
+        logging.exception("podcasts: failed to read podcasts json")
         return {"authors": {}, "episodes": {}}
+
 
 
 def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
@@ -453,22 +474,36 @@ def _episodes_menu_html(author_name: str, level_key: Optional[str] = None, topic
 # -----------------------------
 # 🎛️ UI builders
 # -----------------------------
-def _kb_authors(data: Dict[str, Any]) -> InlineKeyboardMarkup:
-    authors = data.get("authors", {})
-    items = sorted(authors.items(), key=lambda x: (x[1].get("order", 9999), x[1].get("name", "")))
+def _kb_authors(data: Any) -> InlineKeyboardMarkup:
+    # 💬 Принимаем только dict-форму, но без падений если прилетело не то
+    kb = InlineKeyboardBuilder()
 
-    rows = []
-    for aid, a in items:
-        rows.append([InlineKeyboardButton(text=f"🎙 {a.get('name','Автор')}", callback_data=f"pod:author:{aid}")])
+    if not isinstance(data, dict):
+        data = {"authors": {}, "episodes": {}}
 
-    if not rows:
-        rows = [[InlineKeyboardButton(text="(пусто)", callback_data="pod:noop")]]
+    authors = data.get("authors") or {}
+    if not isinstance(authors, dict):
+        authors = {}
 
-    rows.append([InlineKeyboardButton(text="⭐ Мои заметки", callback_data="pod:notes")])  # 💬 открыть сохранённые заметки из подкастов
+    # 💬 сортировка: order, затем name
+    def _sort_key(item):
+        _aid, author = item
+        if not isinstance(author, dict):
+            return (999999, "")
+        return (int(author.get("order") or 999999), (author.get("name") or "").lower())
 
+    for author_id, author in sorted(authors.items(), key=_sort_key):
+        if not isinstance(author, dict):
+            continue
 
-    rows.append([InlineKeyboardButton(text="🏠 В меню", callback_data="back_to_menu")])  # 💬 выход в главное меню без тупика
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+        author_name = (author.get("name") or f"Автор {author_id}").strip()
+        kb.button(text=f"🎙️ {author_name}", callback_data=f"pod:author:{author_id}")
+
+    kb.button(text="🏠 В меню", callback_data="back_to_menu")
+    kb.adjust(1)
+
+    return kb.as_markup()
+
 def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None, topic_key: str = None, page: int = 0) -> InlineKeyboardMarkup:
     episodes = data.get("episodes") or {}
     premium_active = _premium_active(user_id)
@@ -748,48 +783,37 @@ def _format_fragment(es: str, ru: str, hint: str = "") -> str:
 @router.callback_query(F.data == "podcasts_open")
 async def podcasts_open(callback: CallbackQuery, state: FSMContext):
     _require_init()
+    user_id = callback.from_user.id
 
+    # 💬 фиксируем экран и чистим фильтры
     await state.update_data(
-        pod_ctx=True,
         pod_screen="authors",
-        pod_wait_filter=False,
-        pod_filter=None,
-        pod_level_filter=None,
-        pod_topic_filter=None,
-        pod_active_author_id=None,
-        pod_active_episode_id=None,
+        pod_author=None,
+        pod_filter_level=None,
+        pod_filter_topic=None,
+        pod_ep_page=0,
     )
 
-    subscribed = await _is_subscribed_main_channel(callback.from_user.id)
-
     try:
-        if not subscribed:
-            await callback.message.edit_text(
-                "🎧 ПОДКАСТЫ\n\n"
-                "Чтобы открыть подкасты, нужно быть подписанным на канал.\n\n"
-                "После подписки нажми кнопку ниже = проверить",
-                reply_markup=_kb_subscribe_check(),
-                parse_mode="HTML",
-            )
-            return
-
         data = _read_podcasts()
-        authors = sorted(list((data.get("authors") or {}).values()), key=lambda a: (a.get("name") or "").lower())
 
         await callback.message.edit_text(
-            "🎧 ПОДКАСТЫ\n\nВыбери автора",
-            reply_markup=_kb_authors(authors),
-            parse_mode="HTML",
+            "🎙️ <b>Подкасты</b>\n\nВыбери автора",
+            reply_markup=_kb_authors(data),  # 💬 важно: передаём data, а не list
+            parse_mode="HTML"
         )
-        await state.update_data(pod_nav_msg_id=callback.message.message_id)
+        await callback.answer()
 
     except Exception:
-        msg = await callback.message.answer(
-            "🎧 ПОДКАСТЫ\n\nВыбери автора",
-            reply_markup=_kb_authors(sorted(list((_read_podcasts().get("authors") or {}).values()), key=lambda a: (a.get("name") or "").lower())),
-            parse_mode="HTML",
+        logging.exception("podcasts_open failed")
+        data = _read_podcasts()
+        await callback.message.answer(
+            "🎙️ <b>Подкасты</b>\n\nВыбери автора",
+            reply_markup=_kb_authors(data),
+            parse_mode="HTML"
         )
-        await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 если edit невозможен
+        await callback.answer()
+
 
 
 @router.callback_query(F.data == "pod:checksub")
