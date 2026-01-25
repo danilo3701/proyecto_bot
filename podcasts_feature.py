@@ -94,6 +94,16 @@ def init_podcasts_feature(
     _ensure_podcasts_file()
     _ensure_podcast_notes_dir()  # 💬 гарантируем папку для заметок подкастов
 
+FREE_PODCASTS_LIMIT = int(os.getenv("FREE_PODCASTS_LIMIT", "10"))
+
+DEFAULT_PREMIUM_LINKS = {
+    "week": os.getenv("PREMIUM_PAYLINK_WEEK", "https://buy.stripe.com/00wfZia9Eeby65JefbbbG0b"),
+    "month": os.getenv("PREMIUM_PAYLINK_MONTH", "https://buy.stripe.com/bJeeVe1D8ffC0Lpc73bbG0a"),
+    "year": os.getenv("PREMIUM_PAYLINK_YEAR", "https://buy.stripe.com/bJefZi3LgaZmcu74EBbbG0c"),
+}
+
+_is_premium_active: Optional[Callable[[int], bool]] = None
+_premium_links: Dict[str, str] = dict(DEFAULT_PREMIUM_LINKS)
 
 
 # -----------------------------
