@@ -94,6 +94,26 @@ def init_podcasts_feature(
     _ensure_podcasts_file()
     _ensure_podcast_notes_dir()  # 💬 гарантируем папку для заметок подкастов
 
+def _require_init() -> None:
+    # 💬 Минимальная и безопасная инициализация на входе в подкасты
+    # 💬 Гарантируем папки и базовый JSON, чтобы не падать в рантайме
+
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    try:
+        _ensure_podcasts_file()
+    except Exception:
+        pass
+
+    try:
+        _ensure_podcast_notes_dir()
+    except Exception:
+        pass
+
+
 FREE_PODCASTS_LIMIT = int(os.getenv("FREE_PODCASTS_LIMIT", "10"))
 
 DEFAULT_PREMIUM_LINKS = {
