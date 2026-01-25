@@ -106,6 +106,57 @@ _is_premium_active: Optional[Callable[[int], bool]] = None
 _premium_links: Dict[str, str] = dict(DEFAULT_PREMIUM_LINKS)
 
 
+
+PREMIUM_ACCESS_PATH = os.getenv("PREMIUM_ACCESS_PATH", str(DATA_DIR / "premium_access.json"))  # 💬 файл, куда пишет Stripe webhook
+
+def _premium_active(user_id: int) -> bool:
+    # 💬 проверяем Premium через DI из core, иначе читаем premium_access.json
+    if callable(_is_premium_active):
+        try:
+            return bool(_is_premium_active(user_id))
+        except Exception:
+            return False
+
+    try:
+        with open(PREMIUM_ACCESS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+        row = data.get(str(user_id), {})
+        if isinstance(row, dict):
+            until_ts = int(row.get("active_until", 0) or 0)
+        else:
+            until_ts = int(row or 0)
+        return until_ts > int(time.time())
+    except Exception:
+        return False
+
+def _premium_paywall_text() -> str:
+    # 💬 текст для предупреждения, отдельным сообщением (его потом удалим)
+    return (
+        "🔒 <b>Этот эпизод доступен в Premium</b>\n\n"
+        "Оплати по ссылке, затем вернись сюда и нажми <b>Проверить Premium</b>"
+    )
+
+def _kb_premium_paywall() -> InlineKeyboardMarkup:
+    # 💬 кнопки оплаты + проверка + назад (назад удаляет это сообщение)
+    week = _premium_links.get("week")
+    month = _premium_links.get("month")
+    year = _premium_links.get("year")
+
+    rows: List[List[InlineKeyboardButton]] = []
+    pay_row: List[InlineKeyboardButton] = []
+    if week:
+        pay_row.append(InlineKeyboardButton(text="Premium 1 неделя", url=week))
+    if month:
+        pay_row.append(InlineKeyboardButton(text="Premium 1 месяц", url=month))
+    if year:
+        pay_row.append(InlineKeyboardButton(text="Premium 1 год", url=year))
+    if pay_row:
+        rows.append(pay_row)
+
+    rows.append([InlineKeyboardButton(text="✅ Проверить Premium", callback_data="pod:premium_check")])
+    rows.append([InlineKeyboardButton(text="👈 Назад", callback_data="pod:premium_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 # -----------------------------
 # 🧠 FSM для админки
 # -----------------------------
@@ -378,15 +429,26 @@ def _kb_authors(data: Dict[str, Any]) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton(text="🏠 В меню", callback_data="back_to_menu")])  # 💬 выход в главное меню без тупика
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-
 def _kb_episodes(
     data: Dict[str, Any],
+    user_id: int,
     author_id: str,
     level_key: Optional[str] = None,
     topic_key: Optional[str] = None,
     page: int = 0,
 ) -> InlineKeyboardMarkup:
     # 💬 клавиатура эпизодов с фильтрами (уровень + тема), reset и пагинацией
+    premium_active = _premium_active(user_id)  # 💬 Premium активен = открываем все эпизоды
+
+    def _lock_title(s: str) -> str:
+        # 💬 меняем первый токен (эмодзи/слово) на 🔒
+        s = (s or "").strip()
+        if not s:
+            return "🔒 Эпизод"
+        parts = s.split()
+        if len(parts) <= 1:
+            return f"🔒 {s}"
+        return "🔒 " + " ".join(parts[1:])
 
     def _episode_topic_key(ep: Dict[str, Any]) -> Optional[str]:
         # 💬 topic берём из ep["topic_key"] или маппим из старого ep["category"]
@@ -404,6 +466,86 @@ def _kb_episodes(
         if cat == "news":
             return "D"  # 💬 новости считаем частью D
         return None
+
+    def _episode_level_key(ep: Dict[str, Any]) -> Optional[str]:
+        # 💬 level берём из ep["level_key"], иначе пытаемся угадать по заголовку (A1/A2/B1/B2/C1)
+        lk = (ep.get("level_key") or "").strip().upper()
+        if lk in {"B", "X1", "X2"}:
+            return lk
+
+        title = (ep.get("title") or "").upper()
+        found = re.findall(r"\b(A0|A1|A2|B1|B2|C1|C2)\b", title)
+        found = set(found)
+
+        if found & {"B2", "C1", "C2"}:
+            return "X2"
+        if found & {"A2", "B1"}:
+            return "X1"
+        if found & {"A0", "A1"}:
+            return "B"
+        return None
+
+    def _filtered_items() -> List[Tuple[str, Dict[str, Any]]]:
+        eps = data.get("episodes", {})
+        items = [(eid, e) for eid, e in eps.items() if e.get("author_id") == author_id]
+        items.sort(key=lambda x: x[1].get("order", 9999))
+
+        if not level_key and not topic_key:
+            return items
+
+        out: List[Tuple[str, Dict[str, Any]]] = []
+        for eid, e in items:
+            if level_key and _episode_level_key(e) != level_key:
+                continue
+            if topic_key and _episode_topic_key(e) != topic_key:
+                continue
+            out.append((eid, e))
+        return out
+
+    items = _filtered_items()
+
+    rows: List[List[InlineKeyboardButton]] = []
+
+    is_filtered = bool(level_key or topic_key)
+    if is_filtered:
+        rows.append([InlineKeyboardButton(text="🧹 СБРОСИТЬ ФИЛЬТР", callback_data="pod:filter_reset")])  # 💬 кнопка появляется только при фильтре
+
+    if not items:
+        rows.append([InlineKeyboardButton(text="(ничего не найдено)", callback_data="pod:noop")])  # 💬 безопасный пустой результат
+        rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    PER_PAGE = 8
+    total = len(items)
+    pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
+    page = max(0, min(page, pages - 1))
+
+    start = page * PER_PAGE
+    end = start + PER_PAGE
+    chunk = items[start:end]
+
+    for offset, (eid, e) in enumerate(chunk):
+        abs_idx = start + offset  # 💬 индекс в общем списке (важно для лимита 10)
+        title = e.get("title", "🎧 Эпизод")
+        if (not premium_active) and abs_idx >= FREE_PODCASTS_LIMIT:
+            rows.append([InlineKeyboardButton(text=_lock_title(title), callback_data=f"pod:locked:{eid}")])  # 💬 замок вместо эмодзи
+        else:
+            rows.append([InlineKeyboardButton(text=title, callback_data=f"pod:ep:{eid}")])
+
+    if pages > 1:
+        prev_cb = "pod:ep_page_prev" if page > 0 else "pod:noop"
+        next_cb = "pod:ep_page_next" if page < (pages - 1) else "pod:noop"
+        rows.append(
+            [
+                InlineKeyboardButton(text="◀️", callback_data=prev_cb),
+                InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="pod:noop"),
+                InlineKeyboardButton(text="▶️", callback_data=next_cb),
+            ]
+        )  # 💬 пагинация по 8 кнопок
+
+    rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 
     def _episode_level_key(ep: Dict[str, Any]) -> Optional[str]:
         # 💬 level берём из ep["level_key"], иначе пытаемся угадать по заголовку (A1/A2/B1/B2/C1)
@@ -558,7 +700,7 @@ def _format_fragment(es: str, ru: str, hint: str = "") -> str:
 
 
 
-
+'''
 # -----------------------------
 # 👤 USER FLOW
 # -----------------------------
@@ -583,6 +725,7 @@ async def podcasts_open(message: Message, state: FSMContext) -> None:
         pod_frag_msg_id=None,
         pod_nav_msg_id=None,
         pod_hint_msg_id=None,
+        pod_premium_msg_id=None,  # 💬 id предупреждения Premium, чтобы удалять без мусора
         pod_audio_msg_id=None,  # 💬 id аудио текущего эпизода
         pod_filter_level=None,  # 💬 фильтр уровня (B/X1/X2)
         pod_filter_topic=None,  # 💬 фильтр темы (C/D/G)
@@ -597,6 +740,8 @@ async def podcasts_open(message: Message, state: FSMContext) -> None:
     except Exception:
         msg = await message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
         await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 если edit невозможен
+        '''
+
 
 @router.callback_query(F.data == "pod:checksub")
 async def pod_checksub(cb: CallbackQuery, state: FSMContext) -> None:
@@ -776,13 +921,13 @@ async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
     try:
         await cb.message.edit_text(
             text,
-            reply_markup=_kb_episodes(data, author_id, None, None, 0),
+            reply_markup=_kb_episodes(data, cb.from_user.id, author_id, None, None, 0),
             parse_mode="HTML",
         )
     except Exception:
         msg = await cb.message.answer(
             text,
-            reply_markup=_kb_episodes(data, author_id, None, None, 0),
+            reply_markup=_kb_episodes(data, cb.from_user.id, author_id, None, None, 0),
             parse_mode="HTML",
         )
         await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 fallback
@@ -815,7 +960,7 @@ async def pod_filter_reset(cb: CallbackQuery, state: FSMContext) -> None:
     try:
         await cb.message.edit_text(
             text,
-            reply_markup=_kb_episodes(data, author_id, None, None, 0),
+            reply_markup=_kb_episodes(data, cb.from_user.id, author_id, None, None, 0),
             parse_mode="HTML",
         )
     except Exception:
@@ -858,7 +1003,7 @@ async def pod_ep_page_nav(cb: CallbackQuery, state: FSMContext) -> None:
     try:
         await cb.message.edit_text(
             text,
-            reply_markup=_kb_episodes(data, author_id, level_key, topic_key, page),
+            reply_markup=_kb_episodes(data, cb.from_user.id, author_id, level_key, topic_key, page),
             parse_mode="HTML",
         )
     except Exception:
@@ -945,12 +1090,89 @@ async def pod_filter_input(message: Message, state: FSMContext) -> None:
             chat_id=message.chat.id,
             message_id=int(nav_msg_id),
             text=text,
-            reply_markup=_kb_episodes(data, author_id, level_key, topic_key, 0),
+            reply_markup=_kb_episodes(data, message.from_user.id, author_id, level_key, topic_key, 0),
             parse_mode="HTML",
         )
     except Exception:
         pass
 
+
+
+@router.callback_query(F.data.startswith("pod:locked:"))
+async def pod_episode_locked(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 показываем paywall отдельным сообщением, чтобы потом удалить без мусора
+    st = await state.get_data()
+    if not st.get("pod_ctx") or st.get("pod_screen") != "episodes":
+        await cb.answer()
+        return
+
+    if _premium_active(cb.from_user.id):
+        await cb.answer("✅ Premium активен. Нажми эпизод ещё раз.", show_alert=True)
+        return
+
+    old_id = st.get("pod_premium_msg_id")
+    if old_id:
+        await _safe_delete_message(cb.bot, cb.message.chat.id, int(old_id))  # 💬 удаляем старое предупреждение
+        await state.update_data(pod_premium_msg_id=None)
+
+    msg = await cb.message.answer(
+        _premium_paywall_text(),
+        reply_markup=_kb_premium_paywall(),
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
+    await state.update_data(pod_premium_msg_id=msg.message_id)
+    await cb.answer()
+
+@router.callback_query(F.data == "pod:premium_back")
+async def pod_premium_back(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 закрываем paywall и удаляем сообщение
+    await state.update_data(pod_premium_msg_id=None)
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+    await cb.answer()
+
+@router.callback_query(F.data == "pod:premium_check")
+async def pod_premium_check(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 проверка Premium, затем обновляем список эпизодов (снимаем замки)
+    st = await state.get_data()
+    ok = _premium_active(cb.from_user.id)
+
+    if not ok:
+        await cb.answer("⏳ Premium ещё не активен. Попробуй ещё раз через немного.", show_alert=True)
+        return
+
+    await state.update_data(pod_premium_msg_id=None)
+    try:
+        await cb.message.delete()  # 💬 удаляем предупреждение
+    except Exception:
+        pass
+
+    author_id = st.get("pod_author_id")
+    nav_msg_id = st.get("pod_nav_msg_id")
+    level_key = st.get("pod_filter_level")
+    topic_key = st.get("pod_filter_topic")
+    page = int(st.get("pod_ep_page") or 0)
+
+    if author_id and nav_msg_id:
+        data = _read_podcasts()
+        author = data.get("authors", {}).get(author_id, {})
+        author_name = author.get("name", "Автор")
+        text = _episodes_menu_html(author_name, level_key, topic_key)
+        try:
+            await cb.bot.edit_message_text(
+                chat_id=cb.message.chat.id,
+                message_id=int(nav_msg_id),
+                text=text,
+                reply_markup=_kb_episodes(data, cb.from_user.id, author_id, level_key, topic_key, page),
+                parse_mode="HTML",
+            )  # 💬 обновили список без замков
+        except Exception:
+            pass
+
+    await cb.answer("✅ Premium активен", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("pod:ep:"))
@@ -960,6 +1182,11 @@ async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
     data = _read_podcasts()
     ep = data.get("episodes", {}).get(ep_id)
     st = await state.get_data()  # 💬 берём прошлые msg_id (аудио/прочее) для чистки
+
+    prem_id = st.get("pod_premium_msg_id")
+    if prem_id:
+        await _safe_delete_message(cb.bot, cb.message.chat.id, int(prem_id))  # 💬 убираем paywall, если пользователь пошёл дальше
+        await state.update_data(pod_premium_msg_id=None)
 
 
     if not ep:
@@ -1053,7 +1280,7 @@ async def pod_back_inline(cb: CallbackQuery, state: FSMContext) -> None:
         msg = await cb.bot.send_message(
             chat_id=cb.message.chat.id,
             text=text,
-            reply_markup=_kb_episodes(data, author_id, level_key, topic_key, page),
+            reply_markup=_kb_episodes(data, cb.from_user.id, author_id, level_key, topic_key, page),
             parse_mode="HTML",
         )  # 💬 возвращаем список эпизодов без мусора
 
