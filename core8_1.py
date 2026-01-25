@@ -2180,6 +2180,12 @@ async def level_chosen(callback: CallbackQuery, state: FSMContext):
 
     # 💬 Временно отключаем грамматику: после выбора уровня сразу показываем темы лексики
     await state.update_data(chosen_category="lex")  # 💬 фиксируем категорию, чтобы дальше не было «Лексика/Грамматика»
+    await state.update_data(
+        topics_page=0,               # 💬 что делает эта часть: новый уровень = всегда с 1 страницы
+        topics_nav_category="lex",   # 💬 фиксируем контекст пагинации
+        topics_nav_level=level,      # 💬 фиксируем контекст пагинации
+    )
+
     await show_topics_for_category_level(callback, state, category="lex", level=level)  # 💬 сразу экран тем
     await callback.answer()
     return
@@ -2273,13 +2279,47 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
         # 💬 Если тем нет — возвращаем пользователя в стартовое меню
         return await start_handler(message, state)
 
-    # 💬 По одной теме в строке
-    inline_keyboard = [[btn] for btn in buttons]
+    # 💬 что делает эта часть: берём текущую страницу из state и сбрасываем, если изменились category/level
+    st = await state.get_data()
+    page = int(st.get("topics_page") or 0)
+    if st.get("topics_nav_category") != category or st.get("topics_nav_level") != level:
+        page = 0  # 💬 новый фильтр = начинаем с 1 страницы
 
-    # 💬 Добавляем кнопку «НАЗАД» в конец списка тем
+    PER_PAGE = 6  # 💬 2 кнопки × 3 строки
+    total = len(buttons)
+    pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
+    page = max(0, min(page, pages - 1))  # 💬 защита от выхода за пределы
+
+    await state.update_data(
+        topics_nav_category=category,  # 💬 чтобы пагинация знала, что мы листаем
+        topics_nav_level=level,        # 💬 чтобы пагинация знала, что мы листаем
+        topics_page=page,              # 💬 текущая страница
+    )
+
+    start_i = page * PER_PAGE
+    chunk = buttons[start_i:start_i + PER_PAGE]
+
+    inline_keyboard = []
+    for i in range(0, len(chunk), 2):
+        row = [chunk[i]]
+        if i + 1 < len(chunk):
+            row.append(chunk[i + 1])
+        inline_keyboard.append(row)  # 💬 2 кнопки в строке
+
+    if pages > 1:
+        prev_cb = "topics:prev" if page > 0 else "topics:noop"
+        next_cb = "topics:next" if page < (pages - 1) else "topics:noop"
+        inline_keyboard.append(
+            [
+                InlineKeyboardButton(text="◀️", callback_data=prev_cb),
+                InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="topics:noop"),
+                InlineKeyboardButton(text="▶️", callback_data=next_cb),
+            ]
+        )  # 💬 переключалка страниц как в подкастах
+
     inline_keyboard.append(
         [InlineKeyboardButton(text="👈 НАЗАД", callback_data="topic_back")]
-    )
+    )  # 💬 возврат к выбору уровня
 
     inline_kb = InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
@@ -3789,6 +3829,45 @@ async def cb_back_to_topics(callback: CallbackQuery, state: FSMContext):
 
     # 💬 Возвращаемся в стартовый поток (главное меню)
     await start_handler(callback.message, state)
+
+
+@dp.callback_query(StateFilter(LessonStates.choosing_topic), F.data.in_(["topics:prev", "topics:next", "topics:noop"]))
+@track_handler
+async def topics_page_nav(callback: CallbackQuery, state: FSMContext):
+    # 💬 что делает эта часть: листаем страницы тем (2×3), защищаемся от спама кликов
+    if callback.data == "topics:noop":
+        await callback.answer()
+        return
+
+    st = await state.get_data()
+
+    # 💬 анти-спам кликов (чтобы не ловить TelegramBadRequest на серии edit_text)
+    try:
+        now = time.time()
+        last = float(st.get("topics_nav_ts") or 0)
+        if now - last < 0.6:
+            await callback.answer()
+            return
+        await state.update_data(topics_nav_ts=now)
+    except Exception:
+        pass
+
+    page = int(st.get("topics_page") or 0)
+    if callback.data == "topics:prev":
+        page = max(0, page - 1)
+    else:
+        page = page + 1
+
+    await state.update_data(topics_page=page)
+
+    category = st.get("topics_nav_category") or st.get("chosen_category") or "lex"
+    level = st.get("topics_nav_level") or st.get("chosen_level")
+    if not level:
+        await callback.answer()
+        return await start_handler(callback.message, state)
+
+    await show_topics_for_category_level(callback, state, category=category, level=level)  # 💬 show сам сделает clamp page
+    await callback.answer()
 
 
 @dp.callback_query(StateFilter(LessonStates.choosing_topic), F.data == "topic_back")
