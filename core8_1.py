@@ -820,26 +820,18 @@ XP_DATA_PATH = "/data/xp_data.json"
 XP_DATA_PATH = "/data/xp_data.json"
 XP_DATA_BACKUP_PATH = "/data/xp_data_backup.json"  # 💬 резерв: спасает рейтинг, если основной файл сломался
 
-def _atomic_json_dump(path: str, data, **json_kwargs):
-    # 💬 атомарная запись JSON: сначала пишем во временный файл, потом заменяем основной
-    # 💬 поддержка параметров json.dump: ensure_ascii, indent, sort_keys и т.д.
-    tmp_path = path + ".tmp"
+def _atomic_json_dump(path: str, data: dict, **json_kwargs) -> None:
+    # 💬 Атомарная запись JSON + поддержка ensure_ascii/indent и любых json.dump kwargs
+    tmp_path = f"{path}.tmp"
 
-    dump_kwargs = {
-        "ensure_ascii": False,
-        "indent": 2,
-    }
-
-    if json_kwargs:
-        for k, v in json_kwargs.items():
-            if v is not None:
-                dump_kwargs[k] = v
+    # 💬 дефолты как раньше, но теперь можно переопределять при вызове
+    kwargs = {"ensure_ascii": False, "indent": 2}
+    kwargs.update(json_kwargs or {})
 
     with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, **dump_kwargs)
+        json.dump(data, f, **kwargs)
 
     os.replace(tmp_path, path)
-
 
 def load_xp_data():
     # 💬 грузим XP; если файл пропал/битый — восстанавливаем из backup, чтобы рейтинг не "обнулялся"
