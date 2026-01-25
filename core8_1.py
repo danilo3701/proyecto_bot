@@ -5002,8 +5002,9 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     )
     total_quizzes = base_quiz + inline_quiz + pool_quiz
 
-    # 💬 Порог: 30 XP × кол-во квизов × 0.8 (округление вниз десятками)
-    xp_threshold = math.floor(total_quizzes * 30 * 0.8 / 10) * 10
+    # 💬 Порог: 30 XP × кол-во квизов × 0.5 (округление вниз десятками)
+    xp_threshold = math.floor(total_quizzes * 30 * 0.5 / 10) * 10
+
     await state.update_data(
         xp_threshold=xp_threshold,
         total_quizzes=total_quizzes,  # 💬 сохраняем для прогресса по квизам
@@ -6273,42 +6274,37 @@ async def lex_read_to_menu(cb: CallbackQuery, state: FSMContext):
     await state.update_data(lex_section=None)  # 💬 выходим из «Читать»
     return await lesson_menu_handler(cb.message, state)
 
-
-@dp.callback_query(LessonStates.waiting_lesson_action, F.data == "video:done")
+@dp.callback_query(LessonStates.waiting_lesson_action, F.data == "video:next")
 @track_handler
-async def handle_video_done(callback: CallbackQuery, state: FSMContext):
+async def handle_video_next(callback: CallbackQuery, state: FSMContext):
     """
-    💬 Обработчик галочки под видео:
-        • инкрементирует video_index в state
-        • возвращает пользователя в меню урока с обновлённым прогрессом по видео
+    # 💬 Следующее видео:
+    #    1) отмечаем текущее как просмотренное (двигаем video_index)
+    #    2) удаляем старое сообщение с кнопками
+    #    3) отправляем новое сообщение со следующим видео (чистый чат)
     """
+    await callback.answer()
+
     data = await state.get_data()
     topic_key = data.get("selected_topic")
     if not topic_key:
-        await callback.answer()
         return await start_handler(callback.message, state)
 
     topic = topics.get(topic_key, {})
     videos = topic.get("videos", [])
     total_video = len(videos)
 
+    if not videos:
+        # 💬 если видео пропали = возвращаемся в меню
+        return await lesson_menu_handler(callback.message, state)
+
     dv_idx = int(data.get("video_index", 0) or 0)
 
-    if total_video:
-        # 💬 не выходим за пределы количества видео:
-        # dv_idx == total_video → все видео уже просмотрены, звёздочки полные
-        new_idx = min(dv_idx + 1, total_video)
-        await state.update_data(video_index=new_idx)
+    # 💬 сдвигаем прогресс, но не выходим за предел
+    new_idx = min(dv_idx + 1, total_video) if total_video else dv_idx
+    await state.update_data(video_index=new_idx)
 
-    await callback.answer("✅ Видео отмечено как просмотренное")
-    # 💬 Возвращаемся в меню урока — там пересчитается строка «🎬 Видео: ...»
-    return await lesson_menu_handler(callback.message, state)
-
-@dp.callback_query(LessonStates.waiting_lesson_action, F.data == "video:menu")
-@track_handler
-async def handle_video_menu(callback: CallbackQuery, state: FSMContext):
-    # 💬 Убираем кнопки под видео и возвращаем в меню урока
-    await callback.answer()
+    # 💬 чистый чат = удаляем текущее сообщение с кнопками
     try:
         await callback.message.delete()
     except Exception:
@@ -6316,7 +6312,55 @@ async def handle_video_menu(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_reply_markup(reply_markup=None)
         except Exception:
             pass
-    return await lesson_menu_handler(callback.message, state)
+
+    # 💬 если дошли до конца = показываем финал отдельным сообщением
+    if new_idx >= total_video:
+        end_kb = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🏠 В меню", callback_data="video:menu")]]
+        )
+        await callback.message.answer(
+            "✅ Все видео по этой теме отмечены как просмотренные",
+            reply_markup=end_kb
+        )
+        return
+
+    # 💬 показываем следующее видео новым сообщением (а не edit_text)
+    video = videos[new_idx]
+
+    link = ""
+    title = ""
+    if isinstance(video, dict):
+        title = (video.get("title") or "").strip()
+        link = (video.get("link") or video.get("url") or "").strip()
+    else:
+        link = str(video or "").strip()
+
+    if not title:
+        title = f"📺 Video {new_idx + 1}"
+
+    if not link:
+        # 💬 если ссылка пустая = не падаем, уводим в меню
+        return await lesson_menu_handler(callback.message, state)
+
+    cta = random.choice(link_cta_phrases)
+    text = f'📺 <b>{title}</b>\n👉 <a href="{link}"><b>{cta}</b></a>'
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Просмотрено", callback_data="video:done"),
+                InlineKeyboardButton(text="➡️ Следующее видео", callback_data="video:next"),
+            ],
+            [InlineKeyboardButton(text="🏠 В меню", callback_data="video:menu")],
+        ]
+    )
+
+    await callback.message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=kb,
+        disable_web_page_preview=True
+    )
 
 
 @dp.callback_query(LessonStates.waiting_lesson_action, F.data == "video:next")
