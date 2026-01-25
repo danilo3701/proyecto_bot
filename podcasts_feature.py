@@ -110,24 +110,45 @@ _premium_links: Dict[str, str] = dict(DEFAULT_PREMIUM_LINKS)
 PREMIUM_ACCESS_PATH = os.getenv("PREMIUM_ACCESS_PATH", str(DATA_DIR / "premium_access.json"))  # 💬 файл, куда пишет Stripe webhook
 
 def _premium_active(user_id: int) -> bool:
-    # 💬 проверяем Premium через DI из core, иначе читаем premium_access.json
+    # 💬 если кто то снаружи подал DI чекер = используем его
     if callable(_is_premium_active):
         try:
             return bool(_is_premium_active(user_id))
         except Exception:
-            return False
+            pass
 
-    try:
-        with open(PREMIUM_ACCESS_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f) or {}
-        row = data.get(str(user_id), {})
-        if isinstance(row, dict):
-            until_ts = int(row.get("active_until", 0) or 0)
-        else:
-            until_ts = int(row or 0)
-        return until_ts > int(time.time())
-    except Exception:
-        return False
+    # 💬 поддержка 2 схем
+    # premium_access.json = until_ts
+    # premium_users.json  = premium_until
+    candidate_paths = [
+        Path(PREMIUM_ACCESS_PATH),
+        DATA_DIR / "premium_users.json",
+        DATA_DIR / "premium_access.json",
+    ]
+
+    now = time.time()
+
+    for path in candidate_paths:
+        try:
+            if not path.exists():
+                continue
+
+            raw = path.read_text(encoding="utf-8").strip()
+            if not raw:
+                continue
+
+            data = json.loads(raw)
+            rec = data.get(str(user_id)) or {}
+
+            until_ts = int(rec.get("until_ts") or rec.get("premium_until") or 0)
+            if until_ts > now:
+                return True
+
+        except Exception:
+            continue
+
+    return False
+
 
 def _premium_paywall_text() -> str:
     # 💬 текст для предупреждения, отдельным сообщением (его потом удалим)
@@ -428,92 +449,93 @@ def _kb_authors(data: Dict[str, Any]) -> InlineKeyboardMarkup:
 
     rows.append([InlineKeyboardButton(text="🏠 В меню", callback_data="back_to_menu")])  # 💬 выход в главное меню без тупика
     return InlineKeyboardMarkup(inline_keyboard=rows)
+def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None, topic_key: str = None, page: int = 0) -> InlineKeyboardMarkup:
+    episodes = data.get("episodes") or {}
+    premium_active = _premium_active(user_id)
 
-def _kb_episodes(
-    data: Dict[str, Any],
-    user_id: int,
-    author_id: str,
-    level_key: Optional[str] = None,
-    topic_key: Optional[str] = None,
-    page: int = 0,
-) -> InlineKeyboardMarkup:
-    # 💬 клавиатура эпизодов с фильтрами (уровень + тема), reset и пагинацией
-    premium_active = _premium_active(user_id)  # 💬 Premium активен = открываем все эпизоды
+    PER_PAGE = 8
 
     def _lock_title(s: str) -> str:
-        # 💬 меняем первый токен (эмодзи/слово) на 🔒
         s = (s or "").strip()
         if not s:
-            return "🔒 Эпизод"
-        parts = s.split()
-        if len(parts) <= 1:
-            return f"🔒 {s}"
-        return "🔒 " + " ".join(parts[1:])
+            s = "Эпизод"
+        if len(s) > 28:
+            s = s[:27].rstrip() + "…"
+        return f"🔒 {s}"
 
-    def _episode_topic_key(ep: Dict[str, Any]) -> Optional[str]:
-        # 💬 topic берём из ep["topic_key"] или маппим из старого ep["category"]
-        t = (ep.get("topic_key") or "").strip().upper()
-        if t in {"C", "D", "G"}:
-            return t
+    def _episode_level_key(e: dict) -> str:
+        raw = (e or {}).get("level") or (e or {}).get("level_key") or (e or {}).get("lvl") or ""
+        raw = str(raw).strip().upper()
+        return raw
 
-        cat = (ep.get("category") or "").strip().lower()
-        if cat in {"grammar", "lexica"}:
-            return "G"
-        if cat == "daily":
-            return "D"
-        if cat == "talks":
-            return "C"
-        if cat == "news":
-            return "D"  # 💬 новости считаем частью D
-        return None
+    def _filtered_items() -> list:
+        items_local = []
+        for eid, e in episodes.items():
+            if level_key:
+                if _episode_level_key(e) != str(level_key).strip().upper():
+                    continue
 
-    def _episode_level_key(ep: Dict[str, Any]) -> Optional[str]:
-        # 💬 level берём из ep["level_key"], иначе пытаемся угадать по заголовку (A1/A2/B1/B2/C1)
-        lk = (ep.get("level_key") or "").strip().upper()
-        if lk in {"B", "X1", "X2"}:
-            return lk
+            if topic_key:
+                topics = (e or {}).get("topics") or (e or {}).get("topic") or []
+                if isinstance(topics, str):
+                    topics = [topics]
+                topics_norm = {str(t).strip().lower() for t in topics if str(t).strip()}
+                if str(topic_key).strip().lower() not in topics_norm:
+                    continue
 
-        title = (ep.get("title") or "").upper()
-        found = re.findall(r"\b(A0|A1|A2|B1|B2|C1|C2)\b", title)
-        found = set(found)
+            items_local.append((str(eid), e))
 
-        if found & {"B2", "C1", "C2"}:
-            return "X2"
-        if found & {"A2", "B1"}:
-            return "X1"
-        if found & {"A0", "A1"}:
-            return "B"
-        return None
+        def _sort_key(pair):
+            eid_local, e_local = pair
+            try:
+                return (int(eid_local),)
+            except Exception:
+                return (10**9, eid_local)
 
-    def _filtered_items() -> List[Tuple[str, Dict[str, Any]]]:
-        eps = data.get("episodes", {})
-        items = [(eid, e) for eid, e in eps.items() if e.get("author_id") == author_id]
-        items.sort(key=lambda x: x[1].get("order", 9999))
-
-        if not level_key and not topic_key:
-            return items
-
-        out: List[Tuple[str, Dict[str, Any]]] = []
-        for eid, e in items:
-            if level_key and _episode_level_key(e) != level_key:
-                continue
-            if topic_key and _episode_topic_key(e) != topic_key:
-                continue
-            out.append((eid, e))
-        return out
+        items_local.sort(key=_sort_key)
+        return items_local
 
     items = _filtered_items()
+    total = len(items)
+    pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
+    page = max(0, min(int(page or 0), pages - 1))
 
-    rows: List[List[InlineKeyboardButton]] = []
+    start = page * PER_PAGE
+    end = start + PER_PAGE
 
+    rows = []
     is_filtered = bool(level_key or topic_key)
-    if is_filtered:
-        rows.append([InlineKeyboardButton(text="🧹 СБРОСИТЬ ФИЛЬТР", callback_data="pod:filter_reset")])  # 💬 кнопка появляется только при фильтре
 
-    if not items:
-        rows.append([InlineKeyboardButton(text="(ничего не найдено)", callback_data="pod:noop")])  # 💬 безопасный пустой результат
-        rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])
+    if is_filtered:
+        rows.append([InlineKeyboardButton(text="🧹 СБРОСИТЬ ФИЛЬТР", callback_data="pod:filter_reset")])
+
+    if total == 0:
+        rows.append([InlineKeyboardButton(text="🔎 НИЧЕГО НЕ НАЙДЕНО", callback_data="pod:filter")])
+        rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:back_authors")])
         return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    for global_index, (eid, e) in enumerate(items[start:end], start=start):
+        title = (e or {}).get("title") or f"Эпизод {eid}"
+
+        if (global_index >= FREE_PODCASTS_LIMIT) and (not premium_active):
+            rows.append([InlineKeyboardButton(text=_lock_title(title), callback_data=f"pod:locked:{author_id}:{eid}")])
+        else:
+            rows.append([InlineKeyboardButton(text=title, callback_data=f"pod:ep:{author_id}:{eid}")])
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"pod:author:{author_id}:{page-1}"))
+    nav.append(InlineKeyboardButton(text=f"{page+1}/{pages}", callback_data="pod:filter"))
+    if page < pages - 1:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"pod:author:{author_id}:{page+1}"))
+    if nav:
+        rows.append(nav)
+
+    rows.append([InlineKeyboardButton(text="🔎 Фильтр", callback_data="pod:filter")])
+    rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:back_authors")])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 
     PER_PAGE = 8
     total = len(items)
@@ -699,48 +721,55 @@ def _format_fragment(es: str, ru: str, hint: str = "") -> str:
     return "\n".join(lines)
 
 
+# =============================================================================
+#   🟢 1) User Flow
+# =============================================================================
 
-'''
-# -----------------------------
-# 👤 USER FLOW
-# -----------------------------
-async def podcasts_open(message: Message, state: FSMContext) -> None:
-    # 💬 точка входа из core8_1.py (menu:podcasts) = заменяем главное меню, а не шлём новое
-    ok = await _is_subscribed_main_channel(message.from_user.id)
-    if not ok:
-        text = "🔒 Подкасты доступны после подписки на канал.\n\nНажми кнопку ниже, затем нажми «Проверить подписку»"
-        try:
-            await message.edit_text(text, reply_markup=_kb_subscribe_check())
-        except Exception:
-            await message.answer(text, reply_markup=_kb_subscribe_check())
-        return
+@router.callback_query(F.data == "podcasts_open")
+async def podcasts_open(callback: CallbackQuery, state: FSMContext):
+    _require_init()
 
-    data = _read_podcasts()
     await state.update_data(
         pod_ctx=True,
-        pod_author_id=None,
-        pod_ep_id=None,
-        pod_idx=0,
-        pod_notes_idx=0,  # 💬 индекс для режима "Мои заметки"
-        pod_frag_msg_id=None,
-        pod_nav_msg_id=None,
-        pod_hint_msg_id=None,
-        pod_premium_msg_id=None,  # 💬 id предупреждения Premium, чтобы удалять без мусора
-        pod_audio_msg_id=None,  # 💬 id аудио текущего эпизода
-        pod_filter_level=None,  # 💬 фильтр уровня (B/X1/X2)
-        pod_filter_topic=None,  # 💬 фильтр темы (C/D/G)
-        pod_ep_page=0,  # 💬 пагинация списка эпизодов
-        pod_screen="authors",  # 💬 текущий экран подкастов (authors/episodes/player/notes)
-
+        pod_screen="authors",
+        pod_wait_filter=False,
+        pod_filter=None,
+        pod_level_filter=None,
+        pod_topic_filter=None,
+        pod_active_author_id=None,
+        pod_active_episode_id=None,
     )
 
+    subscribed = await _is_subscribed_main_channel(callback.from_user.id)
+
     try:
-        await message.edit_text("🎧 Выбери автора:", reply_markup=_kb_authors(data))
-        await state.update_data(pod_nav_msg_id=message.message_id)  # 💬 запоминаем “главное сообщение навигации”
+        if not subscribed:
+            await callback.message.edit_text(
+                "🎧 ПОДКАСТЫ\n\n"
+                "Чтобы открыть подкасты, нужно быть подписанным на канал.\n\n"
+                "После подписки нажми кнопку ниже = проверить",
+                reply_markup=_kb_subscribe_check(),
+                parse_mode="HTML",
+            )
+            return
+
+        data = _read_podcasts()
+        authors = sorted(list((data.get("authors") or {}).values()), key=lambda a: (a.get("name") or "").lower())
+
+        await callback.message.edit_text(
+            "🎧 ПОДКАСТЫ\n\nВыбери автора",
+            reply_markup=_kb_authors(authors),
+            parse_mode="HTML",
+        )
+        await state.update_data(pod_nav_msg_id=callback.message.message_id)
+
     except Exception:
-        msg = await message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
+        msg = await callback.message.answer(
+            "🎧 ПОДКАСТЫ\n\nВыбери автора",
+            reply_markup=_kb_authors(sorted(list((_read_podcasts().get("authors") or {}).values()), key=lambda a: (a.get("name") or "").lower())),
+            parse_mode="HTML",
+        )
         await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 если edit невозможен
-        '''
 
 
 @router.callback_query(F.data == "pod:checksub")
