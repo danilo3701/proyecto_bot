@@ -271,7 +271,7 @@ from scenario.offer_continue_block import offer_continue
 from scenario.refusal_block import refusal
 
 # ...другие импорты, если нужны...
-from typing import List
+from typing import List, Optional  # 💬 Optional нужен для type hints (Stripe/webhook)
 from typing import Callable
 from aiohttp import web
 
