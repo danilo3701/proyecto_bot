@@ -240,10 +240,11 @@ def _read_podcasts() -> Dict[str, Any]:
     _ensure_podcasts_file()
 
     try:
-        with open(PODCASTS_JSON_PATH, "r", encoding="utf-8") as f:
-            raw = json.load(f)
+        with PODCASTS_FILE.open("r", encoding="utf-8") as f:
+            raw = json.load(f)  # 💬 читаем единый файл /data/podcasts_data.json, иначе authors всегда будут пустыми
     except Exception:
         raw = {}
+
 
     # 💬 Если внезапно старый формат = список, конвертируем в dict-форму
     if isinstance(raw, list):
