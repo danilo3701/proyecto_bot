@@ -272,6 +272,8 @@ from scenario.refusal_block import refusal
 
 # ...другие импорты, если нужны...
 from typing import List
+from typing import Callable
+from aiohttp import web
 
 
 
@@ -861,6 +863,357 @@ def save_xp_data(xp_data):
     _atomic_json_dump(XP_DATA_BACKUP_PATH, xp_data)
 
 
+# ================================================================================
+#   💎 PREMIUM (Stripe)
+#   Один Premium открывает всё: лексику, подкасты, будущие категории
+# ================================================================================
+PREMIUM_USERS_PATH = "/data/premium_users.json"
+PREMIUM_USERS_BACKUP_PATH = "/data/premium_users.backup.json"
+
+FREE_TOPICS_LIMIT = int(os.getenv("FREE_TOPICS_LIMIT", "10"))
+
+PREMIUM_PAYLINK_YEAR = os.getenv("PREMIUM_PAYLINK_YEAR", "https://buy.stripe.com/bJefZi3LgaZmcu74EBbbG0c")
+PREMIUM_PAYLINK_MONTH = os.getenv("PREMIUM_PAYLINK_MONTH", "https://buy.stripe.com/bJeeVe1D8ffC0Lpc73bbG0a")
+PREMIUM_PAYLINK_WEEK = os.getenv("PREMIUM_PAYLINK_WEEK", "https://buy.stripe.com/00wfZia9Eeby65JefbbbG0b")
+
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
+try:
+    import stripe  # type: ignore
+except Exception:
+    stripe = None  # type: ignore
+
+
+def load_premium_users() -> dict:
+    # 💬 схема:
+    # { "<user_id>": {"active_until": int, "plan": str, "stripe_customer_id": str, "stripe_subscription_id": str},
+    #   "__stripe_customer_to_user": { "cus_xxx": "<user_id>" },
+    #   "__stripe_subscription_to_user": { "sub_xxx": "<user_id>" } }
+    if not os.path.exists(PREMIUM_USERS_PATH):
+        base = {"__stripe_customer_to_user": {}, "__stripe_subscription_to_user": {}}
+        _atomic_json_dump(PREMIUM_USERS_PATH, base, ensure_ascii=False, indent=2)
+        _atomic_json_dump(PREMIUM_USERS_BACKUP_PATH, base, ensure_ascii=False, indent=2)
+        return base
+
+    try:
+        with open(PREMIUM_USERS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+    except Exception:
+        # 💬 пробуем подняться из бэкапа
+        try:
+            with open(PREMIUM_USERS_BACKUP_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f) or {}
+        except Exception:
+            data = {}
+
+    if "__stripe_customer_to_user" not in data:
+        data["__stripe_customer_to_user"] = {}
+    if "__stripe_subscription_to_user" not in data:
+        data["__stripe_subscription_to_user"] = {}
+    return data
+
+
+def save_premium_users(data: dict) -> None:
+    _atomic_json_dump(PREMIUM_USERS_PATH, data, ensure_ascii=False, indent=2)
+    _atomic_json_dump(PREMIUM_USERS_BACKUP_PATH, data, ensure_ascii=False, indent=2)
+
+
+def is_premium_active(user_id: int) -> bool:
+    data = load_premium_users()
+    row = data.get(str(user_id), {})
+    try:
+        until = int((row or {}).get("active_until", 0) or 0)
+    except Exception:
+        until = 0
+    return until > int(time.time())
+
+
+def _set_premium_user(
+    user_id: int,
+    active_until: int,
+    plan: str = "",
+    stripe_customer_id: str = "",
+    stripe_subscription_id: str = "",
+) -> None:
+    data = load_premium_users()
+    uid = str(user_id)
+
+    prev = data.get(uid)
+    if not isinstance(prev, dict):
+        prev = {}
+
+    prev["active_until"] = int(active_until or 0)
+    if plan:
+        prev["plan"] = plan
+
+    if stripe_customer_id:
+        prev["stripe_customer_id"] = stripe_customer_id
+        data["__stripe_customer_to_user"][stripe_customer_id] = uid
+
+    if stripe_subscription_id:
+        prev["stripe_subscription_id"] = stripe_subscription_id
+        data["__stripe_subscription_to_user"][stripe_subscription_id] = uid
+
+    data[uid] = prev
+    save_premium_users(data)
+
+
+def _extract_tg_id_from_checkout_session(session_obj: dict) -> Optional[int]:
+    # 💬 Stripe Checkout custom_fields: ищем value где только цифры
+    cfs = session_obj.get("custom_fields") or []
+    for cf in cfs:
+        val = None
+        if isinstance(cf, dict):
+            if isinstance(cf.get("numeric"), dict):
+                val = cf["numeric"].get("value")
+            if val is None and isinstance(cf.get("text"), dict):
+                val = cf["text"].get("value")
+        if val is None:
+            continue
+        s = str(val).strip()
+        if s.isdigit() and len(s) >= 5:
+            try:
+                return int(s)
+            except Exception:
+                continue
+    return None
+
+
+def _premium_paywall_text(user_id: int) -> str:
+    return (
+        "<b>🔒 Это Premium</b>\n\n"
+        "Бесплатно доступно:\n"
+        f"• первые {FREE_TOPICS_LIMIT} тем\n"
+        "• первые 10 подкастов\n\n"
+        "Твой Telegram ID:\n"
+        f"<code>{user_id}</code>\n\n"
+        "Оплати по кнопке ниже и в форме оплаты укажи Telegram ID\n"
+        "Потом вернись сюда и нажми «✅ Проверить Premium»"
+    )
+
+
+def _premium_paywall_kb(back_cb: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💎 Premium 2,90€ в неделю", url=PREMIUM_PAYLINK_WEEK)],
+            [InlineKeyboardButton(text="💎 Premium 4,90€ в месяц", url=PREMIUM_PAYLINK_MONTH)],
+            [InlineKeyboardButton(text="💎 Premium 49,00€ в год", url=PREMIUM_PAYLINK_YEAR)],
+            [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)],
+        ]
+    )
+
+
+def _locked_title(title: str) -> str:
+    t = (title or "").strip()
+    if not t:
+        return "🔒"
+    parts = t.split(maxsplit=1)
+    if len(parts) == 1:
+        return f"🔒 {parts[0]}"
+    return f"🔒 {parts[1]}"
+
+
+def _stripe_get_subscription_period_end(subscription_id: str) -> Optional[int]:
+    if not subscription_id:
+        return None
+    if stripe is None or not STRIPE_SECRET_KEY:
+        return None
+    try:
+        stripe.api_key = STRIPE_SECRET_KEY
+        sub = stripe.Subscription.retrieve(subscription_id)
+        return int(sub.get("current_period_end") or 0) or None
+    except Exception as e:
+        logging.exception(f"Stripe subscription retrieve failed: {e}")
+        return None
+
+
+def _stripe_guess_plan_from_subscription(subscription_id: str) -> str:
+    if stripe is None or not STRIPE_SECRET_KEY or not subscription_id:
+        return ""
+    try:
+        stripe.api_key = STRIPE_SECRET_KEY
+        sub = stripe.Subscription.retrieve(subscription_id)
+        items = (((sub or {}).get("items") or {}).get("data") or [])
+        if not items:
+            return ""
+        price = (items[0] or {}).get("price") or {}
+        recurring = (price or {}).get("recurring") or {}
+        interval = (recurring or {}).get("interval") or ""
+        return str(interval)
+    except Exception:
+        return ""
+
+
+async def _stripe_process_event(event: dict) -> None:
+    etype = (event or {}).get("type") or ""
+    obj = (((event or {}).get("data") or {}).get("object") or {})
+
+    if etype == "checkout.session.completed":
+        # 💬 первичная покупка
+        if (obj.get("mode") or "") != "subscription":
+            return
+
+        tg_id = _extract_tg_id_from_checkout_session(obj)
+        if not tg_id:
+            logging.warning("Stripe checkout.session.completed без Telegram ID")
+            return
+
+        sub_id = str(obj.get("subscription") or "")
+        cust_id = str(obj.get("customer") or "")
+
+        active_until = _stripe_get_subscription_period_end(sub_id)
+        if not active_until:
+            # 💬 fallback на 24 часа, если API недоступен
+            active_until = int(time.time()) + 86400
+
+        plan = _stripe_guess_plan_from_subscription(sub_id)
+        _set_premium_user(
+            user_id=tg_id,
+            active_until=active_until,
+            plan=plan,
+            stripe_customer_id=cust_id,
+            stripe_subscription_id=sub_id,
+        )
+        return
+
+    if etype in ("invoice.paid", "invoice.payment_succeeded"):
+        # 💬 продление
+        cust_id = str(obj.get("customer") or "")
+        sub_id = str(obj.get("subscription") or "")
+
+        data = load_premium_users()
+        uid = None
+        if sub_id and sub_id in data.get("__stripe_subscription_to_user", {}):
+            uid = data["__stripe_subscription_to_user"].get(sub_id)
+        if (not uid) and cust_id and cust_id in data.get("__stripe_customer_to_user", {}):
+            uid = data["__stripe_customer_to_user"].get(cust_id)
+
+        if not uid:
+            return
+
+        active_until = _stripe_get_subscription_period_end(sub_id)
+        if not active_until:
+            active_until = int(time.time()) + 86400
+
+        plan = _stripe_guess_plan_from_subscription(sub_id)
+        _set_premium_user(
+            user_id=int(uid),
+            active_until=active_until,
+            plan=plan,
+            stripe_customer_id=cust_id,
+            stripe_subscription_id=sub_id,
+        )
+        return
+
+    if etype == "customer.subscription.deleted":
+        # 💬 отмена
+        sub_id = str(obj.get("id") or "")
+        cust_id = str(obj.get("customer") or "")
+
+        data = load_premium_users()
+        uid = None
+        if sub_id and sub_id in data.get("__stripe_subscription_to_user", {}):
+            uid = data["__stripe_subscription_to_user"].get(sub_id)
+        if (not uid) and cust_id and cust_id in data.get("__stripe_customer_to_user", {}):
+            uid = data["__stripe_customer_to_user"].get(cust_id)
+
+        if not uid:
+            return
+
+        _set_premium_user(
+            user_id=int(uid),
+            active_until=int(time.time()) - 5,
+            plan="canceled",
+            stripe_customer_id=cust_id,
+            stripe_subscription_id=sub_id,
+        )
+        return
+
+    if etype == "customer.subscription.updated":
+        # 💬 на всякий случай синкаем срок
+        sub_id = str(obj.get("id") or "")
+        cust_id = str(obj.get("customer") or "")
+        status = str(obj.get("status") or "")
+
+        data = load_premium_users()
+        uid = None
+        if sub_id and sub_id in data.get("__stripe_subscription_to_user", {}):
+            uid = data["__stripe_subscription_to_user"].get(sub_id)
+        if (not uid) and cust_id and cust_id in data.get("__stripe_customer_to_user", {}):
+            uid = data["__stripe_customer_to_user"].get(cust_id)
+
+        if not uid:
+            return
+
+        if status in ("canceled", "unpaid", "incomplete_expired"):
+            _set_premium_user(
+                user_id=int(uid),
+                active_until=int(time.time()) - 5,
+                plan=status,
+                stripe_customer_id=cust_id,
+                stripe_subscription_id=sub_id,
+            )
+            return
+
+        active_until = int(obj.get("current_period_end") or 0) or _stripe_get_subscription_period_end(sub_id)
+        if active_until:
+            _set_premium_user(
+                user_id=int(uid),
+                active_until=active_until,
+                plan=status,
+                stripe_customer_id=cust_id,
+                stripe_subscription_id=sub_id,
+            )
+
+
+async def stripe_webhook_http(request: web.Request) -> web.Response:
+    if stripe is None:
+        return web.Response(status=500, text="stripe library is not installed")
+
+    payload = await request.read()
+    sig_header = request.headers.get("Stripe-Signature", "")
+
+    try:
+        if STRIPE_WEBHOOK_SECRET:
+            stripe.api_key = STRIPE_SECRET_KEY
+            event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+        else:
+            # 💬 dev режим, без проверки подписи
+            event = json.loads(payload.decode("utf-8"))
+    except Exception as e:
+        logging.exception(f"Stripe webhook error: {e}")
+        return web.Response(status=400, text="bad request")
+
+    try:
+        await _stripe_process_event(event)
+    except Exception as e:
+        logging.exception(f"Stripe event processing failed: {e}")
+        return web.Response(status=500, text="processing error")
+
+    return web.Response(text="ok")
+
+
+async def health_http(request: web.Request) -> web.Response:
+    return web.json_response({"ok": True})
+
+
+async def start_http_server() -> Optional[web.AppRunner]:
+    # 💬 Railway Web Service ожидает порт
+    port = int(os.getenv("PORT", "8080"))
+
+    app = web.Application()
+    app.router.add_get("/", health_http)
+    app.router.add_post("/stripe/webhook", stripe_webhook_http)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+    logging.info(f"HTTP server started on 0.0.0.0:{port}")
+    return runner
 
 
 
@@ -1363,6 +1716,7 @@ async def is_vocab_exercise(message: Message, state: FSMContext) -> bool:
 class LessonStates(StatesGroup):
     # 🏁 Начальные шаги: выбор категории и темы
     waiting_subscription = State()  # ожидание проверки подписки на канал(ы)
+    waiting_premium = State()
     choosing_category     = State()  # после /start — ждем «📚 Лексика» или «🧠 Грамматика»
     choosing_level        = State()  # 💬 состояние для выбора уровня после выбора категории
     choosing_subcategory  = State()  # 💬 выбор «Лексика / Грамматика» внутри уровня
@@ -2236,6 +2590,19 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
         return "".join(ch + "\u0336" for ch in s)  # 💬 зачёркивание кнопки без HTML
 
     buttons = []
+    premium_active = is_premium_active(message.from_user.id)  # 💬 Premium активен или нет
+    FREE_LIMIT = int(os.getenv("FREE_TOPICS_LIMIT", "10"))     # 💬 сколько тем бесплатно в каждом уровне
+
+    def _lock_title(s: str) -> str:
+        # 💬 меняем первый токен (эмодзи или слово) на 🔒
+        t = (s or "").strip()
+        if not t:
+            return "🔒"
+        parts = t.split(maxsplit=1)
+        if len(parts) == 1:
+            return f"🔒 {parts[0]}"
+        return f"🔒 {parts[1]}"
+
     for key, info in topics.items():
         # 💬 что делает эта часть: нормализуем уровни, чтобы "B1"/"B2" совпадали с "B1-B2"
         def _norm_level(v) -> str:
@@ -2261,17 +2628,27 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
         pct = int(round(pct_val * 100))
         pct = max(0, min(pct, 100))  # 💬 защита от мусорных значений
 
-        title = info.get("visible_title", key)
+        visible_title = info.get("visible_title", key)
 
-        if pct >= 100:
-            title = f"✅ {_strike(title)} {pct}%"  # 💬 100% = зачёркнутая тема и процент
-        elif pct > 0:
-            title = f"{title} {pct}%"  # 💬 показываем проценты только если > 0
+        is_locked = (category == "lex") and (not premium_active) and (len(buttons) >= FREE_LIMIT)  # 💬 после 10 тем = замок
+
+        if is_locked:
+            title = _lock_title(visible_title)  # 💬 показываем 🔒 вместо эмодзи
+            if pct > 0:
+                title = f"{title} {pct}%"
+            cb_data = f"premium:topic:{key}"  # 💬 ведём в paywall
         else:
-            title = f"{title}"  # 💬 0% = без процентов
+            title = visible_title
+            if pct >= 100:
+                title = f"✅ {_strike(title)} {pct}%"  # 💬 100% = зачёркнутая тема и процент
+            elif pct > 0:
+                title = f"{title} {pct}%"  # 💬 проценты только если > 0
+            else:
+                title = f"{title}"
+            cb_data = f"topic:{key}"
 
+        buttons.append(InlineKeyboardButton(text=title, callback_data=cb_data))
 
-        buttons.append(InlineKeyboardButton(text=title, callback_data=f"topic:{key}"))
 
 
     if not buttons:
@@ -2398,6 +2775,129 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
     await state.set_state(LessonStates.choosing_topic)  # 💬 дальше ждём выбор конкретной темы
 
 
+@dp.callback_query(lambda c: c.data and c.data.startswith("premium:topic:"), StateFilter(LessonStates.choosing_topic))
+async def premium_locked_topic(query: CallbackQuery, state: FSMContext):
+    await query.answer()
+
+    topic_key = query.data.split("premium:topic:", 1)[1].strip()
+    data = await state.get_data()
+
+    chosen_category = data.get("chosen_category")
+    chosen_level = data.get("chosen_level")
+
+    pay_msg = await query.message.answer(
+        _premium_paywall_text(query.from_user.id),
+        reply_markup=_premium_paywall_kb("premium:back_topics")
+    )
+
+    await state.set_state(LessonStates.waiting_premium)
+    await state.update_data(
+        premium_msg_id=pay_msg.message_id,
+        premium_origin_chat_id=query.message.chat.id,
+        premium_origin_msg_id=query.message.message_id,
+        premium_origin_category=chosen_category,
+        premium_origin_level=chosen_level,
+        premium_pending_topic=topic_key
+    )
+
+
+@dp.callback_query(lambda c: c.data == "premium:back_topics", StateFilter(LessonStates.waiting_premium))
+async def premium_back_topics(query: CallbackQuery, state: FSMContext):
+    await query.answer()
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+
+    await state.update_data(
+        premium_msg_id=None,
+        premium_origin_chat_id=None,
+        premium_origin_msg_id=None,
+        premium_origin_category=None,
+        premium_origin_level=None,
+        premium_pending_topic=None
+    )
+    await state.set_state(LessonStates.choosing_topic)
+
+
+@dp.callback_query(lambda c: c.data == "premium:check", StateFilter(LessonStates.waiting_premium))
+async def premium_check(query: CallbackQuery, state: FSMContext):
+    await query.answer()
+
+    if not is_premium_active(query.from_user.id):
+        await query.answer("Premium пока не активен. Если оплатил, подожди 10–30 секунд и нажми ещё раз.", show_alert=True)
+        return
+
+    data = await state.get_data()
+
+    # 💬 закрываем paywall
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+
+    # 💬 обновляем меню тем, чтобы замочки исчезли
+    origin_chat_id = data.get("premium_origin_chat_id")
+    origin_msg_id = data.get("premium_origin_msg_id")
+    category = data.get("premium_origin_category")
+    level = data.get("premium_origin_level")
+
+    if origin_chat_id and origin_msg_id and category and level:
+        try:
+            xp_json = load_xp_data()
+            user_id_str = str(query.from_user.id)
+
+            progress_map = {}
+            user_xp = (xp_json or {}).get(user_id_str, {}) or {}
+            topic_progress = user_xp.get("topic_progress", {}) or {}
+            for tk, tinfo in (topic_progress or {}).items():
+                try:
+                    progress_map[tk] = int((tinfo or {}).get("overall_progress", 0) or 0)
+                except Exception:
+                    progress_map[tk] = 0
+
+            buttons = []
+            for topic_key, info in topics.items():
+                cat = (info.get("category") or "").strip()
+                lvl = (info.get("level") or "").strip()
+                if cat != category or lvl != level:
+                    continue
+
+                title = info.get("visible_title") or topic_key
+                pct = int(progress_map.get(topic_key, 0) or 0)
+                if pct >= 100:
+                    title = f"✅ {_strike(title)} {pct}%"
+                elif pct > 0:
+                    title = f"{title} {pct}%"
+
+                buttons.append(InlineKeyboardButton(text=title, callback_data=f"topic:{topic_key}"))
+
+            if not buttons:
+                buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_categories"))
+            else:
+                rows = []
+                for i in range(0, len(buttons), 2):
+                    rows.append(buttons[i:i + 2])
+                rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_categories")])
+
+                await query.bot.edit_message_text(
+                    chat_id=origin_chat_id,
+                    message_id=origin_msg_id,
+                    text=f"📚 Выбери тему ({level})",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
+                )
+        except Exception:
+            pass
+
+    await state.update_data(
+        premium_msg_id=None,
+        premium_origin_chat_id=None,
+        premium_origin_msg_id=None,
+        premium_origin_category=None,
+        premium_origin_level=None,
+        premium_pending_topic=None
+    )
+    await state.set_state(LessonStates.choosing_topic)
 
 
 @dp.callback_query(LessonStates.choosing_subcategory, F.data.startswith("subcat:"))
@@ -3545,6 +4045,16 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
 
     # 💬 Сохраняем выбранную тему в FSM
     await state.update_data(selected_topic=topic_key)
+
+    if is_premium_active(query.from_user.id):
+        # 💬 Premium = пропускаем рекламную подписку и подписки на каналы
+        if topics.get(topic_key, {}).get("category") == "gram":
+            await safe_open_grammar_topic(query.message, state)
+        else:
+            await lesson_menu_handler(query.message, state)
+        await query.answer()
+        return
+
 
     user_id_str = str(query.from_user.id)
 
@@ -5095,7 +5605,8 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     # 💬 админ-override: открывает locked-разделы, но НЕ сохраняет unlocked в topic_summary
     _ud = load_user_data()
     admin_unlock = bool((_ud.get(str(message.chat.id), {}) or {}).get("lex_admin_unlock", False))
-    unlocked_ui = unlocked or admin_unlock  # 💬 только для отображения и кнопок
+    unlocked_ui = unlocked or admin_unlock or is_premium_active(message.from_user.id)
+
 
 
 
@@ -11540,7 +12051,16 @@ if __name__ == '__main__':
 
 
         print("🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀 Бот запущен!")
-        await dp.start_polling(bot)
+        runner = await start_http_server()
+        try:
+            await dp.start_polling(bot)
+        finally:
+            if runner:
+                try:
+                    await runner.cleanup()
+                except Exception:
+                    pass
+
 
     import asyncio
     try:
