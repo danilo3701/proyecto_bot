@@ -10,6 +10,7 @@ import os
 import re
 import time
 import html
+import logging  # 💬 чтобы logging.exception не падал
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -235,34 +236,52 @@ def _ensure_podcasts_file() -> None:
     if not PODCASTS_FILE.exists():
         _atomic_write_json(PODCASTS_FILE, {"authors": {}, "episodes": {}})
 
-
 def _read_podcasts() -> Dict[str, Any]:
-    # 💬 Всегда возвращаем dict правильной формы, чтобы нигде не падало на .get(...)
-    try:
-        if not os.path.exists(PODCASTS_JSON_PATH):
-            return {"authors": {}, "episodes": {}}
+    _ensure_podcasts_file()
 
+    try:
         with open(PODCASTS_JSON_PATH, "r", encoding="utf-8") as f:
             raw = json.load(f)
-
-        if not isinstance(raw, dict):
-            # 💬 если вдруг файл стал списком или строкой
-            return {"authors": {}, "episodes": {}}
-
-        raw.setdefault("authors", {})
-        raw.setdefault("episodes", {})
-
-        # 💬 защита от некорректных типов внутри
-        if not isinstance(raw.get("authors"), dict):
-            raw["authors"] = {}
-        if not isinstance(raw.get("episodes"), dict):
-            raw["episodes"] = {}
-
-        return raw
-
     except Exception:
-        logging.exception("podcasts: failed to read podcasts json")
-        return {"authors": {}, "episodes": {}}
+        raw = {}
+
+    # 💬 Если внезапно старый формат = список, конвертируем в dict-форму
+    if isinstance(raw, list):
+        # 1) если это похоже на список авторов = превратим в authors
+        authors_map: Dict[str, Any] = {}
+        for i, a in enumerate(raw, start=1):
+            if not isinstance(a, dict):
+                continue
+            aid = str(a.get("id") or a.get("author_id") or i)
+            authors_map[aid] = a
+        raw = {"authors": authors_map, "episodes": {}}
+
+    # 💬 Если прилетело вообще не dict = приводим к безопасной структуре
+    if not isinstance(raw, dict):
+        raw = {"authors": {}, "episodes": {}}
+
+    authors = raw.get("authors") or {}
+    episodes = raw.get("episodes") or {}
+
+    # 💬 Подстраховка типов, чтобы .items() и .get() дальше не падали
+    if isinstance(authors, list):
+        conv: Dict[str, Any] = {}
+        for i, a in enumerate(authors, start=1):
+            if not isinstance(a, dict):
+                continue
+            aid = str(a.get("id") or a.get("author_id") or i)
+            conv[aid] = a
+        authors = conv
+
+    if not isinstance(authors, dict):
+        authors = {}
+    if not isinstance(episodes, dict):
+        episodes = {}
+
+    raw["authors"] = authors
+    raw["episodes"] = episodes
+    return raw
+
 
 
 
@@ -475,34 +494,42 @@ def _episodes_menu_html(author_name: str, level_key: Optional[str] = None, topic
 # 🎛️ UI builders
 # -----------------------------
 def _kb_authors(data: Any) -> InlineKeyboardMarkup:
-    # 💬 Принимаем только dict-форму, но без падений если прилетело не то
-    kb = InlineKeyboardBuilder()
-
+    # 💬 Не падаем, даже если data не dict
     if not isinstance(data, dict):
         data = {"authors": {}, "episodes": {}}
 
     authors = data.get("authors") or {}
+
+    # 💬 Если authors внезапно list = конвертим в dict
+    if isinstance(authors, list):
+        conv: Dict[str, Any] = {}
+        for i, a in enumerate(authors, start=1):
+            if not isinstance(a, dict):
+                continue
+            aid = str(a.get("id") or a.get("author_id") or i)
+            conv[aid] = a
+        authors = conv
+
     if not isinstance(authors, dict):
         authors = {}
 
-    # 💬 сортировка: order, затем name
-    def _sort_key(item):
-        _aid, author = item
-        if not isinstance(author, dict):
-            return (999999, "")
-        return (int(author.get("order") or 999999), (author.get("name") or "").lower())
+    items = sorted(
+        authors.items(),
+        key=lambda x: ((x[1] or {}).get("order", 9999), (((x[1] or {}).get("name") or "")).lower())
+    )
 
-    for author_id, author in sorted(authors.items(), key=_sort_key):
-        if not isinstance(author, dict):
-            continue
+    rows = []
+    for aid, a in items:
+        a = a or {}
+        rows.append([InlineKeyboardButton(text=f"🎙 {a.get('name','Автор')}", callback_data=f"pod:author:{aid}")])
 
-        author_name = (author.get("name") or f"Автор {author_id}").strip()
-        kb.button(text=f"🎙️ {author_name}", callback_data=f"pod:author:{author_id}")
+    if not rows:
+        rows = [[InlineKeyboardButton(text="(пусто)", callback_data="pod:noop")]]
 
-    kb.button(text="🏠 В меню", callback_data="back_to_menu")
-    kb.adjust(1)
+    rows.append([InlineKeyboardButton(text="⭐ Мои заметки", callback_data="pod:notes")])  # 💬 открыть заметки
+    rows.append([InlineKeyboardButton(text="🏠 В меню", callback_data="back_to_menu")])    # 💬 выход в меню
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
-    return kb.as_markup()
 
 def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None, topic_key: str = None, page: int = 0) -> InlineKeyboardMarkup:
     episodes = data.get("episodes") or {}
@@ -779,40 +806,40 @@ def _format_fragment(es: str, ru: str, hint: str = "") -> str:
 # =============================================================================
 #   🟢 1) User Flow
 # =============================================================================
-
 @router.callback_query(F.data == "podcasts_open")
-async def podcasts_open(callback: CallbackQuery, state: FSMContext):
-    _require_init()
-    user_id = callback.from_user.id
+async def podcasts_open(callback: CallbackQuery, state: FSMContext) -> None:
+    # 💬 Совместимость: если в файле есть _require_init() = вызываем, если нет = не падаем
+    try:
+        _require_init()
+    except NameError:
+        pass
+    except Exception:
+        # 💬 если init есть, но ругается = не валим пользователя
+        logging.exception("podcasts_open: _require_init failed")
 
-    # 💬 фиксируем экран и чистим фильтры
+    await callback.answer()
+
+    data = _read_podcasts()  # 💬 гарантированно dict после нашего патча
+
     await state.update_data(
-        pod_screen="authors",
-        pod_author=None,
+        pod_ctx=True,
+        pod_author_id=None,
+        pod_ep_id=None,
+        pod_idx=0,
+        pod_notes_idx=0,      # 💬 индекс заметок
+        pod_frag_msg_id=None,
+        pod_nav_msg_id=callback.message.message_id,
         pod_filter_level=None,
         pod_filter_topic=None,
         pod_ep_page=0,
+        pod_screen="authors",
     )
 
     try:
-        data = _read_podcasts()
-
-        await callback.message.edit_text(
-            "🎙️ <b>Подкасты</b>\n\nВыбери автора",
-            reply_markup=_kb_authors(data),  # 💬 важно: передаём data, а не list
-            parse_mode="HTML"
-        )
-        await callback.answer()
-
+        await callback.message.edit_text("🎧 Выбери автора:", reply_markup=_kb_authors(data))
     except Exception:
-        logging.exception("podcasts_open failed")
-        data = _read_podcasts()
-        await callback.message.answer(
-            "🎙️ <b>Подкасты</b>\n\nВыбери автора",
-            reply_markup=_kb_authors(data),
-            parse_mode="HTML"
-        )
-        await callback.answer()
+        msg = await callback.message.answer("🎧 Выбери автора:", reply_markup=_kb_authors(data))
+        await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 fallback если edit невозможен
 
 
 
