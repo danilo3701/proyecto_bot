@@ -1185,6 +1185,15 @@ async def _stripe_process_event(event: dict) -> None:
 
 async def stripe_webhook_http(request: web.Request) -> web.Response:
     if stripe is None:
+        # 💬 если библиотека stripe не установлена, сразу пингуем админа
+        try:
+            await bot.send_message(
+                ADMIN_CHAT_ID,
+                "🔴 Stripe webhook = 500\nПричина: stripe library is not installed (pip install stripe)"
+            )
+        except Exception:
+            pass
+
         return web.Response(status=500, text="stripe library is not installed")
 
     payload = await request.read()
@@ -1205,6 +1214,20 @@ async def stripe_webhook_http(request: web.Request) -> web.Response:
         await _stripe_process_event(event)
     except Exception as e:
         logging.exception(f"Stripe event processing failed: {e}")
+        # 💬 логируем причину 500 в Telegram админу (коротко, без трейсбэка)
+        try:
+            ev_id = None
+            ev_type = None
+            if isinstance(event, dict):
+                ev_id = event.get("id")
+                ev_type = event.get("type")
+            await bot.send_message(
+                ADMIN_CHAT_ID,
+                f"🔴 Stripe webhook processing error\nid={ev_id}\ntype={ev_type}\nerr={e}"
+            )
+        except Exception:
+            pass
+
         return web.Response(status=500, text="processing error")
 
     return web.Response(text="ok")
@@ -3664,6 +3687,82 @@ async def lex_unlock_handler(message: Message, state: FSMContext):
         await message.answer("🔒 Админ-доступ выключен = снова работает ограничение 70%")  # 💬 подтверждение
 
     await lesson_menu_handler(message, state)  # 💬 сразу перерисовываем меню темы с учётом lex_admin_unlock
+
+@dp.message(Command("premium_debug"))
+@track_handler
+async def premium_debug_handler(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+
+    parts = (message.text or "").split()
+    target_id = message.from_user.id
+    if len(parts) >= 2 and parts[1].isdigit():
+        target_id = int(parts[1])
+
+    premium_file_exists = os.path.exists(PREMIUM_USERS_PATH)
+    premium_file_size = os.path.getsize(PREMIUM_USERS_PATH) if premium_file_exists else 0
+
+    prem = load_premium_users()
+    rec = prem.get(str(target_id))
+
+    is_active, active_until, plan = is_premium_active(target_id)
+    now_ts = int(time.time())
+    left_sec = (active_until or 0) - now_ts
+
+    # 💬 находим связи Stripe -> user_id (если они есть в файле)
+    cust_map = prem.get("__stripe_customer_to_user", {}) or {}
+    sub_map = prem.get("__stripe_subscription_to_user", {}) or {}
+
+    cust_ids = [k for k, v in cust_map.items() if str(v) == str(target_id)][:5]
+    sub_ids = [k for k, v in sub_map.items() if str(v) == str(target_id)][:5]
+
+    def _fmt_ts(ts: int | None) -> str:
+        if not ts:
+            return "None"
+        try:
+            return datetime.datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return str(ts)
+
+    rec_json = "None"
+    if isinstance(rec, dict):
+        try:
+            rec_json = json.dumps(rec, ensure_ascii=False, indent=2)
+        except Exception:
+            rec_json = str(rec)
+        if len(rec_json) > 2500:
+            rec_json = rec_json[:2500] + "\n... (cut)"
+
+    stripe_installed = True
+    try:
+        _ = stripe  # noqa
+        if stripe is None:
+            stripe_installed = False
+    except Exception:
+        stripe_installed = False
+
+    txt = (
+        "🔎 Premium debug\n"
+        f"target_id: {target_id}\n"
+        f"PREMIUM_USERS_PATH: {PREMIUM_USERS_PATH}\n"
+        f"file_exists: {premium_file_exists}, size: {premium_file_size}\n"
+        f"stripe_installed: {stripe_installed}\n"
+        f"STRIPE_SECRET_KEY set: {bool(os.environ.get('STRIPE_SECRET_KEY'))}\n"
+        f"STRIPE_WEBHOOK_SECRET set: {bool(os.environ.get('STRIPE_WEBHOOK_SECRET'))}\n"
+        "\n"
+        f"is_premium_active: {is_active}\n"
+        f"active_until: {_fmt_ts(active_until)} (ts={active_until})\n"
+        f"left_sec: {left_sec}\n"
+        f"plan: {plan}\n"
+        "\n"
+        f"stripe customer ids (<=5): {cust_ids}\n"
+        f"stripe subscription ids (<=5): {sub_ids}\n"
+        "\n"
+        "record:\n"
+        f"{rec_json}"
+    )
+
+    await message.answer(txt)
 
 
 @dp.message(Command("stats"))
