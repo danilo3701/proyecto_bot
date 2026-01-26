@@ -824,6 +824,12 @@ def _atomic_json_dump(path: str, data: dict, **json_kwargs) -> None:
     # 💬 Атомарная запись JSON + поддержка ensure_ascii/indent и любых json.dump kwargs
     tmp_path = f"{path}.tmp"
 
+    # 💬 гарантируем, что директория существует (иначе Stripe webhook будет падать 500 при записи /data/*.json)
+    dir_name = os.path.dirname(path)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
+
+
     # 💬 дефолты как раньше, но теперь можно переопределять при вызове
     kwargs = {"ensure_ascii": False, "indent": 2}
     kwargs.update(json_kwargs or {})
