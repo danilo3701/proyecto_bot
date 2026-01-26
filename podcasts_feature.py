@@ -1749,7 +1749,6 @@ def _kb_admin_episode_levels() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")],
         ]
     )
-)
 
 
 def _kb_admin_authors_pick(data: Dict[str, Any], cb_prefix: str) -> InlineKeyboardMarkup:
