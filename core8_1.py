@@ -2886,18 +2886,18 @@ async def premium_check(query: CallbackQuery, state: FSMContext):
             "❌ Premium не найден\n\n"
             "Если ты только что оплатил(а) — подожди 1–2 минуты и нажми ещё раз"
         )
-
+    
     # 💬 Чистим мусор из paywall-сессии
-
+    await state.update_data(
         premium_origin_category=None,
         premium_origin_level=None,
         premium_pending_topic=None,
     )
-
-    # 💬 Если Premium активен = выходим из paywall state и уходим в главное меню
+    
+    # 💬 Если Premium активен — выходим из paywall state и уходим в главное меню
     if premium_active:
         await state.set_state(None)
-
+    
         # 💬 Убираем paywall-сообщение, если оно ещё есть
         try:
             await query.message.delete()
