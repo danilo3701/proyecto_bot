@@ -248,14 +248,21 @@ def _read_podcasts() -> Dict[str, Any]:
 
     # 💬 Если внезапно старый формат = список, конвертируем в dict-форму
     if isinstance(raw, list):
-        # 1) если это похоже на список авторов = превратим в authors
+        # 💬 старый формат: список авторов (dict или str)
         authors_map: Dict[str, Any] = {}
         for i, a in enumerate(raw, start=1):
+            if isinstance(a, str):
+                name = a.strip()
+                if not name:
+                    continue
+                authors_map[str(i)] = {"name": name, "order": i}  # 💬 authors=["Roi", ...]
+                continue
             if not isinstance(a, dict):
                 continue
             aid = str(a.get("id") or a.get("author_id") or i)
             authors_map[aid] = a
         raw = {"authors": authors_map, "episodes": {}}
+
 
     # 💬 Если прилетело вообще не dict = приводим к безопасной структуре
     if not isinstance(raw, dict):
@@ -268,11 +275,18 @@ def _read_podcasts() -> Dict[str, Any]:
     if isinstance(authors, list):
         conv: Dict[str, Any] = {}
         for i, a in enumerate(authors, start=1):
+            if isinstance(a, str):
+                name = a.strip()
+                if not name:
+                    continue
+                conv[str(i)] = {"name": name, "order": i}  # 💬 поддержка authors=["Roi", ...]
+                continue
             if not isinstance(a, dict):
                 continue
             aid = str(a.get("id") or a.get("author_id") or i)
             conv[aid] = a
         authors = conv
+
 
     if not isinstance(authors, dict):
         authors = {}
@@ -505,11 +519,18 @@ def _kb_authors(data: Any) -> InlineKeyboardMarkup:
     if isinstance(authors, list):
         conv: Dict[str, Any] = {}
         for i, a in enumerate(authors, start=1):
+            if isinstance(a, str):
+                name = a.strip()
+                if not name:
+                    continue
+                conv[str(i)] = {"name": name, "order": i}  # 💬 поддержка старого формата authors=["Roi", ...]
+                continue
             if not isinstance(a, dict):
                 continue
             aid = str(a.get("id") or a.get("author_id") or i)
             conv[aid] = a
         authors = conv
+
 
     if not isinstance(authors, dict):
         authors = {}
@@ -593,9 +614,10 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
         rows.append([InlineKeyboardButton(text="🧹 СБРОСИТЬ ФИЛЬТР", callback_data="pod:filter_reset")])
 
     if total == 0:
-        rows.append([InlineKeyboardButton(text="🔎 НИЧЕГО НЕ НАЙДЕНО", callback_data="pod:filter")])
-        rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:back_authors")])
+        rows.append([InlineKeyboardButton(text="(ничего не найдено)", callback_data="pod:noop")])  # 💬 пустой результат без несуществующего хендлера
+        rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])      # 💬 возвращаемся в существующий экран авторов
         return InlineKeyboardMarkup(inline_keyboard=rows)
+
 
     for global_index, (eid, e) in enumerate(items[start:end], start=start):
         title = (e or {}).get("title") or f"Эпизод {eid}"
