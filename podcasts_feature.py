@@ -1068,7 +1068,7 @@ async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
         pod_nav_msg_id=cb.message.message_id,  # 💬 меню “живёт” в одном сообщении
         pod_filter_level=None,  # 💬 фильтр сбрасывается при смене автора
         pod_filter_topic=None,  # 💬 фильтр сбрасывается при смене автора
-        pod_ep_page=0,  # 💬 пагинация с нуля
+        pod_ep_page=page,  # 💬 сохраняем текущую страницу, чтобы не ломать пагинацию
         pod_screen="episodes",  # 💬 теперь мы на экране эпизодов
     )
 
@@ -1078,19 +1078,18 @@ async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
     try:
         await cb.message.edit_text(
             text,
-            reply_markup=_kb_episodes(data, cb.from_user.id, author_id, None, None, 0),
+            reply_markup=_kb_episodes(data, author_id, None, None, page),
             parse_mode="HTML",
         )
     except Exception:
         msg = await cb.message.answer(
             text,
-            reply_markup=_kb_episodes(data, cb.from_user.id, author_id, None, None, 0),
+            reply_markup=_kb_episodes(data, author_id, None, None, page),
             parse_mode="HTML",
         )
         await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 fallback
 
     await cb.answer()
-
 
 
 
