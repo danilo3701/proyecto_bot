@@ -174,12 +174,21 @@ def _premium_active(user_id: int) -> bool:
     return False
 
 
-def _premium_paywall_text() -> str:
-    # 💬 текст для предупреждения, отдельным сообщением (его потом удалим)
+def _premium_paywall_text(user_id: int) -> str:
+    # 💬 единый Premium текст (как в лексике) + Telegram ID для Stripe custom field
     return (
-        "🔒 <b>Этот эпизод доступен в Premium</b>\n\n"
-        "Оплати по ссылке, затем вернись сюда и нажми <b>Проверить Premium</b>"
+        "🔒 <b>Premium доступ</b>\n\n"
+        "<b>Ты получаешь:</b>\n\n"
+        "✅ <b>Подкасты:</b> все эпизоды без ограничений + новые выпуски\n"
+        "✅ <b>Лексика:</b> все темы без лимитов + будущие темы\n"
+        "✅ <b>Мои слова:</b> безлимит на создание категорий\n"
+        "✅ <b>Грамматика:</b> доступ к разделу, когда он выйдет\n"
+        "✅ <b>Обновления:</b> все новые функции включены\n\n"
+        f"👉🏼<b>Твой Telegram ID:</b> <code>{user_id}</code>\n\n"
+        "Укажи его при оплате → потом нажми <b>✅ Проверить Premium</b>\n"
+        "🔓 Замки снимутся автоматически"
     )
+
 
 def _kb_premium_paywall() -> InlineKeyboardMarkup:
     # 💬 кнопки оплаты + проверка + назад (назад удаляет это сообщение)
@@ -1242,11 +1251,11 @@ async def pod_episode_locked(cb: CallbackQuery, state: FSMContext) -> None:
         await state.update_data(pod_premium_msg_id=None)
 
     msg = await cb.message.answer(
-        _premium_paywall_text(),
+        _premium_paywall_text(cb.from_user.id),  # 💬 Telegram ID для Stripe
         reply_markup=_kb_premium_paywall(),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
+        disable_web_page_preview=True
     )
+
     await state.update_data(pod_premium_msg_id=msg.message_id)
     await cb.answer()
 
