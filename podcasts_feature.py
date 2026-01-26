@@ -138,9 +138,11 @@ def _premium_active(user_id: int) -> bool:
         except Exception:
             pass
 
-    # 💬 поддержка 2 схем
+    # 💬 поддержка схем, core пишет active_until
+    # premium_users.json  = active_until
     # premium_access.json = until_ts
-    # premium_users.json  = premium_until
+    # legacy              = premium_until
+
     candidate_paths = [
         Path(PREMIUM_ACCESS_PATH),
         DATA_DIR / "premium_users.json",
@@ -161,7 +163,8 @@ def _premium_active(user_id: int) -> bool:
             data = json.loads(raw)
             rec = data.get(str(user_id)) or {}
 
-            until_ts = int(rec.get("until_ts") or rec.get("premium_until") or 0)
+            until_ts = int(rec.get("active_until") or rec.get("until_ts") or rec.get("premium_until") or 0)  # 💬 единый ключ Premium как в core
+
             if until_ts > now:
                 return True
 
@@ -1263,9 +1266,34 @@ async def pod_premium_check(cb: CallbackQuery, state: FSMContext) -> None:
     st = await state.get_data()
     ok = _premium_active(cb.from_user.id)
 
+    async def _delete_later(msgs, delay: int = 5):
+        await asyncio.sleep(delay)
+        for m in msgs:
+            try:
+                await m.delete()
+            except Exception:
+                pass  # 💬 тихо чистим реакцию
+
     if not ok:
-        await cb.answer("⏳ Premium ещё не активен. Попробуй ещё раз через немного.", show_alert=True)
+        try:
+            msgs = []
+            msgs.append(await cb.message.answer_sticker("CAACAgIAAxkBAAIWH2l21bO_xugzDFap9zCvHnG64If-AAKRMwACkKbJSE_T26pSZdruOAQ"))  # 💬 стикер нет Premium
+            msgs.append(await cb.message.answer("⏳ Premium ещё не активен. Если оплатил, подожди немного и нажми ещё раз.\nЕсли не срабатывает, напиши @Drancherrro"))  # 💬 подсказка
+            asyncio.create_task(_delete_later(msgs, 5))
+        except Exception:
+            pass
+
+        await cb.answer("⏳ Premium ещё не активен. Попробуй ещё раз через немного.\nЕсли не срабатывает, напиши @Drancherrro", show_alert=True)
         return
+
+    try:
+        msgs = []
+        msgs.append(await cb.message.answer_sticker("CAACAgIAAxkBAAIWI2l21eTj7Ea12Kr5IFDAPatBQzZoAALYLgACQ7nYSMxMa3UjThHMOAQ"))  # 💬 стикер Premium есть
+        msgs.append(await cb.message.answer("✅ Premium активен. Открываю доступ"))  # 💬 подтверждение
+        asyncio.create_task(_delete_later(msgs, 5))
+    except Exception:
+        pass
+
 
     await state.update_data(pod_premium_msg_id=None)
     try:
