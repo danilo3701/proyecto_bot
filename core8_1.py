@@ -9,7 +9,6 @@
 import os                           # Работа с файлами и папками
 
 # ⛔ Проверка отключения бота через переменную
-
 if (os.getenv("DISABLED") or "").strip().lower() == "true":
     print("🚫 DISABLED=true → бот не запускаем", flush=True)  # 💬 чтобы это точно попало в Railway logs
     raise SystemExit(0)
@@ -2857,109 +2856,68 @@ async def premium_back_topics(query: CallbackQuery, state: FSMContext):
     await state.set_state(LessonStates.choosing_topic)
 
 
-@dp.callback_query(lambda c: c.data == "premium:check", StateFilter(LessonStates.waiting_premium))
+@dp.callback_query(StateFilter(LessonStates.waiting_premium), F.data == "premium:check")
 async def premium_check(query: CallbackQuery, state: FSMContext):
     await query.answer()
 
-    async def _delete_later(msgs, delay: int = 5):
-        await asyncio.sleep(delay)
-        for m in msgs:
-            try:
-                await m.delete()
-            except Exception:
-                pass  # 💬 тихо чистим реакцию
+    premium_active = is_premium_active(query.from_user.id)
 
-    if not is_premium_active(query.from_user.id):
-        try:
-            msgs = []
-            msgs.append(await query.message.answer_sticker("CAACAgIAAxkBAAIWH2l21bO_xugzDFap9zCvHnG64If-AAKRMwACkKbJSE_T26pSZdruOAQ"))  # 💬 стикер нет Premium
-            msgs.append(await query.message.answer("⏳ Premium ещё не активен. Если оплатил, подожди немного и нажми ещё раз.\nЕсли не срабатывает, напиши @Drancherrro"))  # 💬 понятная подсказка
-            asyncio.create_task(_delete_later(msgs, 5))
-        except Exception:
-            pass
+    # 💬 Стикеры (оставляем твои id как есть)
+    success_sticker_id = "CAACAgIAAxkBAAEMum9nzoIHdN9yG2tKMw5JWS8F6Yq3xgACNQADr8ZRGsQqBq4Xh0XFNQQ"
+    fail_sticker_id = "CAACAgIAAxkBAAEMunBnzoI7E3L8A1v5b5zYxq9k0h58OgACMgADr8ZRGmL8Kqj3a9vFNQQ"
 
-        await query.answer("⏳ Premium пока не активен. Если оплатил, подожди 10–30 секунд и нажми ещё раз.\nЕсли не срабатывает, напиши @Drancherrro", show_alert=True)
-        return
+    sticker_id = success_sticker_id if premium_active else fail_sticker_id
 
-    try:
-        msgs = []
-        msgs.append(await query.message.answer_sticker("CAACAgIAAxkBAAIWI2l21eTj7Ea12Kr5IFDAPatBQzZoAALYLgACQ7nYSMxMa3UjThHMOAQ"))  # 💬 стикер Premium есть
-        msgs.append(await query.message.answer("✅ Premium активен. Открываю доступ"))  # 💬 подтверждение
-        asyncio.create_task(_delete_later(msgs, 5))
-    except Exception:
-        pass
+    # 💬 Показываем только "стикер + текст", без меню тем
+    sticker_msg = await send_sticker(query.message, sticker_id)
 
+    if premium_active:
+        text_msg = await query.message.answer(
+            "✅ Premium активен\n\n"
+            "🔓 Замки сняты автоматически\n"
+            "↩️ Возвращаю в главное меню"
+        )
+    else:
+        text_msg = await query.message.answer(
+            "❌ Premium не найден\n\n"
+            "Если ты только что оплатил(а) = подожди 1–2 минуты и нажми ещё раз"
+        )
 
-    data = await state.get_data()
-
-    # 💬 закрываем paywall
-    try:
-        await query.message.delete()
-    except Exception:
-        pass
-
-    # 💬 обновляем меню тем, чтобы замочки исчезли
-    origin_chat_id = data.get("premium_origin_chat_id")
-    origin_msg_id = data.get("premium_origin_msg_id")
-    category = data.get("premium_origin_category")
-    level = data.get("premium_origin_level")
-
-    if origin_chat_id and origin_msg_id and category and level:
-        try:
-            xp_json = load_xp_data()
-            user_id_str = str(query.from_user.id)
-
-            progress_map = {}
-            user_xp = (xp_json or {}).get(user_id_str, {}) or {}
-            topic_progress = user_xp.get("topic_progress", {}) or {}
-            for tk, tinfo in (topic_progress or {}).items():
-                try:
-                    progress_map[tk] = int((tinfo or {}).get("overall_progress", 0) or 0)
-                except Exception:
-                    progress_map[tk] = 0
-
-            buttons = []
-            for topic_key, info in topics.items():
-                cat = (info.get("category") or "").strip()
-                lvl = (info.get("level") or "").strip()
-                if cat != category or lvl != level:
-                    continue
-
-                title = info.get("visible_title") or topic_key
-                pct = int(progress_map.get(topic_key, 0) or 0)
-                if pct >= 100:
-                    title = f"✅ {_strike(title)} {pct}%"
-                elif pct > 0:
-                    title = f"{title} {pct}%"
-
-                buttons.append(InlineKeyboardButton(text=title, callback_data=f"topic:{topic_key}"))
-
-            if not buttons:
-                buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_categories"))
-            else:
-                rows = []
-                for i in range(0, len(buttons), 2):
-                    rows.append(buttons[i:i + 2])
-                rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_categories")])
-
-                await query.bot.edit_message_text(
-                    chat_id=origin_chat_id,
-                    message_id=origin_msg_id,
-                    text=f"📚 Выбери тему ({level})",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
-                )
-        except Exception:
-            pass
-
+    # 💬 Чистим мусор из paywall-сессии
     await state.update_data(
-        premium_msg_id=None,
-        premium_origin_chat_id=None,
-        premium_origin_msg_id=None,
         premium_origin_category=None,
         premium_origin_level=None,
-        premium_pending_topic=None
+        premium_pending_topic=None,
     )
-    await state.set_state(LessonStates.choosing_topic)
+
+    # 💬 Если Premium активен = выходим из paywall state и уходим в главное меню
+    if premium_active:
+        await state.set_state(None)
+
+        # 💬 Убираем paywall-сообщение, если оно ещё есть
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+
+        # 💬 Удаляем уведомления через пару секунд (чтобы не засорять чат)
+        await asyncio.sleep(3)
+        for msg in (sticker_msg, text_msg):
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+        # 💬 Главное меню (используем уже существующий start_handler)
+        return await start_handler(query.message, state)
+
+    # 💬 Если Premium не активен = остаёмся в текущем экране (paywall), без переходов
+    await asyncio.sleep(3)
+    for msg in (sticker_msg, text_msg):
+        try:
+            await msg.delete()
+        except Exception:
+            pass
 
 
 @dp.callback_query(LessonStates.choosing_subcategory, F.data.startswith("subcat:"))
