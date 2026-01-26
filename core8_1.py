@@ -6018,7 +6018,7 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     if not unlocked_ui:  # 💬 учитываем админ-override
 
         tail_lines: list[str] = [
-            "🔐 <b><i>Набери минимум 70% 📖</i></b>",
+            "🔐 <b><i>Набери минимум 50% 📖</i></b>",
             "🎀 <b><i>И разблокируй остальные</i></b>",
         ]
 
