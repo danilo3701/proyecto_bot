@@ -2867,9 +2867,13 @@ async def premium_check(query: CallbackQuery, state: FSMContext):
     fail_sticker_id = "CAACAgIAAxkBAAEMunBnzoI7E3L8A1v5b5zYxq9k0h58OgACMgADr8ZRGmL8Kqj3a9vFNQQ"
 
     sticker_id = success_sticker_id if premium_active else fail_sticker_id
-    # 💬 Показываем только "стикер + текст", без меню тем
-    sticker_msg = await query.message.answer_sticker(sticker_id)  # 💬 send_sticker не определён, используем встроенный метод
 
+    # 💬 Стикер = опционально (если file_id битый/невалидный, не падаем)
+    sticker_msg = None
+    try:
+        sticker_msg = await query.message.answer_sticker(sticker_id)
+    except TelegramBadRequest:
+        sticker_msg = None  # 💬 просто продолжим без стикера
 
     if premium_active:
         text_msg = await query.message.answer(
@@ -2880,11 +2884,11 @@ async def premium_check(query: CallbackQuery, state: FSMContext):
     else:
         text_msg = await query.message.answer(
             "❌ Premium не найден\n\n"
-            "Если ты только что оплатил(а) = подожди 1–2 минуты и нажми ещё раз"
+            "Если ты только что оплатил(а) — подожди 1–2 минуты и нажми ещё раз"
         )
 
     # 💬 Чистим мусор из paywall-сессии
-    await state.update_data(
+
         premium_origin_category=None,
         premium_origin_level=None,
         premium_pending_topic=None,
@@ -2903,10 +2907,13 @@ async def premium_check(query: CallbackQuery, state: FSMContext):
         # 💬 Удаляем уведомления через пару секунд (чтобы не засорять чат)
         await asyncio.sleep(3)
         for msg in (sticker_msg, text_msg):
+            if not msg:
+                continue  # 💬 если стикер не отправился, msg=None
             try:
                 await msg.delete()
             except Exception:
                 pass
+
 
         # 💬 Главное меню (используем уже существующий start_handler)
         return await start_handler(query.message, state)
@@ -2914,6 +2921,8 @@ async def premium_check(query: CallbackQuery, state: FSMContext):
     # 💬 Если Premium не активен = остаёмся в текущем экране (paywall), без переходов
     await asyncio.sleep(3)
     for msg in (sticker_msg, text_msg):
+        if not msg:
+            continue  # 💬 если стикер не отправился, msg=None
         try:
             await msg.delete()
         except Exception:
