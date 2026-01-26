@@ -652,17 +652,20 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
         else:
             rows.append([InlineKeyboardButton(text=title, callback_data=f"pod:ep:{author_id}:{eid}")])
 
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"pod:author:{author_id}:{page-1}"))
-    nav.append(InlineKeyboardButton(text=f"{page+1}/{pages}", callback_data="pod:filter"))
-    if page < pages - 1:
-        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"pod:author:{author_id}:{page+1}"))
-    if nav:
-        rows.append(nav)
+    prev_cb = f"pod:author:{author_id}:{page-1}" if page > 0 else "pod:noop"
+    next_cb = f"pod:author:{author_id}:{page+1}" if page < pages - 1 else "pod:noop"
+
+    rows.append(
+        [
+            InlineKeyboardButton(text="⬅️", callback_data=prev_cb),
+            InlineKeyboardButton(text=f"{page+1}/{pages}", callback_data="pod:filter"),
+            InlineKeyboardButton(text="➡️", callback_data=next_cb),
+        ]
+    )  # 💬 стрелки всегда видны, на краях = noop
 
     rows.append([InlineKeyboardButton(text="🔎 Фильтры", callback_data="pod:filter")])
-    rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:back_authors")])
+    rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])  # 💬 возвращаемся в существующий хендлер
+"pod:back_authors")])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -935,8 +938,10 @@ async def pod_back_authors(cb: CallbackQuery, state: FSMContext) -> None:
         pod_filter_level=None,  # 💬 сбрасываем фильтр при смене автора
         pod_filter_topic=None,  # 💬 сбрасываем фильтр при смене автора
         pod_ep_page=0,  # 💬 сбрасываем пагинацию
+        pod_show_filter_panel=False,  # 💬 выключаем режим ввода фильтра
         pod_screen="authors",  # 💬 возвращаемся на экран авторов
     )
+
 
 
     try:
@@ -1059,32 +1064,59 @@ async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.answer("Автор не найден", show_alert=True)
         return
 
-    await state.update_data(
-        pod_author_id=author_id,
-        pod_ep_id=None,
-        pod_idx=0,
-        pod_notes_idx=0,  # 💬 индекс для режима "Мои заметки"
-        pod_frag_msg_id=None,
-        pod_nav_msg_id=cb.message.message_id,  # 💬 меню “живёт” в одном сообщении
-        pod_filter_level=None,  # 💬 фильтр сбрасывается при смене автора
-        pod_filter_topic=None,  # 💬 фильтр сбрасывается при смене автора
-        pod_ep_page=page,  # 💬 сохраняем текущую страницу, чтобы не ломать пагинацию
-        pod_screen="episodes",  # 💬 теперь мы на экране эпизодов
-    )
+    st = await state.get_data()
+
+    is_page_nav = (
+        bool(st.get("pod_ctx"))
+        and st.get("pod_screen") == "episodes"
+        and str(st.get("pod_author_id")) == str(author_id)
+        and len(parts) >= 4
+    )  # 💬 если это тот же автор и есть :page = это листание, фильтр не трогаем
+
+    if is_page_nav:
+        level_key = st.get("pod_filter_level")
+        topic_key = st.get("pod_filter_topic")
+        show_help = bool(st.get("pod_show_filter_panel"))
+
+        await state.update_data(
+            pod_author_id=author_id,
+            pod_ep_id=None,
+            pod_nav_msg_id=cb.message.message_id,
+            pod_ep_page=page,  # 💬 обновляем только страницу
+            pod_screen="episodes",
+        )
+    else:
+        level_key = None
+        topic_key = None
+        show_help = False
+
+        await state.update_data(
+            pod_author_id=author_id,
+            pod_ep_id=None,
+            pod_idx=0,
+            pod_notes_idx=0,  # 💬 индекс для режима "Мои заметки"
+            pod_frag_msg_id=None,
+            pod_nav_msg_id=cb.message.message_id,  # 💬 меню “живёт” в одном сообщении
+            pod_filter_level=None,  # 💬 фильтр сбрасывается при смене автора
+            pod_filter_topic=None,  # 💬 фильтр сбрасывается при смене автора
+            pod_ep_page=page,  # 💬 стартуем с нужной страницы
+            pod_show_filter_panel=False,  # 💬 новый автор = выключаем режим ввода фильтра
+            pod_screen="episodes",  # 💬 теперь мы на экране эпизодов
+        )
 
     author_name = author.get("name", "Автор")  # 💬 имя автора для заголовка
-    text = _episodes_menu_html(author_name, None, None)  # 💬 HTML меню без фильтра
+    text = _episodes_menu_html(author_name, level_key, topic_key, show_help=show_help)  # 💬 меню с учетом фильтра/панели
 
     try:
         await cb.message.edit_text(
             text,
-            reply_markup=_kb_episodes(data, author_id, None, None, page),
+            reply_markup=_kb_episodes(data, cb.from_user.id, author_id, level_key, topic_key, page),
             parse_mode="HTML",
         )
     except Exception:
         msg = await cb.message.answer(
             text,
-            reply_markup=_kb_episodes(data, author_id, None, None, page),
+            reply_markup=_kb_episodes(data, cb.from_user.id, author_id, level_key, topic_key, page),
             parse_mode="HTML",
         )
         await state.update_data(pod_nav_msg_id=msg.message_id)  # 💬 fallback
@@ -1217,8 +1249,9 @@ async def pod_ep_page_nav(cb: CallbackQuery, state: FSMContext) -> None:
 async def pod_filter_input(message: Message, state: FSMContext) -> None:
     # 💬 пользователь пишет ключи фильтра в чат, мы удаляем сообщение и обновляем инлайн-список
     st = await state.get_data()
-    if not st.get("pod_ctx") or st.get("pod_screen") != "episodes":
-        raise SkipHandler  # 💬 не наш экран = отдаём сообщение другим хендлерам (админке и т.д.)
+    if (not st.get("pod_ctx")) or (st.get("pod_screen") != "episodes") or (not st.get("pod_show_filter_panel")):
+        raise SkipHandler  # 💬 ввод фильтра слушаем только когда открыта панель фильтра
+
 
     author_id = st.get("pod_author_id")
     nav_msg_id = st.get("pod_nav_msg_id")
@@ -1278,6 +1311,15 @@ async def pod_filter_input(message: Message, state: FSMContext) -> None:
         pod_filter_topic=topic_key,
         pod_ep_page=0,  # 💬 при новом фильтре всегда с первой страницы
     )
+    try:
+        if upper == "RESET":
+            hint = await message.answer("🧹 Фильтр сброшен")  # 💬 короткое подтверждение
+        else:
+            hint = await message.answer(f"✅ Отфильтровано по ключу: {upper}")  # 💬 подтверждаем введённый ключ
+        asyncio.create_task(_autodelete_message(message.bot, message.chat.id, hint.message_id, delay=2))
+    except Exception:
+        pass
+
 
     data = _read_podcasts()
     author = data.get("authors", {}).get(author_id, {})
