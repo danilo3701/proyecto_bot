@@ -2867,9 +2867,9 @@ async def premium_check(query: CallbackQuery, state: FSMContext):
     fail_sticker_id = "CAACAgIAAxkBAAEMunBnzoI7E3L8A1v5b5zYxq9k0h58OgACMgADr8ZRGmL8Kqj3a9vFNQQ"
 
     sticker_id = success_sticker_id if premium_active else fail_sticker_id
-
     # 💬 Показываем только "стикер + текст", без меню тем
-    sticker_msg = await send_sticker(query.message, sticker_id)
+    sticker_msg = await query.message.answer_sticker(sticker_id)  # 💬 send_sticker не определён, используем встроенный метод
+
 
     if premium_active:
         text_msg = await query.message.answer(
