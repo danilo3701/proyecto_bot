@@ -665,7 +665,6 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
 
     rows.append([InlineKeyboardButton(text="🔎 Фильтры", callback_data="pod:filter")])
     rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])  # 💬 возвращаемся в существующий хендлер
-"pod:back_authors")])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1272,6 +1271,15 @@ async def pod_filter_input(message: Message, state: FSMContext) -> None:
     else:
         tokens = re.findall(r"[A-Z0-9]+", upper)
         tokens = [t for t in tokens if t]
+
+        level_alias = {
+            "A0": "B", "A1": "B",
+            "A2": "X1", "B1": "X1",
+            "B2": "X2", "C1": "X2", "C2": "X2",
+        }  # 💬 позволяем вводить A1/A2/B1/B2/C1, а внутри храним B/X1/X2 как в JSON
+
+        tokens = [level_alias.get(t, t) for t in tokens]  # 💬 нормализуем уровни перед проверкой
+
 
         level_set = {"B", "X1", "X2"}
         topic_set = {"C", "D", "G"}  # 💬 N убрали, новости входят в D
