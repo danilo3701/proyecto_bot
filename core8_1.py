@@ -2829,9 +2829,34 @@ async def premium_back_topics(query: CallbackQuery, state: FSMContext):
 async def premium_check(query: CallbackQuery, state: FSMContext):
     await query.answer()
 
+    async def _delete_later(msgs, delay: int = 5):
+        await asyncio.sleep(delay)
+        for m in msgs:
+            try:
+                await m.delete()
+            except Exception:
+                pass  # 💬 тихо чистим реакцию
+
     if not is_premium_active(query.from_user.id):
-        await query.answer("Premium пока не активен. Если оплатил, подожди 10–30 секунд и нажми ещё раз.", show_alert=True)
+        try:
+            msgs = []
+            msgs.append(await query.message.answer_sticker("CAACAgIAAxkBAAIWH2l21bO_xugzDFap9zCvHnG64If-AAKRMwACkKbJSE_T26pSZdruOAQ"))  # 💬 стикер нет Premium
+            msgs.append(await query.message.answer("⏳ Premium ещё не активен. Если оплатил, подожди немного и нажми ещё раз.\nЕсли не срабатывает, напиши @Drancherrro"))  # 💬 понятная подсказка
+            asyncio.create_task(_delete_later(msgs, 5))
+        except Exception:
+            pass
+
+        await query.answer("⏳ Premium пока не активен. Если оплатил, подожди 10–30 секунд и нажми ещё раз.\nЕсли не срабатывает, напиши @Drancherrro", show_alert=True)
         return
+
+    try:
+        msgs = []
+        msgs.append(await query.message.answer_sticker("CAACAgIAAxkBAAIWI2l21eTj7Ea12Kr5IFDAPatBQzZoAALYLgACQ7nYSMxMa3UjThHMOAQ"))  # 💬 стикер Premium есть
+        msgs.append(await query.message.answer("✅ Premium активен. Открываю доступ"))  # 💬 подтверждение
+        asyncio.create_task(_delete_later(msgs, 5))
+    except Exception:
+        pass
+
 
     data = await state.get_data()
 
