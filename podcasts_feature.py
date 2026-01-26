@@ -578,38 +578,41 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
     def _filtered_items() -> list:
         items_local = []
         for eid, e in episodes.items():
+            # 💬 1) сначала ограничиваем по автору (иначе фильтр и поиск “плывут”)
+            if str((e or {}).get("author_id")) != str(author_id):
+                continue
+
+            # 💬 2) фильтр по уровню
             if level_key:
                 if _episode_level_key(e) != str(level_key).strip().upper():
                     continue
 
+            # 💬 3) фильтр по разделу/категории
             if topic_key:
                 tk = topic_key.strip().upper()
-            
-                # 💬 поддержка старых полей topics/topic + нового поля category
-                topics = e.get("topics") or e.get("topic") or []
+
+                topics = (e or {}).get("topics") or (e or {}).get("topic") or []
                 if isinstance(topics, str):
                     topics = [topics]
                 topics_norm = {str(t).strip().upper() for t in topics if t}
-            
-                category = (e.get("category") or "").strip().lower()
-            
-                # 💬 маппинг ваших ключей на category
-                if tk == "C":  # разговор двух людей
-                    if not (("C" in topics_norm) or (category == "talks")):
-                        return False
-                elif tk == "D":  # истории
-                    if not (("D" in topics_norm) or (category == "daily")):
-                        return False
-                elif tk == "G":  # грамматика и лексика
-                    if not (("G" in topics_norm) or (category in ("grammar", "lexica"))):
-                        return False
-                else:
-                    # 💬 если кто-то сохранит нестандартный ключ = проверяем по topics_norm
-                    if tk not in topics_norm:
-                        return False
 
+                category = str((e or {}).get("category") or "").strip().lower()
+
+                ok_topic = True
+                if tk == "C":  # разговор двух людей
+                    ok_topic = (("C" in topics_norm) or (category == "talks"))
+                elif tk == "D":  # истории
+                    ok_topic = (("D" in topics_norm) or (category == "daily"))
+                elif tk == "G":  # грамматика и лексика
+                    ok_topic = (("G" in topics_norm) or (category in ("grammar", "lexica")))
+                else:
+                    ok_topic = (tk in topics_norm)
+
+                if not ok_topic:
+                    continue  # 💬 важно: НЕ return, иначе ломаем выдачу целиком
 
             items_local.append((str(eid), e))
+
 
         def _sort_key(pair):
             eid_local, e_local = pair
@@ -658,7 +661,7 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
     if nav:
         rows.append(nav)
 
-    rows.append([InlineKeyboardButton(text="🔎 Фильтр", callback_data="pod:filter")])
+    rows.append([InlineKeyboardButton(text="🔎 Фильтры", callback_data="pod:filter")])
     rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:back_authors")])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -1039,11 +1042,20 @@ async def pod_notes_controls(cb: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("pod:author:"))
 async def pod_author(cb: CallbackQuery, state: FSMContext) -> None:
-    author_id = cb.data.split(":")[-1]
-    data = _read_podcasts()
-    author = data.get("authors", {}).get(author_id)
+    parts = (cb.data or "").split(":")
+    # 💬 поддержка 2 форматов:
+    # 💬 1) pod:author:<author_id>
+    # 💬 2) pod:author:<author_id>:<page>
+    author_id = parts[2] if len(parts) >= 3 else None
 
-    if not author:
+    page = 0
+    if len(parts) >= 4 and str(parts[3]).isdigit():
+        page = int(parts[3])
+
+    data = _read_podcasts()
+    author = (data.get("authors") or {}).get(author_id)
+
+    if not author_id or not author:
         await cb.answer("Автор не найден", show_alert=True)
         return
 
@@ -1155,12 +1167,6 @@ async def pod_filter_toggle(cb: CallbackQuery, state: FSMContext) -> None:
     except Exception:
         pass
 
-    await cb.answer()
-
-
-@router.callback_query(F.data == "pod:noop")
-async def pod_noop(cb: CallbackQuery) -> None:
-    # 💬 чтобы «страница 1/3» не крутила часики
     await cb.answer()
 
 
