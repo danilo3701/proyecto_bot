@@ -471,48 +471,39 @@ def _kb_subscribe_check() -> InlineKeyboardMarkup:
         ]
     )
 
+def _episodes_menu_html(author_name: str, level_key: str | None, topic_key: str | None, show_help: bool = False) -> str:
+    # 💬 Компактный экран эпизодов (по умолчанию) + разворачиваемый help по фильтрам
+    filter_line = ""
+    if level_key or topic_key:
+        parts = []
+        if level_key:
+            parts.append(level_key.upper())
+        if topic_key:
+            parts.append(topic_key.upper())
+        filter_line = f"<b>ОТФИЛЬТРОВАНО ПО =</b> <code>{' '.join(parts)}</code>\n\n"
 
-def _episodes_menu_html(author_name: str, level_key: Optional[str] = None, topic_key: Optional[str] = None) -> str:
-    # 💬 текст экрана эпизодов (HTML) = весь блок жирный, курсив сохраняем, показываем активный фильтр + инструкция
+    if not show_help:
+        return (
+            f"<b>🎙 {author_name}</b>\n"
+            "Пользуйся кнопкой <b>🔎 Фильтры</b> для быстрого поиска\n\n"
+            f"{filter_line}"
+            "<b>Выбери эпизод:</b>"
+        )
 
-    level_map = {
-        "B": "Basico",
-        "X1": "A2–B1",
-        "X2": "B2–C1",
-    }
-    topic_map = {
-        "C": "Conversación",
-        "D": "Diario",
-        "G": "GramaLexico",
-    }
-
-    parts = []
-    if level_key in level_map:
-        parts.append(level_map[level_key])
-    if topic_key in topic_map:
-        parts.append(topic_map[topic_key])
-
-    flt_line = ""
-    if parts:
-        flt_line = f"\nОТФИЛЬТРОВАНО ПО = {' + '.join(parts)}\n"  # 💬 строка активного фильтра
-
+    # 💬 Развёрнутый экран подсказки (открывается по кнопке «Фильтры»)
     return (
-        f"<b>🎙 {author_name}"
-        f"{flt_line}\n"
-        "💫 Фильтр по ключам\n"
-        "✍🏽 Напиши в чат ключ\n\n"
-        "🔑 Уровень\n"
-        "«B» <i>(базовый)</i>\n"
-        "«X1» <i>(A2–B1)</i>\n"
-        "«X2» <i>(B2–C1)</i>\n\n"
-        "🔑 Тема\n"
-        "«C» <i>(болтовня 2 людей)</i>\n"
-        "«D» <i>(дневной | новости)</i>\n"
-        "«G» <i>(грамматика | лексика)</i>\n\n"
-        "✅ <i>Пример:</i> <b>«X1 G»</b>\n"
-        "<b>«RESET»</b> = Сброс\n\n"
-        "Выбери эпизод:</b>"
+        f"<b>🎙 {author_name}</b>\n\n"
+        f"{filter_line}"
+        "🔎 <b>Фильтр по ключам</b>\n\n"
+        "<b>Уровень:</b> A1 | A2 | B1 | B2 | C1\n"
+        "<b>Раздел:</b> C = разговор двух людей | D = истории | G = грамматика и лексика\n\n"
+        "<b>Примеры ввода:</b>\n"
+        "<code>a2</code>\n"
+        "<code>b1 g</code>\n"
+        "<code>a1 c</code>\n\n"
+        "Чтобы сбросить = нажми «🔄 Сбросить»"
     )
+
 
 
 
@@ -569,7 +560,7 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
     episodes = data.get("episodes") or {}
     premium_active = _premium_active(user_id)
 
-    PER_PAGE = 8
+    PER_PAGE = 5
 
     def _lock_title(s: str) -> str:
         s = (s or "").strip()
@@ -592,12 +583,31 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
                     continue
 
             if topic_key:
-                topics = (e or {}).get("topics") or (e or {}).get("topic") or []
+                tk = topic_key.strip().upper()
+            
+                # 💬 поддержка старых полей topics/topic + нового поля category
+                topics = e.get("topics") or e.get("topic") or []
                 if isinstance(topics, str):
                     topics = [topics]
-                topics_norm = {str(t).strip().lower() for t in topics if str(t).strip()}
-                if str(topic_key).strip().lower() not in topics_norm:
-                    continue
+                topics_norm = {str(t).strip().upper() for t in topics if t}
+            
+                category = (e.get("category") or "").strip().lower()
+            
+                # 💬 маппинг ваших ключей на category
+                if tk == "C":  # разговор двух людей
+                    if not (("C" in topics_norm) or (category == "talks")):
+                        return False
+                elif tk == "D":  # истории
+                    if not (("D" in topics_norm) or (category == "daily")):
+                        return False
+                elif tk == "G":  # грамматика и лексика
+                    if not (("G" in topics_norm) or (category in ("grammar", "lexica"))):
+                        return False
+                else:
+                    # 💬 если кто-то сохранит нестандартный ключ = проверяем по topics_norm
+                    if tk not in topics_norm:
+                        return False
+
 
             items_local.append((str(eid), e))
 
@@ -1085,7 +1095,13 @@ async def pod_filter_reset(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.answer()
         return
 
-    await state.update_data(pod_filter_level=None, pod_filter_topic=None, pod_ep_page=0)  # 💬 сброс фильтров
+    await state.update_data(
+        pod_filter_level=None,
+        pod_filter_topic=None,
+        pod_ep_page=0,
+        pod_show_filter_panel=False,  # 💬 при сбросе = возвращаем компактный экран
+    )
+
 
     data = _read_podcasts()
     author = data.get("authors", {}).get(author_id, {})
@@ -1101,6 +1117,50 @@ async def pod_filter_reset(cb: CallbackQuery, state: FSMContext) -> None:
     except Exception:
         pass
 
+    await cb.answer()
+
+
+@router.callback_query(F.data == "pod:filter")
+async def pod_filter_toggle(cb: CallbackQuery, state: FSMContext) -> None:
+    # 💬 Тоггл: показываем/прячем help по фильтрам внутри того же сообщения
+    st = await state.get_data()
+    if not st.get("pod_ctx") or st.get("pod_screen") != "episodes":
+        await cb.answer()
+        return
+
+    author_id = st.get("pod_author_id")
+    if not author_id:
+        await cb.answer()
+        return
+
+    show_help = not bool(st.get("pod_show_filter_panel"))
+    await state.update_data(pod_show_filter_panel=show_help)  # 💬 запоминаем режим
+
+    level_key = st.get("pod_filter_level")
+    topic_key = st.get("pod_filter_topic")
+    page = int(st.get("pod_ep_page") or 0)
+
+    data = _read_podcasts()
+    author = data.get("authors", {}).get(author_id, {})
+    author_name = author.get("name", "Автор")
+
+    text = _episodes_menu_html(author_name, level_key, topic_key, show_help=show_help)
+
+    try:
+        await cb.message.edit_text(
+            text,
+            reply_markup=_kb_episodes(data, cb.from_user.id, author_id, level_key, topic_key, page),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    await cb.answer()
+
+
+@router.callback_query(F.data == "pod:noop")
+async def pod_noop(cb: CallbackQuery) -> None:
+    # 💬 чтобы «страница 1/3» не крутила часики
     await cb.answer()
 
 
