@@ -988,15 +988,18 @@ def _extract_tg_id_from_checkout_session(session_obj: dict) -> Optional[int]:
 
 def _premium_paywall_text(user_id: int) -> str:
     return (
-        "<b>🔒 Это Premium</b>\n\n"
-        "Бесплатно доступно:\n"
-        f"• первые {FREE_TOPICS_LIMIT} тем\n"
-        "• первые 10 подкастов\n\n"
-        "Твой Telegram ID:\n"
-        f"<code>{user_id}</code>\n\n"
-        "Оплати по кнопке ниже и в форме оплаты укажи Telegram ID\n"
-        "Потом вернись сюда и нажми «✅ Проверить Premium»"
+        "🔒 <b>Premium доступ</b>\n\n"
+        "<b>Ты получаешь:</b>\n\n"
+        "✅ <b>Подкасты:</b> все эпизоды без ограничений + новые выпуски\n"
+        "✅ <b>Лексика:</b> все темы без лимитов + будущие темы\n"
+        "✅ <b>Мои слова:</b> безлимит на создание категорий\n"
+        "✅ <b>Грамматика:</b> доступ к разделу, когда он выйдет\n"
+        "✅ <b>Обновления:</b> все новые функции включены\n\n"
+        f"👉🏼<b>Твой Telegram ID:</b> <code>{user_id}</code>\n\n"
+        "Укажи его при оплате → потом нажми <b>✅ Проверить Premium</b>\n"
+        "🔓 Замки снимутся автоматически"  # 💬 продающий paywall + инструкция по ID
     )
+
 
 
 def _premium_paywall_kb(back_cb: str) -> InlineKeyboardMarkup:
