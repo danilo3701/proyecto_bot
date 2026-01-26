@@ -471,8 +471,22 @@ def _kb_subscribe_check() -> InlineKeyboardMarkup:
         ]
     )
 
+
 def _episodes_menu_html(author_name: str, level_key: str | None, topic_key: str | None, show_help: bool = False) -> str:
     # 💬 Компактный экран эпизодов (по умолчанию) + разворачиваемый help по фильтрам
+    def _norm_level_key(s: str | None) -> str | None:
+        # 💬 приводим уровни к B/X (поддержка старых X1/X2 и ввода A1/B2 и т.д.)
+        if not s:
+            return None
+        t = str(s).strip().upper()
+        if t in {"X1", "X2", "A2", "B1", "B2", "C1", "C2", "X"}:
+            return "X"
+        if t in {"A0", "A1", "B"}:
+            return "B"
+        return t
+
+    level_key = _norm_level_key(level_key)
+
     filter_line = ""
     if level_key or topic_key:
         parts = []
@@ -495,13 +509,13 @@ def _episodes_menu_html(author_name: str, level_key: str | None, topic_key: str 
         f"<b>🎙 {author_name}</b>\n\n"
         f"{filter_line}"
         "🔎 <b>Фильтр по ключам</b>\n\n"
-        "<b>Уровень:</b> A1 | A2 | B1 | B2 | C1\n"
-        "<b>Раздел:</b> C = разговор двух людей | D = истории | G = грамматика и лексика\n\n"
-        "<b>Примеры ввода:</b>\n"
-        "<code>a2</code>\n"
-        "<code>b1 g</code>\n"
-        "<code>a1 c</code>\n\n"
-        "Чтобы сбросить = нажми «🔄 Сбросить»"
+        "<b>Уровень:</b> B = basic (начальный) | X = средний\n"
+        "<b>Разделы:</b>\n"
+        "C = разговор двух людей\n"
+        "D = диалоги из истории\n"
+        "G = грамматика и лексика\n\n"
+        "<b>Пример ввода:</b> <code>b</code> | <code>x</code> | <code>x g</code> | <code>b c</code> | <code>reset</code>\n\n"
+        "Чтобы сбросить фильтр = нажми «🧹 СБРОСИТЬ ФИЛЬТР» или напиши <code>reset</code>"
     )
 
 
@@ -562,6 +576,20 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
 
     PER_PAGE = 5
 
+    def _norm_level_key(s: str | None) -> str | None:
+        # 💬 приводим уровни к B/X (поддержка старых X1/X2 и мусорных значений)
+        if not s:
+            return None
+        t = str(s).strip().upper()
+        if t in {"X1", "X2", "A2", "B1", "B2", "C1", "C2", "X"}:
+            return "X"
+        if t in {"A0", "A1", "B"}:
+            return "B"
+        return t
+
+    level_key = _norm_level_key(level_key)  # 💬 нормализуем входящий фильтр уровня
+
+
     def _lock_title(s: str) -> str:
         s = (s or "").strip()
         if not s:
@@ -573,7 +601,17 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
     def _episode_level_key(e: dict) -> str:
         raw = (e or {}).get("level") or (e or {}).get("level_key") or (e or {}).get("lvl") or ""
         raw = str(raw).strip().upper()
+
+        # 💬 приводим эпизодные уровни к B/X, чтобы новые фильтры работали со старыми данными
+        if raw in {"X1", "X2"}:
+            return "X"
+        if raw in {"A2", "B1", "B2", "C1", "C2", "X"}:
+            return "X"
+        if raw in {"A0", "A1", "B"}:
+            return "B"
+
         return raw
+
 
     def _filtered_items() -> list:
         items_local = []
@@ -1273,16 +1311,16 @@ async def pod_filter_input(message: Message, state: FSMContext) -> None:
         tokens = [t for t in tokens if t]
 
         level_alias = {
-            "A0": "B", "A1": "B",
-            "A2": "X1", "B1": "X1",
-            "B2": "X2", "C1": "X2", "C2": "X2",
-        }  # 💬 позволяем вводить A1/A2/B1/B2/C1, а внутри храним B/X1/X2 как в JSON
+            "A0": "B", "A1": "B", "B": "B",
+            "A2": "X", "B1": "X", "B2": "X", "C1": "X", "C2": "X",
+            "X1": "X", "X2": "X", "X": "X",
+        }  # 💬 вводим B/X (и принимаем старые X1/X2 + A1/B2 и т.д.)
 
         tokens = [level_alias.get(t, t) for t in tokens]  # 💬 нормализуем уровни перед проверкой
 
-
-        level_set = {"B", "X1", "X2"}
+        level_set = {"B", "X"}
         topic_set = {"C", "D", "G"}  # 💬 N убрали, новости входят в D
+
 
 
         level_key = None
@@ -1703,15 +1741,15 @@ def _kb_admin_episode_categories() -> InlineKeyboardMarkup:
     )
     
 def _kb_admin_episode_levels() -> InlineKeyboardMarkup:
-    # 💬 выбор уровня эпизода (сохраняем как level_key = B/X1/X2)
+    # 💬 выбор уровня эпизода (сохраняем как level_key = B/X)
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="«B» Basico (базовый)", callback_data="podadm:eplvl:B")],
-            [InlineKeyboardButton(text="«X1» A2–B1 (средний)", callback_data="podadm:eplvl:X1")],
-            [InlineKeyboardButton(text="«X2» B2–C1 (продвинутый)", callback_data="podadm:eplvl:X2")],
+            [InlineKeyboardButton(text="«B» Basic (начальный)", callback_data="podadm:eplvl:B")],
+            [InlineKeyboardButton(text="«X» Средний", callback_data="podadm:eplvl:X")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="podadm:back")],
         ]
     )
+)
 
 
 def _kb_admin_authors_pick(data: Dict[str, Any], cb_prefix: str) -> InlineKeyboardMarkup:
@@ -1924,9 +1962,10 @@ async def admin_pick_episode_category(cb: CallbackQuery, state: FSMContext) -> N
 async def admin_pick_episode_level(cb: CallbackQuery, state: FSMContext) -> None:
     # 💬 выбираем уровень и идём к вводу названия
     level = cb.data.split(":")[-1].strip().upper()
-    if level not in {"B", "X1", "X2"}:
-        await cb.answer("❗ Используй кнопки уровня (B, X1, X2).", show_alert=True)
+    if level not in {"B", "X"}:
+        await cb.answer("❗ Используй кнопки уровня (B, X).", show_alert=True)
         return
+
 
     await state.update_data(adm_episode_level=level)  # 💬 сохраняем level_key в FSM
     await state.set_state(PodcastAdminStates.waiting_episode_title)  # 💬 дальше как было
@@ -2039,8 +2078,8 @@ async def admin_episode_audio(message: Message, state: FSMContext) -> None:
     category = (st.get("adm_episode_category") or "").strip()  # 💬 категория эпизода из выбора кнопкой
 
     level_key = (st.get("adm_episode_level") or "B").strip().upper()  # 💬 уровень эпизода для фильтра (fallback = B)
-    if level_key not in {"B", "X1", "X2"}:
-        level_key = "X1"  # 💬 защита от мусора
+    if level_key not in {"B", "X"}:
+        level_key = "X"  # 💬 защита от мусора
 
 
     if not author_id or not title:
