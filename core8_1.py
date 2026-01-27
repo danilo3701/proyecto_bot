@@ -2418,19 +2418,16 @@ async def start_handler(message: Message, state: FSMContext):
     await state.update_data(menu_hidden=False)  # 💬 меню на экране
     await state.set_state(LessonStates.choosing_category)  # 💬 ждём выбор кнопок меню
 
-
 @dp.callback_query(F.data == "settings:subscription")
-async def settings_subscription_cb(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
-
+async def settings_subscription_cb(callback: CallbackQuery):
     uid = callback.from_user.id
+
     data = load_premium_users()
     row = (data or {}).get(str(uid), {})
     if not isinstance(row, dict):
         row = {}
 
-    premium_active = is_premium_active(uid)
-    until_ts = 0
+    # 💬 Берём сохранённые данные
     try:
         until_ts = int(row.get("active_until", 0) or 0)
     except Exception:
@@ -2438,7 +2435,41 @@ async def settings_subscription_cb(callback: CallbackQuery, state: FSMContext):
 
     plan = str(row.get("plan", "") or "")
     cust_id = str(row.get("stripe_customer_id", "") or "")
+    sub_id = str(row.get("stripe_subscription_id", "") or "")
 
+    # 💬 Синхронизация срока из Stripe при открытии/обновлении
+    # Это лечит ситуацию, когда вебхук раньше падал и active_until остался коротким
+    if sub_id and stripe is not None and STRIPE_SECRET_KEY:
+        try:
+            stripe.api_key = STRIPE_SECRET_KEY
+            new_end = _stripe_get_subscription_period_end(sub_id)
+            if new_end and int(new_end) > int(until_ts or 0):
+                # 💬 Обновляем файл премиума правильным сроком
+                guessed_plan = plan or _stripe_guess_plan_from_subscription(sub_id)
+                _set_premium_user(
+                    uid,
+                    int(new_end),
+                    plan=guessed_plan,
+                    stripe_customer_id=cust_id or None,
+                    stripe_subscription_id=sub_id,
+                )
+
+                # 💬 Перечитываем, чтобы UI показал уже обновлённое значение
+                data = load_premium_users()
+                row = (data or {}).get(str(uid), {})
+                try:
+                    until_ts = int((row or {}).get("active_until", 0) or 0)
+                except Exception:
+                    until_ts = 0
+                plan = str((row or {}).get("plan", "") or plan)
+                cust_id = str((row or {}).get("stripe_customer_id", "") or cust_id)
+        except Exception:
+            # 💬 Не валим меню из-за проблем Stripe, просто показываем то что есть
+            pass
+
+    premium_active = is_premium_active(uid)
+
+    # ===== Отображение срока
     until_str = "—"
     if until_ts:
         try:
@@ -2447,6 +2478,7 @@ async def settings_subscription_cb(callback: CallbackQuery, state: FSMContext):
         except Exception:
             until_str = str(until_ts)
 
+    # ===== Customer Portal
     portal_url = ""
     if cust_id and stripe is not None and STRIPE_SECRET_KEY:
         try:
@@ -2460,24 +2492,27 @@ async def settings_subscription_cb(callback: CallbackQuery, state: FSMContext):
             logging.exception(f"Stripe portal session failed: {e}")
             portal_url = ""
 
+    # ===== Текст
     if premium_active:
         txt = (
             "💎 <b>Моя подписка</b>\n\n"
             "✅ <b>Premium активен</b>\n"
             f"⏳ Действует до: <b>{until_str}</b>\n\n"
-            "Открыто: лексика + подкасты + будущие разделы"  # 💬 единый Premium на всё
+            "Открыто: лексика + подкасты + будущие разделы"
         )
     else:
         txt = (
             "💎 <b>Моя подписка</b>\n\n"
             "🔒 <b>Premium не активен</b>\n\n"
-            "Оформи Premium, чтобы снять замки во всех разделах"  # 💬 коротко и ясно
+            "Оформи Premium, чтобы снять замки во всех разделах"
         )
 
+    # ===== Кнопки
     kb_rows = []
 
+    # 💬 Явная отмена через Customer Portal
     if portal_url:
-        kb_rows.append([InlineKeyboardButton(text="🧾 Управлять подпиской", url=portal_url)])  # 💬 Stripe Customer Portal
+        kb_rows.append([InlineKeyboardButton(text="❌ Отменить подписку", url=portal_url)])
 
     if premium_active:
         kb_rows.append([InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check_settings")])
@@ -2490,14 +2525,22 @@ async def settings_subscription_cb(callback: CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="💎 Premium 49,00€ в год", url=PREMIUM_PAYLINK_YEAR)],
             [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check_settings")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")],
-        ])  # 💬 покупка прямо отсюда
+        ])
 
     kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
+    # 💬 Главное: НЕ плодим сообщения
     try:
-        await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")  # 💬 не плодим сообщения
+        await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
+    except TelegramBadRequest as e:
+        # 💬 Частый кейс: "message is not modified" = просто не шлём новое сообщение
+        if "message is not modified" in str(e).lower():
+            await callback.answer("✅")
+            return
+        # 💬 Если нельзя редактировать (например, уже не то сообщение) = мягкий fallback
+        await callback.message.answer(txt, reply_markup=kb, parse_mode="HTML")
     except Exception:
-        await callback.message.answer(txt, reply_markup=kb, parse_mode="HTML")  # 💬 fallback
+        await callback.message.answer(txt, reply_markup=kb, parse_mode="HTML")
 
 
 # ================================================================================
