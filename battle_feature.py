@@ -734,7 +734,7 @@ async def start_battle_from_lex_menu(message: Message, state: FSMContext) -> Non
     await state.set_state(Battle.Future) # 💬 вход в выбор темы
 
     await message.answer(
-        "⚔️ <b>Выбери тему для битвы</b>",
+        "😤 <b>Выбери битву</b>",
         parse_mode="HTML",
         reply_markup=_topics_kb(keys),
     )
