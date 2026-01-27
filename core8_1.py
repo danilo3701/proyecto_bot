@@ -3900,9 +3900,20 @@ async def premium_debug_handler(message: Message, state: FSMContext):
 
     rec = prem.get(str(target_id))
 
-    is_active, active_until, plan = is_premium_active(target_id)
+    # 💬 is_premium_active() возвращает bool, поэтому метаданные читаем из premium_users.json
+    is_active = is_premium_active(target_id)
+
+    active_until = 0
+    plan = ""
+    if isinstance(rec, dict):
+        try:
+            active_until = int(rec.get("active_until", 0) or 0)
+        except Exception:
+            active_until = 0
+        plan = str(rec.get("plan", "") or "")
+
     now_ts = int(time.time())
-    left_sec = (active_until or 0) - now_ts
+    left_sec = active_until - now_ts
 
     # 💬 находим связи Stripe -> user_id (если они есть в файле)
     cust_map = prem.get("__stripe_customer_to_user", {}) or {}
