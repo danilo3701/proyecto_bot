@@ -1,5 +1,5 @@
 # ProyectoBot/core8_1.py
-# файл коры
+# файл корыremium_debug dump = выгрузить весь premium
 
 # ================================================================================
 # 🟡 Импорты и константы для core8_1.py
@@ -3875,6 +3875,29 @@ async def premium_debug_handler(message: Message, state: FSMContext):
     premium_file_size = os.path.getsize(PREMIUM_USERS_PATH) if premium_file_exists else 0
 
     prem = load_premium_users()
+
+    # 💬 /premium_debug dump = выгрузить весь premium-файл документом (как есть)
+    if any(p.lower() in ("dump", "all", "file") for p in parts[1:]):
+        export_path = f"/tmp/premium_users_dump_{int(time.time())}.json"
+
+        # 💬 пишем JSON 1-в-1, как хранится в памяти (по сути как файл)
+        with open(export_path, "w", encoding="utf-8") as f:
+            json.dump(prem, f, ensure_ascii=False, indent=2)
+
+        try:
+            await message.answer_document(
+                document=FSInputFile(export_path),
+                caption=f"📎 premium_users dump = keys {len(prem)}"
+            )
+        finally:
+            # 💬 чистим временный файл
+            try:
+                os.remove(export_path)
+            except Exception:
+                pass
+
+        return  # 💬 важно: не продолжаем обычный debug-вывод
+
     rec = prem.get(str(target_id))
 
     is_active, active_until, plan = is_premium_active(target_id)
