@@ -1032,16 +1032,59 @@ def _locked_title(title: str) -> str:
         return f"🔒 {parts[0]}"
     return f"🔒 {parts[1]}"
 
-
 def _stripe_get_subscription_period_end(subscription_id: str) -> Optional[int]:
     if not subscription_id:
         return None
     if stripe is None or not STRIPE_SECRET_KEY:
         return None
+
     try:
         stripe.api_key = STRIPE_SECRET_KEY
+
+        ts_candidates: list[int] = []
+
+        # 1) Базовый источник: Subscription.current_period_end
         sub = stripe.Subscription.retrieve(subscription_id)
-        return int(sub.get("current_period_end") or 0) or None
+        try:
+            cpe = int(sub.get("current_period_end") or 0)
+            if cpe > 0:
+                ts_candidates.append(cpe)
+        except Exception:
+            pass
+
+        # 2) Более “прикладной” источник для “следующей даты списания”:
+        #    upcoming invoice period_end / next_payment_attempt / lines.period.end
+        #    (в некоторых конфигурациях Stripe это ближе к тому, что видно в Dashboard)
+        try:
+            inv = stripe.Invoice.upcoming(subscription=subscription_id)
+
+            for key in ("period_end", "next_payment_attempt"):
+                try:
+                    v = int(inv.get(key) or 0)
+                    if v > 0:
+                        ts_candidates.append(v)
+                except Exception:
+                    pass
+
+            try:
+                lines = (inv.get("lines") or {}).get("data") or []
+                if lines:
+                    period = (lines[0].get("period") or {})
+                    v = int(period.get("end") or 0)
+                    if v > 0:
+                        ts_candidates.append(v)
+            except Exception:
+                pass
+        except Exception:
+            # 💬 upcoming invoice может быть недоступен (например, подписка уже отменена/нет инвойсов)
+            pass
+
+        if not ts_candidates:
+            return None
+
+        # 💬 Берём самый дальний срок как “действует до”
+        return max(ts_candidates)
+
     except Exception as e:
         logging.exception(f"Stripe subscription retrieve failed: {e}")
         return None
@@ -2426,31 +2469,26 @@ async def settings_subscription_cb(callback: CallbackQuery):
     uid = callback.from_user.id
 
     data = load_premium_users()
-    row = (data or {}).get(str(uid), {})
+    if not isinstance(data, dict):
+        data = {}
+
+    row = data.get(str(uid), {})
     if not isinstance(row, dict):
         row = {}
 
-    # 💬 Берём сохранённые данные
-    try:
-        until_ts = int(row.get("active_until", 0) or 0)
-    except Exception:
-        until_ts = 0
-
-    plan = str(row.get("plan", "") or "")
-    cust_id = str(row.get("stripe_customer_id", "") or "")
-    sub_id = str(row.get("stripe_subscription_id", "") or "")
-
     # 💬 Если в файле не хватает данных (cust_id/sub_id), попробуем восстановить из Stripe
-    if stripe:
+    if stripe and STRIPE_SECRET_KEY:
+        stripe.api_key = STRIPE_SECRET_KEY
+
         # 1) Есть sub_id, но нет cust_id = вытащим customer из Subscription
         if sub_id and not cust_id:
             try:
                 sub_obj = stripe.Subscription.retrieve(sub_id)
-                cust_id = (sub_obj.get("customer") or "").strip()
+                cust_id = str(sub_obj.get("customer") or "").strip()
                 if cust_id:
-                    user_rec["stripe_customer_id"] = cust_id
-                    premium_users[str(user_id)] = user_rec
-                    save_premium_users(premium_users)
+                    row["stripe_customer_id"] = cust_id
+                    data[str(uid)] = row
+                    save_premium_users(data)
             except Exception:
                 pass
 
@@ -2468,13 +2506,14 @@ async def settings_subscription_cb(callback: CallbackQuery):
                     best_sub = subs["data"][0]
 
                 if best_sub:
-                    sub_id = (best_sub.get("id") or "").strip()
+                    sub_id = str(best_sub.get("id") or "").strip()
                     if sub_id:
-                        user_rec["stripe_subscription_id"] = sub_id
-                        premium_users[str(user_id)] = user_rec
-                        save_premium_users(premium_users)
+                        row["stripe_subscription_id"] = sub_id
+                        data[str(uid)] = row
+                        save_premium_users(data)
             except Exception:
                 pass
+
 
 
     # 💬 Синхронизация срока из Stripe при открытии/обновлении
