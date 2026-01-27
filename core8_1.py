@@ -1484,6 +1484,14 @@ USER_DATA_BACKUP_PATH = "/data/user_data_backup.json"  # 💬 резерв, чт
 MY_WORDS_PATH = "/data/my_words.json"  # 💬 файл пользовательских слов
 MY_WORDS_BACKUP_PATH = "/data/my_words_backup.json"  # 💬 резерв, чтобы не потерять слова
 
+# 💬 FREE лимиты для "Мои слова" (без Premium)
+FREE_MYWORDS_CATEGORIES_LIMIT = int(os.getenv("FREE_MYWORDS_CATEGORIES_LIMIT", "3"))  # 💬 бесплатно максимум 3 категории
+FREE_MYWORDS_WORDS_PER_CAT_LIMIT = int(os.getenv("FREE_MYWORDS_WORDS_PER_CAT_LIMIT", "10"))  # 💬 бесплатно максимум 10 слов в категории
+
+# 💬 жёсткий защитный лимит (чтобы не раздувать файл бесконечно даже с Premium)
+MYWORDS_HARD_WORDS_PER_CAT_LIMIT = int(os.getenv("MYWORDS_HARD_WORDS_PER_CAT_LIMIT", "30"))
+
+
 def load_my_words_data() -> dict:
     # 💬 грузим my_words; если файла нет или он битый = создаём пустой или восстанавливаем из backup
     if not os.path.exists(MY_WORDS_PATH):
@@ -5346,6 +5354,21 @@ async def mywords_add_choose_cat_cb(callback: CallbackQuery, state: FSMContext):
 @track_handler
 async def mywords_add_newcat_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    
+    # 💬 FREE лимит на категории: 3 категории без Premium
+    user_id = str(callback.message.chat.id)
+    store, u = mywords_get_user_block(user_id)
+    cats = u.setdefault("categories", {})
+
+    if (not is_premium_active(callback.from_user.id)) and (len(cats) >= FREE_MYWORDS_CATEGORIES_LIMIT):
+        await callback.message.answer(
+            _premium_paywall_text(callback.from_user.id),
+            reply_markup=_premium_paywall_kb("mywords:menu"),
+            parse_mode="HTML"
+        )
+        return  # 💬 не переводим в state ввода названия
+
+    
     txt = "➕ Новая категория\n\nНапиши название категории."
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
     try:
@@ -5361,6 +5384,20 @@ async def mywords_add_newcat_name(message: Message, state: FSMContext):
     name = (message.text or "").strip()
     if not name:
         return await smart_reply(message, "Напиши название категории.")  # 💬 валидация
+
+    # 💬 Подстраховка: если state выставили вручную, всё равно режем >3 категории без Premium
+    store, u = mywords_get_user_block(user_id)
+    cats = u.setdefault("categories", {})
+
+    is_new_category = name not in cats
+    if is_new_category and (not is_premium_active(message.from_user.id)) and (len(cats) >= FREE_MYWORDS_CATEGORIES_LIMIT):
+        await message.answer(
+            _premium_paywall_text(message.from_user.id),
+            reply_markup=_premium_paywall_kb("mywords:menu"),
+            parse_mode="HTML"
+        )
+        return
+
 
     store, u = mywords_get_user_block(user_id)
     cats = u.setdefault("categories", {})
@@ -5401,8 +5438,18 @@ async def mywords_add_save_cb(callback: CallbackQuery, state: FSMContext):
     cats = u.setdefault("categories", {})
     words = cats.setdefault(category, [])
 
-    if len(words) >= 30:
-        await smart_reply(callback.message, "В категории уже 30 слов. Создай новую категорию.")
+    # 💬 FREE лимит: 10 слов в категории без Premium
+    if (not is_premium_active(callback.from_user.id)) and (len(words) >= FREE_MYWORDS_WORDS_PER_CAT_LIMIT):
+        await callback.message.answer(
+            _premium_paywall_text(callback.from_user.id),
+            reply_markup=_premium_paywall_kb("mywords:menu"),
+            parse_mode="HTML"
+        )
+        return await mywords_menu(callback.message, state)
+
+    # 💬 жёсткий защитный лимит (даже с Premium)
+    if len(words) >= MYWORDS_HARD_WORDS_PER_CAT_LIMIT:
+        await smart_reply(callback.message, f"В категории уже {MYWORDS_HARD_WORDS_PER_CAT_LIMIT} слов. Создай новую категорию.")
         return await mywords_menu(callback.message, state)
 
     words.append({
