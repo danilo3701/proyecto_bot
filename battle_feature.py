@@ -241,12 +241,11 @@ def _share_invite_url() -> str:
     return f"https://t.me/share/url?url={quote(deep)}&text={quote(text)}"
 
 
-
 def _topics_kb(topic_keys: List[str]) -> InlineKeyboardMarkup:
     rows = []
 
     # 💬 лимитируем длину, чтобы клавиатура не разъезжалась от самой длинной темы
-    MAX_BTN_TITLE = 12  # можно потом подкрутить: 20-28 обычно выглядит хорошо
+    MAX_BTN_TITLE = 18  # можно потом подкрутить
 
     def _clip_title(t: str, max_len: int = MAX_BTN_TITLE) -> str:
         # 💬 аккуратно режем и добавляем многоточие
@@ -258,14 +257,23 @@ def _topics_kb(topic_keys: List[str]) -> InlineKeyboardMarkup:
         return t[: max(1, max_len - 1)].rstrip() + "…"
 
     source = _get_battle_source()  # 💬 берём battle_topics.json если есть
+
+    # 💬 собираем кнопки и раскладываем по 2 в ряд
+    buttons: List[InlineKeyboardButton] = []
     for k in topic_keys[:18]:
         info = source.get(k, {})
         title = info.get("title") or k
         title = _clip_title(str(title))
-        rows.append([InlineKeyboardButton(text=f"{title}", callback_data=f"battle:topic:{k}")])
+        buttons.append(
+            InlineKeyboardButton(text=f"{title}", callback_data=f"battle:topic:{k}")
+        )
+
+    for i in range(0, len(buttons), 2):
+        rows.append(buttons[i:i + 2])  # 💬 2 кнопки в строке (последняя может быть 1)
 
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="battle:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
 
 def _bt_admin_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
