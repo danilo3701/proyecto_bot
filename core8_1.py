@@ -1063,6 +1063,26 @@ def _stripe_guess_plan_from_subscription(subscription_id: str) -> str:
     except Exception:
         return ""
 
+def _stripe_extract_invoice_period_end(invoice_obj: dict) -> int:
+    """Берём реальный конец оплаченного периода прямо из invoice.* (без API вызовов)."""
+    try:
+        lines = (((invoice_obj or {}).get("lines") or {}).get("data") or [])
+        ends = []
+        for ln in lines:
+            period = ((ln or {}).get("period") or {})
+            end_ts = int(period.get("end") or 0)
+            if end_ts:
+                ends.append(end_ts)
+
+        if ends:
+            return max(ends)
+
+        # 💬 запасной вариант: иногда есть period_end на уровне invoice
+        return int((invoice_obj or {}).get("period_end") or 0)
+    except Exception:
+        logging.exception("Stripe: не смог распарсить period_end из invoice.*")
+        return 0
+
 
 async def _stripe_process_event(event: dict) -> None:
     etype = (event or {}).get("type") or ""
@@ -1096,24 +1116,17 @@ async def _stripe_process_event(event: dict) -> None:
         )
         return
 
-    if etype in ("invoice.paid", "invoice.payment_succeeded"):
-        # 💬 продление
-        cust_id = str(obj.get("customer") or "")
-        sub_id = str(obj.get("subscription") or "")
+        # 💬 1) сначала пробуем достать конец периода из самого invoice (самое надёжное)
+        active_until = _stripe_extract_invoice_period_end(obj)
 
-        data = load_premium_users()
-        uid = None
-        if sub_id and sub_id in data.get("__stripe_subscription_to_user", {}):
-            uid = data["__stripe_subscription_to_user"].get(sub_id)
-        if (not uid) and cust_id and cust_id in data.get("__stripe_customer_to_user", {}):
-            uid = data["__stripe_customer_to_user"].get(cust_id)
+        # 💬 2) если вдруг нет lines/period = пробуем Stripe API
+        if not active_until:
+            active_until = _stripe_get_subscription_period_end(sub_id)
 
-        if not uid:
-            return
-
-        active_until = _stripe_get_subscription_period_end(sub_id)
+        # 💬 3) последний fallback (чтобы не ломать поток)
         if not active_until:
             active_until = int(time.time()) + 86400
+
 
         plan = _stripe_guess_plan_from_subscription(sub_id)
         _set_premium_user(
