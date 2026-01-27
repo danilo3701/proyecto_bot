@@ -1043,18 +1043,16 @@ def _stripe_get_subscription_period_end(subscription_id: str) -> Optional[int]:
 
         ts_candidates: list[int] = []
 
-        # 1) Базовый источник: Subscription.current_period_end
-        sub = stripe.Subscription.retrieve(subscription_id)
+        # 1) Subscription.current_period_end (база)
         try:
+            sub = stripe.Subscription.retrieve(subscription_id)
             cpe = int(sub.get("current_period_end") or 0)
             if cpe > 0:
                 ts_candidates.append(cpe)
         except Exception:
             pass
 
-        # 2) Более “прикладной” источник для “следующей даты списания”:
-        #    upcoming invoice period_end / next_payment_attempt / lines.period.end
-        #    (в некоторых конфигурациях Stripe это ближе к тому, что видно в Dashboard)
+        # 2) Upcoming invoice (часто совпадает с тем, что видно как "Next invoice" в Dashboard)
         try:
             inv = stripe.Invoice.upcoming(subscription=subscription_id)
 
@@ -1066,6 +1064,7 @@ def _stripe_get_subscription_period_end(subscription_id: str) -> Optional[int]:
                 except Exception:
                     pass
 
+            # 💬 берём end периода из первой строки (и это часто самый правильный "до")
             try:
                 lines = (inv.get("lines") or {}).get("data") or []
                 if lines:
@@ -1076,18 +1075,42 @@ def _stripe_get_subscription_period_end(subscription_id: str) -> Optional[int]:
             except Exception:
                 pass
         except Exception:
-            # 💬 upcoming invoice может быть недоступен (например, подписка уже отменена/нет инвойсов)
+            pass
+
+        # 3) Invoice.list fallback (берём периоды из последних инвойсов, если upcoming недоступен/падает)
+        try:
+            invs = stripe.Invoice.list(subscription=subscription_id, limit=5)
+            for inv in (invs.get("data") or []):
+                for key in ("period_end", "next_payment_attempt"):
+                    try:
+                        v = int(inv.get(key) or 0)
+                        if v > 0:
+                            ts_candidates.append(v)
+                    except Exception:
+                        pass
+
+                try:
+                    lines = (inv.get("lines") or {}).get("data") or []
+                    for ln in lines:
+                        period = (ln.get("period") or {})
+                        v = int(period.get("end") or 0)
+                        if v > 0:
+                            ts_candidates.append(v)
+                except Exception:
+                    pass
+        except Exception:
             pass
 
         if not ts_candidates:
             return None
 
-        # 💬 Берём самый дальний срок как “действует до”
+        # 💬 берём самый дальний срок как “действует до”
         return max(ts_candidates)
 
     except Exception as e:
         logging.exception(f"Stripe subscription retrieve failed: {e}")
         return None
+
 
 
 def _stripe_guess_plan_from_subscription(subscription_id: str) -> str:
@@ -2581,17 +2604,79 @@ async def settings_subscription_cb(callback: CallbackQuery):
             portal_url = ""
 
     # ===== Текст
+    stripe_status_line = ""
+    stripe_note_line = ""
+    stripe_next_str = ""  # 💬 покажем "следующее списание" (если смогли достать)
+
+    # 💬 Пытаемся показать проблемные статусы Stripe (past_due / unpaid / canceled и т.д.)
+    if sub_id and stripe is not None and STRIPE_SECRET_KEY:
+        try:
+            stripe.api_key = STRIPE_SECRET_KEY
+            sub_obj = stripe.Subscription.retrieve(sub_id)
+            st = str(sub_obj.get("status") or "").lower()
+            cancel_at_period_end = bool(sub_obj.get("cancel_at_period_end"))
+
+            if st in ("active", "trialing"):
+                stripe_status_line = "✅ Оплачено"
+            elif st == "past_due":
+                stripe_status_line = "⚠️ Оплата не прошла (past_due)"
+            elif st == "unpaid":
+                stripe_status_line = "❌ Не оплачено (unpaid)"
+            elif st == "canceled":
+                stripe_status_line = "🚫 Отменено (canceled)"
+            elif st.startswith("incomplete"):
+                stripe_status_line = f"⚠️ Незавершено ({st})"
+            else:
+                stripe_status_line = f"ℹ️ {st or '—'}"
+
+            if cancel_at_period_end:
+                stripe_note_line = "🧾 Отмена запланирована (до конца оплаченного периода)"
+
+            # 💬 Берём “следующую дату списания/конец периода” максимально надёжно
+            end_ts = _stripe_get_subscription_period_end(sub_id)
+            if end_ts:
+                try:
+                    dt2 = datetime.datetime.fromtimestamp(int(end_ts))
+                    stripe_next_str = dt2.strftime("%Y-%m-%d %H:%M")
+                except Exception:
+                    stripe_next_str = str(end_ts)
+
+        except Exception:
+            pass
+
     if premium_active:
+        extra_lines = []
+        if stripe_status_line:
+            extra_lines.append(f"📌 Статус Stripe: <b>{stripe_status_line}</b>")
+        if stripe_next_str:
+            extra_lines.append(f"🧾 Следующее списание: <b>{stripe_next_str}</b>")
+        if stripe_note_line:
+            extra_lines.append(stripe_note_line)
+
+        extra_block = ("\n\n" + "\n".join(extra_lines)) if extra_lines else ""
+
         txt = (
             "💎 <b>Моя подписка</b>\n\n"
             "✅ <b>Premium активен</b>\n"
-            f"⏳ Действует до: <b>{until_str}</b>\n\n"
+            f"⏳ Действует до: <b>{until_str}</b>"
+            f"{extra_block}\n\n"
             "Открыто: лексика + подкасты + будущие разделы"
         )
     else:
+        extra_lines = []
+        if until_ts:
+            extra_lines.append(f"⏳ Последний срок: <b>{until_str}</b>")
+        if stripe_status_line:
+            extra_lines.append(f"📌 Статус Stripe: <b>{stripe_status_line}</b>")
+        if stripe_note_line:
+            extra_lines.append(stripe_note_line)
+
+        extra_block = ("\n\n" + "\n".join(extra_lines)) if extra_lines else ""
+
         txt = (
             "💎 <b>Моя подписка</b>\n\n"
-            "🔒 <b>Premium не активен</b>\n\n"
+            "🔒 <b>Premium не активен</b>"
+            f"{extra_block}\n\n"
             "Оформи Premium, чтобы снять замки во всех разделах"
         )
 
