@@ -245,13 +245,28 @@ def _share_invite_url() -> str:
 def _topics_kb(topic_keys: List[str]) -> InlineKeyboardMarkup:
     rows = []
 
+    # 💬 лимитируем длину, чтобы клавиатура не разъезжалась от самой длинной темы
+    MAX_BTN_TITLE = 12  # можно потом подкрутить: 20-28 обычно выглядит хорошо
+
+    def _clip_title(t: str, max_len: int = MAX_BTN_TITLE) -> str:
+        # 💬 аккуратно режем и добавляем многоточие
+        t = (t or "").strip()
+        if not t:
+            return "Тема"
+        if len(t) <= max_len:
+            return t
+        return t[: max(1, max_len - 1)].rstrip() + "…"
+
     source = _get_battle_source()  # 💬 берём battle_topics.json если есть
     for k in topic_keys[:18]:
         info = source.get(k, {})
         title = info.get("title") or k
-        rows.append([InlineKeyboardButton(text=f"⚔️ {title}", callback_data=f"battle:topic:{k}")])
+        title = _clip_title(str(title))
+        rows.append([InlineKeyboardButton(text=f"{title}", callback_data=f"battle:topic:{k}")])
+
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="battle:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+)
 
 def _bt_admin_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -734,7 +749,7 @@ async def start_battle_from_lex_menu(message: Message, state: FSMContext) -> Non
     await state.set_state(Battle.Future) # 💬 вход в выбор темы
 
     await message.answer(
-        "😤 <b>Выбери битву</b>",
+        "😤 <b>Выбери битву</b> ⚔️",
         parse_mode="HTML",
         reply_markup=_topics_kb(keys),
     )
