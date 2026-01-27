@@ -698,10 +698,13 @@ def _kb_episodes(
         rows.append([InlineKeyboardButton(text="🧹 СБРОСИТЬ ФИЛЬТР", callback_data="pod:filter_reset")])
 
     if total == 0:
-        rows.append([InlineKeyboardButton(text="(ничего не найдено)", callback_data="pod:noop")])
-        rows.append([InlineKeyboardButton(text="🔎 Фильтры", callback_data="pod:filter")])
-        rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])
-        rows.append([InlineKeyboardButton(text="🏠 В меню", callback_data="back_to_menu")])
+        # 💬 нижняя панель: 🔎 ⬅️ 🏠 (в одну строку, как ты просил)
+        rows.append([
+            InlineKeyboardButton(text="🔎", callback_data="pod:filter"),
+            InlineKeyboardButton(text="⬅️", callback_data="pod:authors"),
+            InlineKeyboardButton(text="🏠", callback_data="back_to_menu"),
+        ])
+
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
     # 💬 список эпизодов на текущей странице
@@ -735,9 +738,13 @@ def _kb_episodes(
         ])
 
     # 💬 фильтры, назад, меню
-    rows.append([InlineKeyboardButton(text="🔎 Фильтры", callback_data="pod:filter")])
-    rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])
-    rows.append([InlineKeyboardButton(text="🏠 В меню", callback_data="back_to_menu")])
+    # 💬 нижняя панель: 🔎 ⬅️ 🏠 (в одну строку, как ты просил)
+    rows.append([
+        InlineKeyboardButton(text="🔎", callback_data="pod:filter"),
+        InlineKeyboardButton(text="⬅️", callback_data="pod:authors"),
+        InlineKeyboardButton(text="🏠", callback_data="back_to_menu"),
+    ])
+
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
