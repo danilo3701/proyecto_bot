@@ -682,10 +682,27 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-    for global_index, (eid, e) in enumerate(items[start:end], start=start):
-        title = (e or {}).get("title") or f"Эпизод {eid}"
+    author_all: List[str] = []
+    for _eid, _e in (episodes or {}).items():
+        if str((_e or {}).get("author_id")) != str(author_id):
+            continue
+        author_all.append(str(_eid))
 
-        if (global_index >= FREE_PODCASTS_LIMIT) and (not premium_active):
+    def _sort_key_global(x: str):
+        try:
+            return (int(x),)
+        except Exception:
+            return (10**9, x)
+
+    author_all.sort(key=_sort_key_global)
+    author_idx = {str(_eid): i for i, _eid in enumerate(author_all)}  # 💬 eid -> absolute index
+
+    # 💬 рисуем текущую страницу, но проверяем лимит по absolute index
+    for eid, e in items[start:end]:
+        title = (e or {}).get("title") or f"Эпизод {eid}"
+        abs_idx = int(author_idx.get(str(eid), 10**9))
+
+        if (abs_idx >= FREE_PODCASTS_LIMIT) and (not premium_active):
             rows.append([InlineKeyboardButton(text=_lock_title(title), callback_data=f"pod:locked:{author_id}:{eid}")])
         else:
             rows.append([InlineKeyboardButton(text=title, callback_data=f"pod:ep:{author_id}:{eid}")])
