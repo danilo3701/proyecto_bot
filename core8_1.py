@@ -889,6 +889,7 @@ PREMIUM_PAYLINK_WEEK = os.getenv("PREMIUM_PAYLINK_WEEK", "https://buy.stripe.com
 
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PORTAL_RETURN_URL = os.getenv("STRIPE_PORTAL_RETURN_URL", os.getenv("PUBLIC_BASE_URL", "")).strip()  # 💬 куда возвращаться из Stripe Portal
 
 try:
     import stripe  # type: ignore
@@ -2418,6 +2419,85 @@ async def start_handler(message: Message, state: FSMContext):
     await state.set_state(LessonStates.choosing_category)  # 💬 ждём выбор кнопок меню
 
 
+@dp.callback_query(F.data == "settings:subscription")
+async def settings_subscription_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+
+    uid = callback.from_user.id
+    data = load_premium_users()
+    row = (data or {}).get(str(uid), {})
+    if not isinstance(row, dict):
+        row = {}
+
+    premium_active = is_premium_active(uid)
+    until_ts = 0
+    try:
+        until_ts = int(row.get("active_until", 0) or 0)
+    except Exception:
+        until_ts = 0
+
+    plan = str(row.get("plan", "") or "")
+    cust_id = str(row.get("stripe_customer_id", "") or "")
+
+    until_str = "—"
+    if until_ts:
+        try:
+            dt = datetime.datetime.fromtimestamp(until_ts)
+            until_str = dt.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            until_str = str(until_ts)
+
+    portal_url = ""
+    if cust_id and stripe is not None and STRIPE_SECRET_KEY:
+        try:
+            stripe.api_key = STRIPE_SECRET_KEY
+            params = {"customer": cust_id}
+            if STRIPE_PORTAL_RETURN_URL:
+                params["return_url"] = STRIPE_PORTAL_RETURN_URL
+            session = stripe.billing_portal.Session.create(**params)
+            portal_url = str((session or {}).get("url") or "")
+        except Exception as e:
+            logging.exception(f"Stripe portal session failed: {e}")
+            portal_url = ""
+
+    if premium_active:
+        txt = (
+            "💎 <b>Моя подписка</b>\n\n"
+            "✅ <b>Premium активен</b>\n"
+            f"⏳ Действует до: <b>{until_str}</b>\n\n"
+            "Открыто: лексика + подкасты + будущие разделы"  # 💬 единый Premium на всё
+        )
+    else:
+        txt = (
+            "💎 <b>Моя подписка</b>\n\n"
+            "🔒 <b>Premium не активен</b>\n\n"
+            "Оформи Premium, чтобы снять замки во всех разделах"  # 💬 коротко и ясно
+        )
+
+    kb_rows = []
+
+    if portal_url:
+        kb_rows.append([InlineKeyboardButton(text="🧾 Управлять подпиской", url=portal_url)])  # 💬 Stripe Customer Portal
+
+    if premium_active:
+        kb_rows.append([InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check_settings")])
+        kb_rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="settings:subscription")])
+        kb_rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")])
+    else:
+        kb_rows.extend([
+            [InlineKeyboardButton(text="💎 Premium 2,90€ в неделю", url=PREMIUM_PAYLINK_WEEK)],
+            [InlineKeyboardButton(text="💎 Premium 4,90€ в месяц", url=PREMIUM_PAYLINK_MONTH)],
+            [InlineKeyboardButton(text="💎 Premium 49,00€ в год", url=PREMIUM_PAYLINK_YEAR)],
+            [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check_settings")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")],
+        ])  # 💬 покупка прямо отсюда
+
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+
+    try:
+        await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")  # 💬 не плодим сообщения
+    except Exception:
+        await callback.message.answer(txt, reply_markup=kb, parse_mode="HTML")  # 💬 fallback
 
 
 # ================================================================================
@@ -2929,6 +3009,44 @@ async def premium_check(query: CallbackQuery, state: FSMContext):
             pass
 
 
+@dp.callback_query(F.data == "premium:check_settings")
+async def premium_check_settings(query: CallbackQuery, state: FSMContext):
+    await query.answer()
+
+    premium_active = is_premium_active(query.from_user.id)
+
+    # 💬 твои sticker_id, но с защитой от "wrong file identifier"
+    success_sticker_id = "CAACAgIAAxkBAAIWI2l21eTj7Ea12Kr5IFDAPatBQzZoAALYLgACQ7nYSMxMa3UjThHMOAQ"
+    fail_sticker_id = "CAACAgIAAxkBAAIWH2l21bO_xugzDFap9zCvHnG64If-AAKRMwACkKbJSE_T26pSZdruOAQ"
+
+    sticker_msg = None
+    try:
+        sticker_id = success_sticker_id if premium_active else fail_sticker_id
+        sticker_msg = await query.message.answer_sticker(sticker_id)  # 💬 показываем реакцию
+    except Exception:
+        sticker_msg = None  # 💬 если sticker_id битый — просто без стикера
+
+    if premium_active:
+        text_msg = await query.message.answer("✅ Premium активен\n🔓 Замки сняты автоматически")
+    else:
+        text_msg = await query.message.answer("❌ Premium не найден\nЕсли оплатил(а) только что = подожди 1–2 минуты и проверь ещё раз")
+
+    await asyncio.sleep(3)
+    for msg in (sticker_msg, text_msg):
+        if not msg:
+            continue
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+
+    # 💬 возвращаем пользователя в «Моя подписка», без прыжков в лексику
+    try:
+        await settings_subscription_cb(query, state)
+    except Exception:
+        pass
+
+
 @dp.callback_query(LessonStates.choosing_subcategory, F.data.startswith("subcat:"))
 @track_handler
 async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
@@ -3027,14 +3145,18 @@ async def settings_menu(message: Message, state: FSMContext):
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL),
-            InlineKeyboardButton(text="Лимит слов", callback_data="settings:limit"),
+            InlineKeyboardButton(text="💬 Связь", url=CONTACT_URL),
+            InlineKeyboardButton(text="💎 Моя подписка", callback_data="settings:subscription"),
         ],
         [
-            InlineKeyboardButton(text="Время уведомления", callback_data="settings:notify"),
+            InlineKeyboardButton(text="🍪 Лимит слов", callback_data="settings:limit"),
+            InlineKeyboardButton(text="⏰ Время уведомления", callback_data="settings:notify"),
+        ],
+        [
             InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back"),
         ],
-    ])  # 💬 меню настроек (инлайн 4 кнопки)
+    ])  # 💬 меню настроек + вход в «Моя подписка»
+
 
 
     txt = (
