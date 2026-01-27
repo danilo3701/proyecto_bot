@@ -184,10 +184,13 @@ def _premium_paywall_text(user_id: int) -> str:
         "✅ <b>Мои слова:</b> безлимит на создание категорий\n"
         "✅ <b>Грамматика:</b> доступ к разделу, когда он выйдет\n"
         "✅ <b>Обновления:</b> все новые функции включены\n\n"
-        f"👉🏼<b>Твой Telegram ID:</b> <code>{user_id}</code>\n\n"
-        "Укажи его при оплате → потом нажми <b>✅ Проверить Premium</b>\n"
+        "📋 <b>Скопировать Telegram ID:</b>\n"
+        f"<pre><code>{user_id}</code></pre>\n"
+        "➡️ Укажи свой ID при оплате\n"
+        "➡️ Потом нажми «✅ Проверить Premium»\n"
         "🔓 Замки снимутся автоматически"
     )
+
 
 
 def _kb_premium_paywall() -> InlineKeyboardMarkup:
@@ -197,15 +200,14 @@ def _kb_premium_paywall() -> InlineKeyboardMarkup:
     year = _premium_links.get("year")
 
     rows: List[List[InlineKeyboardButton]] = []
-    pay_row: List[InlineKeyboardButton] = []
+
+    # 💬 каждая оплата = отдельная строка (как ты просил)
     if week:
-        pay_row.append(InlineKeyboardButton(text="Premium 1 неделя", url=week))
+        rows.append([InlineKeyboardButton(text="Premium 1 неделя", url=week)])
     if month:
-        pay_row.append(InlineKeyboardButton(text="Premium 1 месяц", url=month))
+        rows.append([InlineKeyboardButton(text="Premium 1 месяц", url=month)])
     if year:
-        pay_row.append(InlineKeyboardButton(text="Premium 1 год", url=year))
-    if pay_row:
-        rows.append(pay_row)
+        rows.append([InlineKeyboardButton(text="Premium 1 год", url=year)])
 
     rows.append([InlineKeyboardButton(text="✅ Проверить Premium", callback_data="pod:premium_check")])
     rows.append([InlineKeyboardButton(text="👈 Назад", callback_data="pod:premium_back")])
