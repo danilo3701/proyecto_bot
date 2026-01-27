@@ -1088,6 +1088,9 @@ async def _stripe_process_event(event: dict) -> None:
     etype = (event or {}).get("type") or ""
     obj = (((event or {}).get("data") or {}).get("object") or {})
 
+    # ─────────────────────────────────────────────────────────
+    # 1) Первичная покупка (Checkout)
+    # ─────────────────────────────────────────────────────────
     if etype == "checkout.session.completed":
         # 💬 первичная покупка
         if (obj.get("mode") or "") != "subscription":
@@ -1116,7 +1119,25 @@ async def _stripe_process_event(event: dict) -> None:
         )
         return
 
-        # 💬 1) сначала пробуем достать конец периода из самого invoice (самое надёжное)
+    # ─────────────────────────────────────────────────────────
+    # 2) Оплата инвойса (именно тут самый точный current_period_end)
+    # ─────────────────────────────────────────────────────────
+    if etype in ("invoice.paid", "invoice.payment_succeeded"):
+        sub_id = str(obj.get("subscription") or "")
+        cust_id = str(obj.get("customer") or "")
+
+        data = load_premium_users()
+
+        uid = None
+        if sub_id and sub_id in data.get("__stripe_subscription_to_user", {}):
+            uid = data["__stripe_subscription_to_user"].get(sub_id)
+        if (not uid) and cust_id and cust_id in data.get("__stripe_customer_to_user", {}):
+            uid = data["__stripe_customer_to_user"].get(cust_id)
+
+        if not uid:
+            return
+
+        # 💬 1) сначала пробуем достать конец периода из invoice (самое надёжное)
         active_until = _stripe_extract_invoice_period_end(obj)
 
         # 💬 2) если вдруг нет lines/period = пробуем Stripe API
@@ -1127,8 +1148,10 @@ async def _stripe_process_event(event: dict) -> None:
         if not active_until:
             active_until = int(time.time()) + 86400
 
+        # 💬 план стараемся не ломать: берём предыдущий, иначе пробуем угадать
+        prev = data.get(str(uid), {}) or {}
+        plan = prev.get("plan") or _stripe_guess_plan_from_subscription(sub_id) or "premium"
 
-        plan = _stripe_guess_plan_from_subscription(sub_id)
         _set_premium_user(
             user_id=int(uid),
             active_until=active_until,
@@ -1138,6 +1161,9 @@ async def _stripe_process_event(event: dict) -> None:
         )
         return
 
+    # ─────────────────────────────────────────────────────────
+    # 3) Отмена подписки
+    # ─────────────────────────────────────────────────────────
     if etype == "customer.subscription.deleted":
         # 💬 отмена
         sub_id = str(obj.get("id") or "")
@@ -1162,8 +1188,10 @@ async def _stripe_process_event(event: dict) -> None:
         )
         return
 
+    # ─────────────────────────────────────────────────────────
+    # 4) На всякий случай синк срока по subscription.updated
+    # ─────────────────────────────────────────────────────────
     if etype == "customer.subscription.updated":
-        # 💬 на всякий случай синкаем срок
         sub_id = str(obj.get("id") or "")
         cust_id = str(obj.get("customer") or "")
         status = str(obj.get("status") or "")
@@ -1197,6 +1225,7 @@ async def _stripe_process_event(event: dict) -> None:
                 stripe_customer_id=cust_id,
                 stripe_subscription_id=sub_id,
             )
+        return
 
 
 async def stripe_webhook_http(request: web.Request) -> web.Response:
