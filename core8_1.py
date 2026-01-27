@@ -890,6 +890,9 @@ PREMIUM_PAYLINK_WEEK = os.getenv("PREMIUM_PAYLINK_WEEK", "https://buy.stripe.com
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PORTAL_RETURN_URL = os.getenv("STRIPE_PORTAL_RETURN_URL", os.getenv("PUBLIC_BASE_URL", "")).strip()  # 💬 куда возвращаться из Stripe Portal
+# 💬 Railway часто хранит домен без https://, а Stripe требует полный URL
+if STRIPE_PORTAL_RETURN_URL and not STRIPE_PORTAL_RETURN_URL.startswith(("http://", "https://")):
+    STRIPE_PORTAL_RETURN_URL = "https://" + STRIPE_PORTAL_RETURN_URL.lstrip("/")
 
 try:
     import stripe  # type: ignore
@@ -2436,6 +2439,43 @@ async def settings_subscription_cb(callback: CallbackQuery):
     plan = str(row.get("plan", "") or "")
     cust_id = str(row.get("stripe_customer_id", "") or "")
     sub_id = str(row.get("stripe_subscription_id", "") or "")
+
+    # 💬 Если в файле не хватает данных (cust_id/sub_id), попробуем восстановить из Stripe
+    if stripe:
+        # 1) Есть sub_id, но нет cust_id = вытащим customer из Subscription
+        if sub_id and not cust_id:
+            try:
+                sub_obj = stripe.Subscription.retrieve(sub_id)
+                cust_id = (sub_obj.get("customer") or "").strip()
+                if cust_id:
+                    user_rec["stripe_customer_id"] = cust_id
+                    premium_users[str(user_id)] = user_rec
+                    save_premium_users(premium_users)
+            except Exception:
+                pass
+
+        # 2) Есть cust_id, но нет sub_id = найдём активную подписку у customer
+        if cust_id and not sub_id:
+            try:
+                subs = stripe.Subscription.list(customer=cust_id, status="all", limit=5)
+                best_sub = None
+                for s in (subs.get("data") or []):
+                    st = (s.get("status") or "").lower()
+                    if st in ("active", "trialing", "past_due"):
+                        best_sub = s
+                        break
+                if not best_sub and (subs.get("data") or []):
+                    best_sub = subs["data"][0]
+
+                if best_sub:
+                    sub_id = (best_sub.get("id") or "").strip()
+                    if sub_id:
+                        user_rec["stripe_subscription_id"] = sub_id
+                        premium_users[str(user_id)] = user_rec
+                        save_premium_users(premium_users)
+            except Exception:
+                pass
+
 
     # 💬 Синхронизация срока из Stripe при открытии/обновлении
     # Это лечит ситуацию, когда вебхук раньше падал и active_until остался коротким
