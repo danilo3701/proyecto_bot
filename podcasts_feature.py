@@ -589,14 +589,21 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
 
     level_key = _norm_level_key(level_key)  # 💬 нормализуем входящий фильтр уровня
 
-
     def _lock_title(s: str) -> str:
         s = (s or "").strip()
         if not s:
             s = "Эпизод"
+
+        # 💬 замок должен ЗАМЕНЯТЬ первый эмоджи (как ты просил), а не добавляться рядом
+        for pref in ("🎧", "🎙️", "🎙"):
+            if s.startswith(pref):
+                s = s[len(pref):].lstrip()
+                break
+
         if len(s) > 28:
             s = s[:27].rstrip() + "…"
         return f"🔒 {s}"
+
 
     def _episode_level_key(e: dict) -> str:
         raw = (e or {}).get("level") or (e or {}).get("level_key") or (e or {}).get("lvl") or ""
@@ -679,129 +686,6 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
     if total == 0:
         rows.append([InlineKeyboardButton(text="(ничего не найдено)", callback_data="pod:noop")])  # 💬 пустой результат без несуществующего хендлера
         rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])      # 💬 возвращаемся в существующий экран авторов
-        return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-    author_all: List[str] = []
-    for _eid, _e in (episodes or {}).items():
-        if str((_e or {}).get("author_id")) != str(author_id):
-            continue
-        author_all.append(str(_eid))
-
-    def _sort_key_global(x: str):
-        try:
-            return (int(x),)
-        except Exception:
-            return (10**9, x)
-
-    author_all.sort(key=_sort_key_global)
-    author_idx = {str(_eid): i for i, _eid in enumerate(author_all)}  # 💬 eid -> absolute index
-
-    # 💬 рисуем текущую страницу, но проверяем лимит по absolute index
-    for eid, e in items[start:end]:
-        title = (e or {}).get("title") or f"Эпизод {eid}"
-        abs_idx = int(author_idx.get(str(eid), 10**9))
-
-        if (abs_idx >= FREE_PODCASTS_LIMIT) and (not premium_active):
-            rows.append([InlineKeyboardButton(text=_lock_title(title), callback_data=f"pod:locked:{author_id}:{eid}")])
-        else:
-            rows.append([InlineKeyboardButton(text=title, callback_data=f"pod:ep:{author_id}:{eid}")])
-
-    prev_cb = f"pod:author:{author_id}:{page-1}" if page > 0 else "pod:noop"
-    next_cb = f"pod:author:{author_id}:{page+1}" if page < pages - 1 else "pod:noop"
-
-    rows.append(
-        [
-            InlineKeyboardButton(text="⬅️", callback_data=prev_cb),
-            InlineKeyboardButton(text=f"{page+1}/{pages}", callback_data="pod:filter"),
-            InlineKeyboardButton(text="➡️", callback_data=next_cb),
-        ]
-    )  # 💬 стрелки всегда видны, на краях = noop
-
-    rows.append([InlineKeyboardButton(text="🔎 Фильтры", callback_data="pod:filter")])
-    rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])  # 💬 возвращаемся в существующий хендлер
-
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-    PER_PAGE = 8
-    total = len(items)
-    pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
-    page = max(0, min(page, pages - 1))
-
-    start = page * PER_PAGE
-    end = start + PER_PAGE
-    chunk = items[start:end]
-
-    for offset, (eid, e) in enumerate(chunk):
-        abs_idx = start + offset  # 💬 индекс в общем списке (важно для лимита 10)
-        title = e.get("title", "🎧 Эпизод")
-        if (not premium_active) and abs_idx >= FREE_PODCASTS_LIMIT:
-            rows.append([InlineKeyboardButton(text=_lock_title(title), callback_data=f"pod:locked:{eid}")])  # 💬 замок вместо эмодзи
-        else:
-            rows.append([InlineKeyboardButton(text=title, callback_data=f"pod:ep:{eid}")])
-
-    if pages > 1:
-        prev_cb = "pod:ep_page_prev" if page > 0 else "pod:noop"
-        next_cb = "pod:ep_page_next" if page < (pages - 1) else "pod:noop"
-        rows.append(
-            [
-                InlineKeyboardButton(text="◀️", callback_data=prev_cb),
-                InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="pod:noop"),
-                InlineKeyboardButton(text="▶️", callback_data=next_cb),
-            ]
-        )  # 💬 пагинация по 8 кнопок
-
-    rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-    def _episode_level_key(ep: Dict[str, Any]) -> Optional[str]:
-        # 💬 level берём из ep["level_key"], иначе пытаемся угадать по заголовку (A1/A2/B1/B2/C1)
-        lk = (ep.get("level_key") or "").strip().upper()
-        if lk in {"B", "X1", "X2"}:
-            return lk
-
-        title = (ep.get("title") or "").upper()
-        found = re.findall(r"\b(A0|A1|A2|B1|B2|C1|C2)\b", title)
-        found = set(found)
-
-        if found & {"B2", "C1", "C2"}:
-            return "X2"
-        if found & {"A2", "B1"}:
-            return "X1"
-        if found & {"A0", "A1"}:
-            return "B"
-        return None
-
-    def _filtered_items() -> List[Tuple[str, Dict[str, Any]]]:
-        eps = data.get("episodes", {})
-        items = [(eid, e) for eid, e in eps.items() if e.get("author_id") == author_id]
-        items.sort(key=lambda x: x[1].get("order", 9999))
-
-        if not level_key and not topic_key:
-            return items
-
-        out: List[Tuple[str, Dict[str, Any]]] = []
-        for eid, e in items:
-            if level_key and _episode_level_key(e) != level_key:
-                continue
-            if topic_key and _episode_topic_key(e) != topic_key:
-                continue
-            out.append((eid, e))
-        return out
-
-    items = _filtered_items()
-
-    rows: List[List[InlineKeyboardButton]] = []
-
-    is_filtered = bool(level_key or topic_key)
-    if is_filtered:
-        rows.append([InlineKeyboardButton(text="🧹 СБРОСИТЬ ФИЛЬТР", callback_data="pod:filter_reset")])  # 💬 кнопка появляется только при фильтре
-
-    if not items:
-        rows.append([InlineKeyboardButton(text="(ничего не найдено)", callback_data="pod:noop")])  # 💬 безопасный пустой результат
-        rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
