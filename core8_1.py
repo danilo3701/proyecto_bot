@@ -3968,7 +3968,8 @@ async def premium_debug_handler(message: Message, state: FSMContext):
         f"{rec_json}"
     )
 
-    await message.answer(txt)
+    await message.answer(txt, parse_mode=None)  # 💬 фикс: отключаем HTML/Markdown парсинг, чтобы "<=5):" не ломал сообщение
+
 
 
 @dp.message(Command("stats"))
