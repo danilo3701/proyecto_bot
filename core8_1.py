@@ -2776,11 +2776,12 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
     """
     💬 Показываем список тем для выбранной категории и уровня + прогресс-бар
     """
-    message = callback.message  # 💬 работаем через message, чтобы не плодить NameError
+    message = callback.message  # 💬 сообщение, которое редактируем
+    uid = callback.from_user.id  # 💬 ВАЖНО: Premium и прогресс считаем по юзеру, а не по боту
 
     # 💬 что делает эта часть: добавляем % выполнения темы прямо в кнопку списка тем
     xp_json = load_xp_data()
-    usr = xp_json.get(str(message.from_user.id), {})
+    usr = xp_json.get(str(uid), {})
     topic_summary = usr.get("topic_summary", {}) if isinstance(usr, dict) else {}
     if not isinstance(topic_summary, dict):
         topic_summary = {}
@@ -2789,8 +2790,9 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
         return "".join(ch + "\u0336" for ch in s)  # 💬 зачёркивание кнопки без HTML
 
     buttons = []
-    premium_active = is_premium_active(message.from_user.id)  # 💬 Premium активен или нет
+    premium_active = is_premium_active(uid)  # 💬 Premium активен или нет
     FREE_LIMIT = int(os.getenv("FREE_TOPICS_LIMIT", "10"))     # 💬 сколько тем бесплатно в каждом уровне
+
 
     def _lock_title(s: str) -> str:
         # 💬 меняем первый токен (эмодзи или слово) на 🔒
