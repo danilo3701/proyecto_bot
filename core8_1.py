@@ -3391,10 +3391,11 @@ async def settings_menu(message: Message, state: FSMContext):
 
     txt = (
         "⚙️ <b>Настройки</b>\n\n"
-        f"📌 Лимит слов в день = <b>{daily_limit_words}</b>\n"
+        f"📌 Цель слов в день = <b>{daily_limit_words}</b>\n"
         f"⏰ Время уведомления = <b>{notify_time}</b>\n\n"
         "Выбери действие:"
     )  # 💬 показываем текущие значения настроек
+
 
     try:
         await message.edit_text(txt, reply_markup=kb)  # 💬 не плодим новые сообщения
