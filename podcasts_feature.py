@@ -787,31 +787,7 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
         rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
-    PER_PAGE = 8
-    total = len(items)
-    pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
-    page = max(0, min(page, pages - 1))
 
-    start = page * PER_PAGE
-    end = start + PER_PAGE
-    chunk = items[start:end]
-
-    for eid, e in chunk:
-        rows.append([InlineKeyboardButton(text=e.get("title", "🎧 Эпизод"), callback_data=f"pod:ep:{eid}")])
-
-    if pages > 1:
-        prev_cb = "pod:ep_page_prev" if page > 0 else "pod:noop"
-        next_cb = "pod:ep_page_next" if page < (pages - 1) else "pod:noop"
-        rows.append(
-            [
-                InlineKeyboardButton(text="◀️", callback_data=prev_cb),
-                InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="pod:noop"),
-                InlineKeyboardButton(text="▶️", callback_data=next_cb),
-            ]
-        )  # 💬 пагинация по 8 кнопок
-
-    rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _kb_fragment_controls() -> InlineKeyboardMarkup:
@@ -1491,9 +1467,40 @@ async def pod_premium_check(cb: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("pod:ep:"))
 async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
     # 💬 механика как раньше = сначала аудио, потом отдельным сообщением фрагмент с кнопками
-    ep_id = cb.data.split(":")[-1]
+    parts = (cb.data or "").split(":")
+    author_id = parts[2] if len(parts) >= 4 else None
+    ep_id = parts[-1] if parts else ""
+
     data = _read_podcasts()
-    ep = data.get("episodes", {}).get(ep_id)
+
+    # 💬 Доп.защита: даже если кто-то “подделал” callback_data, не даём открыть >10 без Premium
+    if author_id and (not _premium_active(cb.from_user.id)):
+        try:
+            # 💬 строим общий список эпизодов автора (как в меню) и считаем индекс
+            author_items = []
+            for _eid, _e in (data.get("episodes") or {}).items():
+                if str((_e or {}).get("author_id")) == str(author_id):
+                    author_items.append(str(_eid))
+
+            def _sort_key(x: str):
+                try:
+                    return (int(x),)
+                except Exception:
+                    return (10**9, x)
+
+            author_items.sort(key=_sort_key)
+
+            if str(ep_id) in author_items:
+                idx = author_items.index(str(ep_id))
+                if idx >= FREE_PODCASTS_LIMIT:
+                    # 💬 показываем тот же paywall, что и при клике по 🔒
+                    await pod_episode_locked(cb, state)
+                    return
+        except Exception:
+            pass
+
+    ep = (data.get("episodes") or {}).get(ep_id)
+
     st = await state.get_data()  # 💬 берём прошлые msg_id (аудио/прочее) для чистки
 
     prem_id = st.get("pod_premium_msg_id")
