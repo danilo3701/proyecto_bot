@@ -3466,11 +3466,13 @@ async def settings_limit_cb(callback: CallbackQuery, state: FSMContext):
     await state.set_state("settings_inline_input")  # 💬 включаем режим ввода из настроек
 
     await callback.message.edit_text(
-        "🔢 Введи лимит слов в день (число):",
+        "🎯 Цель слов в день\n\n"
+        "Напиши число: сколько слов ты хочешь учить в день",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")]
         ])
     )
+
 
 
 @dp.callback_query(F.data == "settings:notify")
@@ -3527,8 +3529,9 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
                 raise ValueError
         except Exception:
             asyncio.create_task(
-                send_and_auto_delete_text(bot, chat_id, "⚠️ Введи число от 3 до 30", delay=1.0)
+                send_and_auto_delete_text(bot, chat_id, "⚠️ Напиши число от 1 до 50", delay=1.0)
             )  # 💬 короткое предупреждение без мусора в чате
+
             return
 
 
@@ -3549,21 +3552,25 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL),
-                InlineKeyboardButton(text="Лимит слов", callback_data="settings:limit"),
+                InlineKeyboardButton(text="💬 Связь", url=CONTACT_URL),
+                InlineKeyboardButton(text="💎 Моя подписка", callback_data="settings:subscription"),
             ],
             [
-                InlineKeyboardButton(text="Время уведомления", callback_data="settings:notify"),
+                InlineKeyboardButton(text="🍪 Лимит слов", callback_data="settings:limit"),
+                InlineKeyboardButton(text="⏰ Время уведомления", callback_data="settings:notify"),
+            ],
+            [
                 InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back"),
             ],
-        ])  # 💬 меню настроек (инлайн 4 кнопки)
+        ])  # 💬 меню настроек + вход в «Моя подписка»
 
         txt = (
             "⚙️ <b>Настройки</b>\n\n"
-            f"📌 Лимит слов в день = <b>{daily_limit_words}</b>\n"
+            f"📌 Цель слов в день = <b>{daily_limit_words}</b>\n"
             f"⏰ Время уведомления = <b>{notify_time}</b>\n\n"
             "Выбери действие:"
         )  # 💬 показываем текущие значения настроек
+
 
 
         if msg_id:
@@ -3634,10 +3641,11 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
 
         txt = (
             "⚙️ <b>Настройки</b>\n\n"
-            f"📌 Лимит слов в день = <b>{daily_limit_words}</b>\n"
+            f"📌 Цель слов в день = <b>{daily_limit_words}</b>\n"
             f"⏰ Время уведомления = <b>{notify_time}</b>\n\n"
             "Выбери действие:"
         )  # 💬 показываем текущие значения настроек
+
 
 
         if msg_id:
@@ -3687,10 +3695,11 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
         
         txt = (
             "⚙️ <b>Настройки</b>\n\n"
-            f"📌 Лимит слов в день = <b>{daily_limit_words}</b>\n"
+            f"📌 Цель слов в день = <b>{daily_limit_words}</b>\n"
             f"⏰ Время уведомления = <b>{notify_time}</b>\n\n"
             "Выбери действие:"
         )  # 💬 показываем текущие значения настроек
+
         
         if msg_id:
             try:
@@ -3708,12 +3717,13 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
 
 
 # 💬 Обрабатываем только если текст не пустой и не None
-@dp.message(lambda m: m.text is not None and m.text.startswith("🔢 Лимит слов:"))
+@dp.message(lambda m: m.text is not None and (m.text.startswith("🔢 Лимит слов:") or m.text.startswith("🎯 Цель слов в день:")))
 
 async def set_limit(message: Message, state: FSMContext):
-    # 💬 Здесь пользователь нажал на лимит слов
-    await message.answer("Введи новый лимит слов в день (от 1 до 50):")
+    # 💬 Здесь пользователь нажал на цель слов в день (старая/новая кнопка)
+    await message.answer("Напиши число: какая цель у тебя в день учить слов? (от 1 до 50):")
     await state.set_state("waiting_limit_input")
+
 
 
 
