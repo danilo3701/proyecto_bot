@@ -570,7 +570,14 @@ def _kb_authors(data: Any) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None, topic_key: str = None, page: int = 0) -> InlineKeyboardMarkup:
+def _kb_episodes(
+    data: dict,
+    user_id: int,
+    author_id: str,
+    level_key: str = None,
+    topic_key: str = None,
+    page: int = 0
+) -> InlineKeyboardMarkup:
     episodes = data.get("episodes") or {}
     premium_active = _premium_active(user_id)
 
@@ -604,26 +611,33 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
             s = s[:27].rstrip() + "…"
         return f"🔒 {s}"
 
+    def _title_open(s: str) -> str:
+        # 💬 открытый эпизод: гарантируем 🎧 в начале и подрежем длину
+        s = (s or "").strip()
+        if not s:
+            s = "Эпизод"
+        if not (s.startswith("🎧") or s.startswith("🎙") or s.startswith("🎙️")):
+            s = f"🎧 {s}"
+        if len(s) > 32:
+            s = s[:31].rstrip() + "…"
+        return s
 
     def _episode_level_key(e: dict) -> str:
         raw = (e or {}).get("level") or (e or {}).get("level_key") or (e or {}).get("lvl") or ""
         raw = str(raw).strip().upper()
 
-        # 💬 приводим эпизодные уровни к B/X, чтобы новые фильтры работали со старыми данными
         if raw in {"X1", "X2"}:
             return "X"
         if raw in {"A2", "B1", "B2", "C1", "C2", "X"}:
             return "X"
         if raw in {"A0", "A1", "B"}:
             return "B"
-
         return raw
-
 
     def _filtered_items() -> list:
         items_local = []
         for eid, e in episodes.items():
-            # 💬 1) сначала ограничиваем по автору (иначе фильтр и поиск “плывут”)
+            # 💬 1) сначала ограничиваем по автору
             if str((e or {}).get("author_id")) != str(author_id):
                 continue
 
@@ -644,23 +658,22 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
                 category = str((e or {}).get("category") or "").strip().lower()
 
                 ok_topic = True
-                if tk == "C":  # разговор двух людей
+                if tk == "C":
                     ok_topic = (("C" in topics_norm) or (category == "talks"))
-                elif tk == "D":  # истории
+                elif tk == "D":
                     ok_topic = (("D" in topics_norm) or (category == "daily"))
-                elif tk == "G":  # грамматика и лексика
+                elif tk == "G":
                     ok_topic = (("G" in topics_norm) or (category in ("grammar", "lexica")))
                 else:
                     ok_topic = (tk in topics_norm)
 
                 if not ok_topic:
-                    continue  # 💬 важно: НЕ return, иначе ломаем выдачу целиком
+                    continue
 
             items_local.append((str(eid), e))
 
-
         def _sort_key(pair):
-            eid_local, e_local = pair
+            eid_local, _e_local = pair
             try:
                 return (int(eid_local),)
             except Exception:
@@ -671,22 +684,62 @@ def _kb_episodes(data: dict, user_id: int, author_id: str, level_key: str = None
 
     items = _filtered_items()
     total = len(items)
+
     pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
     page = max(0, min(int(page or 0), pages - 1))
 
     start = page * PER_PAGE
     end = start + PER_PAGE
 
-    rows = []
-    is_filtered = bool(level_key or topic_key)
+    rows: List[List[InlineKeyboardButton]] = []
 
+    is_filtered = bool(level_key or topic_key)
     if is_filtered:
         rows.append([InlineKeyboardButton(text="🧹 СБРОСИТЬ ФИЛЬТР", callback_data="pod:filter_reset")])
 
     if total == 0:
-        rows.append([InlineKeyboardButton(text="(ничего не найдено)", callback_data="pod:noop")])  # 💬 пустой результат без несуществующего хендлера
-        rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])      # 💬 возвращаемся в существующий экран авторов
+        rows.append([InlineKeyboardButton(text="(ничего не найдено)", callback_data="pod:noop")])
+        rows.append([InlineKeyboardButton(text="🔎 Фильтры", callback_data="pod:filter")])
+        rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])
+        rows.append([InlineKeyboardButton(text="🏠 В меню", callback_data="back_to_menu")])
         return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    # 💬 список эпизодов на текущей странице
+    for global_idx, (eid, e) in enumerate(items[start:end], start=start):
+        title = (e or {}).get("title") or "Эпизод"
+
+        # 💬 после FREE_PODCASTS_LIMIT = замок, если нет Premium
+        if (not premium_active) and (global_idx >= FREE_PODCASTS_LIMIT):
+            rows.append([
+                InlineKeyboardButton(
+                    text=_lock_title(title),
+                    callback_data=f"pod:locked:{author_id}:{eid}"
+                )
+            ])
+        else:
+            rows.append([
+                InlineKeyboardButton(
+                    text=_title_open(title),
+                    callback_data=f"pod:ep:{author_id}:{eid}"
+                )
+            ])
+
+    # 💬 пагинация (как в лексике: стрелки + 2/3)
+    if pages > 1:
+        prev_cb = "pod:ep_page_prev" if page > 0 else "pod:noop"
+        next_cb = "pod:ep_page_next" if page < (pages - 1) else "pod:noop"
+        rows.append([
+            InlineKeyboardButton(text="⬅️", callback_data=prev_cb),
+            InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="pod:noop"),
+            InlineKeyboardButton(text="➡️", callback_data=next_cb),
+        ])
+
+    # 💬 фильтры, назад, меню
+    rows.append([InlineKeyboardButton(text="🔎 Фильтры", callback_data="pod:filter")])
+    rows.append([InlineKeyboardButton(text="⬅️ К авторам", callback_data="pod:authors")])
+    rows.append([InlineKeyboardButton(text="🏠 В меню", callback_data="back_to_menu")])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 
