@@ -2475,6 +2475,15 @@ async def settings_subscription_cb(callback: CallbackQuery):
     row = data.get(str(uid), {})
     if not isinstance(row, dict):
         row = {}
+    # 💬 Базовые поля из файла (не зависим от глобальных переменных)
+    try:
+        until_ts = int((row or {}).get("active_until", 0) or 0)
+    except Exception:
+        until_ts = 0
+
+    plan = str((row or {}).get("plan", "") or "")
+    cust_id = str((row or {}).get("stripe_customer_id", "") or "").strip()
+    sub_id = str((row or {}).get("stripe_subscription_id", "") or "").strip()
 
     # 💬 Если в файле не хватает данных (cust_id/sub_id), попробуем восстановить из Stripe
     if stripe and STRIPE_SECRET_KEY:
@@ -2589,12 +2598,15 @@ async def settings_subscription_cb(callback: CallbackQuery):
     # ===== Кнопки
     kb_rows = []
 
-    # 💬 Явная отмена через Customer Portal
+    # 💬 Customer Portal: делаем 2 кнопки на один и тот же URL
+    # 💬 чтобы пользователь мог “проверить” без страха нажать “отменить”
     if portal_url:
         kb_rows.append([InlineKeyboardButton(text="❌ Отменить подписку", url=portal_url)])
+        kb_rows.append([InlineKeyboardButton(text="✅ Проверить премиум", url=portal_url)])
 
     if premium_active:
-        kb_rows.append([InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check_settings")])
+        # 💬 Эта кнопка НЕ отменяет. Она синкает файл premium_users.json из Stripe и обновляет UI
+        kb_rows.append([InlineKeyboardButton(text="🔎 Синхронизировать статус", callback_data="premium:check_settings")])
         kb_rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="settings:subscription")])
         kb_rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")])
     else:
@@ -2602,9 +2614,10 @@ async def settings_subscription_cb(callback: CallbackQuery):
             [InlineKeyboardButton(text="💎 Premium 2,90€ в неделю", url=PREMIUM_PAYLINK_WEEK)],
             [InlineKeyboardButton(text="💎 Premium 4,90€ в месяц", url=PREMIUM_PAYLINK_MONTH)],
             [InlineKeyboardButton(text="💎 Premium 49,00€ в год", url=PREMIUM_PAYLINK_YEAR)],
-            [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check_settings")],
+            [InlineKeyboardButton(text="🔎 Синхронизировать статус", callback_data="premium:check_settings")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")],
         ])
+
 
     kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
