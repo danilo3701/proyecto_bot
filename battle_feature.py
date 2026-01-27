@@ -266,7 +266,6 @@ def _topics_kb(topic_keys: List[str]) -> InlineKeyboardMarkup:
 
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="battle:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
-)
 
 def _bt_admin_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
