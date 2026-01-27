@@ -499,7 +499,7 @@ def _episodes_menu_html(author_name: str, level_key: str | None, topic_key: str 
     if not show_help:
         return (
             f"<b>🎙 {author_name}</b>\n"
-            "Пользуйся кнопкой <b>🔎 Фильтры</b> для быстрого поиска\n\n"
+            "<b>🔎 Фильтры</b>\n\n"
             f"{filter_line}"
             "<b>Выбери эпизод:</b>"
         )
@@ -701,7 +701,7 @@ def _kb_episodes(
         # 💬 нижняя панель: 🔎 ⬅️ 🏠 (в одну строку, как ты просил)
         rows.append([
             InlineKeyboardButton(text="🔎", callback_data="pod:filter"),
-            InlineKeyboardButton(text="⬅️", callback_data="pod:authors"),
+            InlineKeyboardButton(text="🔄", callback_data="pod:authors"),
             InlineKeyboardButton(text="🏠", callback_data="back_to_menu"),
         ])
 
@@ -741,7 +741,7 @@ def _kb_episodes(
     # 💬 нижняя панель: 🔎 ⬅️ 🏠 (в одну строку, как ты просил)
     rows.append([
         InlineKeyboardButton(text="🔎", callback_data="pod:filter"),
-        InlineKeyboardButton(text="⬅️", callback_data="pod:authors"),
+        InlineKeyboardButton(text="🔄", callback_data="pod:authors"),
         InlineKeyboardButton(text="🏠", callback_data="back_to_menu"),
     ])
 
