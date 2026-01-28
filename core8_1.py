@@ -5099,11 +5099,17 @@ async def _mywords_delete_after(chat_id: int, message_id: int, delay_sec: int = 
         await bot.delete_message(chat_id=chat_id, message_id=message_id)
     except Exception:
         pass
-
-async def _mywords_temp_note(message: Message, text: str, *, delay_sec: int = 3):
-    # 💬 отправляем короткое уведомление и удаляем через delay_sec
+async def _mywords_temp_note(
+    message: Message,
+    text: str,
+    *,
+    delay_sec: int = 3,
+    reply_markup=None,
+    parse_mode: str | None = None
+):
+    # 💬 отправляем короткое уведомление и удаляем через delay_sec (чтобы чат был чистым)
     try:
-        m = await message.answer(text)
+        m = await message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
         asyncio.create_task(_mywords_delete_after(message.chat.id, m.message_id, delay_sec))
     except Exception:
         pass
@@ -5283,8 +5289,14 @@ async def mywords_send_next_text(message: Message, state: FSMContext):
 
     if not queue:
         mode = data.get("mywords_mode", "new")
-        await smart_reply(message, "🎉 Готово! Возвращаю в список категорий.", reply_markup=ReplyKeyboardRemove())
+        await _mywords_temp_note(
+            message,
+            "🎉 Готово! Возвращаю в список категорий.",
+            delay_sec=3,
+            reply_markup=ReplyKeyboardRemove()
+        )  # 💬 исчезнет через 3 сек, клавиатуру уберёт
         return await mywords_show_categories(message, state, mode)
+
 
     word_id = queue.pop(0)
     word = next((w for w in pool if w.get("id") == word_id), None)
@@ -5560,8 +5572,13 @@ async def mywords_add_save_cb(callback: CallbackQuery, state: FSMContext):
 
     # 💬 жёсткий защитный лимит (даже с Premium)
     if len(words) >= MYWORDS_HARD_WORDS_PER_CAT_LIMIT:
-        await smart_reply(callback.message, f"В категории уже {MYWORDS_HARD_WORDS_PER_CAT_LIMIT} слов. Создай новую категорию.")
+        await _mywords_temp_note(
+            callback.message,
+            f"В категории уже {MYWORDS_HARD_WORDS_PER_CAT_LIMIT} слов. Создай новую категорию.",
+            delay_sec=3
+        )  # 💬 исчезнет через 3 сек
         return await mywords_menu(callback.message, state)
+
 
     words.append({
         "id": gen_my_word_id(),
@@ -5571,8 +5588,9 @@ async def mywords_add_save_cb(callback: CallbackQuery, state: FSMContext):
     })
     save_my_words_data(store)
 
-    await smart_reply(callback.message, "✅ Сохранено!")
+    await _mywords_temp_note(callback.message, "✅ Сохранено!", delay_sec=3)  # 💬 исчезнет через 3 сек
     return await mywords_menu(callback.message, state)
+
 
 # ─────────────────────────────────────────────────────────────
 #   📖 Учить / 🔁 Повторить: выбор категории
@@ -5594,8 +5612,9 @@ async def mywords_choose_cat_new_cb(callback: CallbackQuery, state: FSMContext):
     store, u = mywords_get_user_block(user_id)
     pool_words = mywords_words_for_mode(u, category, mode="new")
     if not pool_words:
-        await smart_reply(callback.message, "В этой категории нет новых слов. Возвращаю к категориям.")
+        await _mywords_temp_note(callback.message, "В этой категории нет новых слов. Возвращаю к категориям.", delay_sec=3)
         return await mywords_show_categories(callback.message, state, mode="new")
+
 
     pool = []
     for w in pool_words:
@@ -5634,8 +5653,9 @@ async def mywords_choose_cat_repeat_cb(callback: CallbackQuery, state: FSMContex
     store, u = mywords_get_user_block(user_id)
     pool_words = mywords_words_for_mode(u, category, mode="repeat")
     if not pool_words:
-        await smart_reply(callback.message, "В этой категории нет выученных слов. Возвращаю к категориям.")
+        await _mywords_temp_note(callback.message, "В этой категории нет выученных слов. Возвращаю к категориям.", delay_sec=3)
         return await mywords_show_categories(callback.message, state, mode="repeat")
+
 
     pool = []
     for w in pool_words:
@@ -5661,8 +5681,14 @@ async def mywords_choose_cat_repeat_cb(callback: CallbackQuery, state: FSMContex
 @dp.message(StateFilter(LessonStates.mywords_quiz, LessonStates.mywords_text), F.text == "⏹ Стоп")
 @track_handler
 async def mywords_stop_any(message: Message, state: FSMContext):
-    await smart_reply(message, "Ок, стоп.", reply_markup=ReplyKeyboardRemove())  # 💬 выход в меню
+    await _mywords_temp_note(
+        message,
+        "Ок, стоп.",
+        delay_sec=3,
+        reply_markup=ReplyKeyboardRemove()
+    )  # 💬 исчезнет через 3 сек, клавиатуру уберёт
     return await mywords_menu(message, state)
+
 
 # ─────────────────────────────────────────────────────────────
 #   Quiz стадия: poll_answer
