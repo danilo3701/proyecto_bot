@@ -5051,8 +5051,50 @@ async def mywords_show_main_menu(message: Message, state: FSMContext):
 
     await state.set_state(LessonStates.choosing_category)
 
+
+# ─────────────────────────────────────────────────────────────
+#   🧹 Clean UI helpers for «Мои слова»
+# ─────────────────────────────────────────────────────────────
+
+async def _mywords_try_delete_user_message(message: Message):
+    # 💬 удаляем ввод пользователя, чтобы чат не засорялся
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+async def _mywords_touch_ui_msg_id(state: FSMContext, ui_message: Message):
+    # 💬 запоминаем 1 "якорное" сообщение (его всегда редактируем в «Мои слова»)
+    try:
+        await state.update_data(mywords_ui_msg_id=ui_message.message_id)
+    except Exception:
+        pass
+
+async def _mywords_edit_ui(message: Message, state: FSMContext, text: str, *, reply_markup=None, parse_mode: str = None):
+    # 💬 пытаемся редактировать якорное сообщение; если его нет — создаём и запоминаем
+    data = await state.get_data()
+    ui_msg_id = data.get("mywords_ui_msg_id")
+
+    if ui_msg_id:
+        try:
+            return await bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=int(ui_msg_id),
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+        except Exception:
+            pass
+
+    ui_message = await smart_reply(message, text, reply_markup=reply_markup, parse_mode=parse_mode)
+    if ui_message:
+        await _mywords_touch_ui_msg_id(state, ui_message)
+    return ui_message
+
+
 async def mywords_menu(message: Message, state: FSMContext):
-    # 💬 показываем меню «Мои слова»
+    # 💬 показываем меню «Мои слова» (всегда через редактирование "якоря")
     user_id = str(message.chat.id)
     store, _ = mywords_get_user_block(user_id)
     save_my_words_data(store)  # 💬 гарантируем файл в Volume
@@ -5060,11 +5102,7 @@ async def mywords_menu(message: Message, state: FSMContext):
     txt = "🧩 *Мои слова*\n\nВыбирай действие:"
     kb = build_mywords_menu_kb()
 
-    try:
-        await message.edit_text(txt, reply_markup=kb, parse_mode="Markdown")
-    except Exception:
-        await smart_reply(message, txt, reply_markup=kb, parse_mode="Markdown")
-
+    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="Markdown")
     await state.set_state(LessonStates.mywords_menu)
 
 async def mywords_show_categories(message: Message, state: FSMContext, mode: str):
@@ -5285,32 +5323,44 @@ async def mywords_settings_any_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     txt = "⚙️ Настройки\n\nСколько слов учим за раз?\nНапиши число."
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:menu")]])
+
+    ui_message = None
     try:
-        await callback.message.edit_text(txt, reply_markup=kb)
+        ui_message = await callback.message.edit_text(txt, reply_markup=kb)
     except Exception:
-        await smart_reply(callback.message, txt, reply_markup=kb)
+        ui_message = await smart_reply(callback.message, txt, reply_markup=kb)
+
+    if ui_message:
+        await _mywords_touch_ui_msg_id(state, ui_message)
+
     await state.set_state(LessonStates.mywords_settings_wait)
 
+@dp.message(StateFilter(LessonStates.mywords_settings_wait))
+@track_handler
 @dp.message(StateFilter(LessonStates.mywords_settings_wait))
 @track_handler
 async def mywords_settings_wait_number(message: Message, state: FSMContext):
     user_id = str(message.chat.id)
     raw = (message.text or "").strip()
+
+    await _mywords_try_delete_user_message(message)  # 💬 чистим чат
+
     if not raw.isdigit():
-        return await smart_reply(message, "Напиши число, например 5.")  # 💬 валидация числа
+        await _mywords_edit_ui(message, state, "Напиши число, например 5.")
+        return
 
     n = max(1, min(int(raw), 30))
     store, u = mywords_get_user_block(user_id)
     u.setdefault("settings", {})["session_words"] = n
     save_my_words_data(store)
 
-    await smart_reply(message, f"✅ Сохранено = {n}", reply_markup=ReplyKeyboardRemove())
+    # 💬 сразу возвращаемся в меню (без новых сообщений)
     return await mywords_menu(message, state)
+
 
 # ─────────────────────────────────────────────────────────────
 #   ➕ Добавить слово
 # ─────────────────────────────────────────────────────────────
-
 @dp.callback_query(F.data == "mywords:add_open")
 @track_handler
 async def mywords_add_open_cb(callback: CallbackQuery, state: FSMContext):
@@ -5325,10 +5375,15 @@ async def mywords_add_open_cb(callback: CallbackQuery, state: FSMContext):
     kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
     txt = "➕ Добавить слово\n\nВыбери категорию:"
+
+    ui_message = None
     try:
-        await callback.message.edit_text(txt, reply_markup=kb)
+        ui_message = await callback.message.edit_text(txt, reply_markup=kb)
     except Exception:
-        await smart_reply(callback.message, txt, reply_markup=kb)
+        ui_message = await smart_reply(callback.message, txt, reply_markup=kb)
+
+    if ui_message:
+        await _mywords_touch_ui_msg_id(state, ui_message)
 
     await state.set_state(LessonStates.mywords_add_choose_category)
 
@@ -5354,12 +5409,18 @@ async def mywords_add_choose_cat_cb(callback: CallbackQuery, state: FSMContext):
     )  # 💬 показываем пример формата ввода
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
+
+    ui_message = None
     try:
-        await callback.message.edit_text(txt, reply_markup=kb, parse_mode="Markdown")
+        ui_message = await callback.message.edit_text(txt, reply_markup=kb, parse_mode="Markdown")
     except Exception:
-        await smart_reply(callback.message, txt, reply_markup=kb, parse_mode="Markdown")
+        ui_message = await smart_reply(callback.message, txt, reply_markup=kb, parse_mode="Markdown")
+
+    if ui_message:
+        await _mywords_touch_ui_msg_id(state, ui_message)
 
     await state.set_state(LessonStates.mywords_add_input_pair)
+
 
 @dp.callback_query(StateFilter(LessonStates.mywords_add_choose_category), F.data == "mywords:add_newcat")
 @track_handler
@@ -5388,13 +5449,50 @@ async def mywords_add_newcat_cb(callback: CallbackQuery, state: FSMContext):
         await smart_reply(callback.message, txt, reply_markup=kb)
     await state.set_state(LessonStates.mywords_add_new_category)
 
+@dp.callback_query(StateFilter(LessonStates.mywords_add_choose_category), F.data == "mywords:add_newcat")
+@track_handler
+async def mywords_add_newcat_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+
+    # 💬 FREE лимит на категории: 3 категории без Premium
+    user_id = str(callback.message.chat.id)
+    store, u = mywords_get_user_block(user_id)
+    cats = u.setdefault("categories", {})
+
+    if (not is_premium_active(callback.from_user.id)) and (len(cats) >= FREE_MYWORDS_CATEGORIES_LIMIT):
+        await callback.message.answer(
+            _premium_paywall_text(callback.from_user.id),
+            reply_markup=_premium_paywall_kb("mywords:menu"),
+            parse_mode="HTML"
+        )
+        return  # 💬 не переводим в state ввода названия
+
+    txt = "➕ Новая категория\n\nНапиши название категории."
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
+
+    ui_message = None
+    try:
+        ui_message = await callback.message.edit_text(txt, reply_markup=kb)
+    except Exception:
+        ui_message = await smart_reply(callback.message, txt, reply_markup=kb)
+
+    if ui_message:
+        await _mywords_touch_ui_msg_id(state, ui_message)
+
+    await state.set_state(LessonStates.mywords_add_new_category)
+
+
 @dp.message(StateFilter(LessonStates.mywords_add_new_category))
 @track_handler
 async def mywords_add_newcat_name(message: Message, state: FSMContext):
     user_id = str(message.chat.id)
     name = (message.text or "").strip()
+
+    await _mywords_try_delete_user_message(message)  # 💬 чистим чат
+
     if not name:
-        return await smart_reply(message, "Напиши название категории.")  # 💬 валидация
+        await _mywords_edit_ui(message, state, "Напиши название категории.")
+        return
 
     # 💬 Подстраховка: если state выставили вручную, всё равно режем >3 категории без Premium
     store, u = mywords_get_user_block(user_id)
@@ -5409,22 +5507,33 @@ async def mywords_add_newcat_name(message: Message, state: FSMContext):
         )
         return
 
-
-    store, u = mywords_get_user_block(user_id)
-    cats = u.setdefault("categories", {})
     cats.setdefault(name, [])
     save_my_words_data(store)
 
     await state.update_data(mywords_category=name)
-    await smart_reply(message, f"Категория выбрана: {name}\n\nОтправь строкой: ES - RU", reply_markup=ReplyKeyboardRemove())
+
+    txt = (
+        f"➕ Добавить слово\n\n"
+        f"Категория: *{name}*\n\n"
+        f"Отправь вот так: ES - RU\n"
+        f"Пример: *Comer - Кушать*"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
+
+    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="Markdown")
     await state.set_state(LessonStates.mywords_add_input_pair)
+
 
 @dp.message(StateFilter(LessonStates.mywords_add_input_pair))
 @track_handler
 async def mywords_add_input_pair(message: Message, state: FSMContext):
     es, ru = parse_es_ru_pair(message.text or "")
+
+    await _mywords_try_delete_user_message(message)  # 💬 чистим чат
+
     if not es or not ru:
-        return await smart_reply(message, "Формат такой: ES - RU")  # 💬 валидация формата
+        await _mywords_edit_ui(message, state, "Формат такой: ES - RU")
+        return
 
     await state.update_data(mywords_pending_pair={"es": es, "ru": ru})
 
@@ -5433,8 +5542,10 @@ async def mywords_add_input_pair(message: Message, state: FSMContext):
         [InlineKeyboardButton(text="✅ Сохранить", callback_data="mywords:add_save")],
         [InlineKeyboardButton(text="🗑 Отмена", callback_data="mywords:menu")]
     ])
-    await smart_reply(message, txt, reply_markup=kb, parse_mode="Markdown")
+
+    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="Markdown")
     await state.set_state(LessonStates.mywords_add_confirm)
+
 
 @dp.callback_query(StateFilter(LessonStates.mywords_add_confirm), F.data == "mywords:add_save")
 @track_handler
@@ -5847,7 +5958,7 @@ async def mywords_edit_choose_cat_cb(callback: CallbackQuery, state: FSMContext)
 
     return await mywords_open_edit_category_menu(callback.message, state, categories[idx])
 
-@dp.callback_query(StateFilter(LessonStates.mywords_edit_menu), F.data == "mywords:edit_delete")
+@dp.callback_query(F.data == "mywords:edit_delete")
 @track_handler
 async def mywords_edit_delete_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -5859,7 +5970,10 @@ async def mywords_edit_delete_cb(callback: CallbackQuery, state: FSMContext):
     txt, total = await mywords_render_words_page(user_id, category, page)
     kb = mywords_words_nav_kb(page, total, back_cb="mywords:edit_open")
 
-    await smart_reply(callback.message, txt + "\n\nНапиши номер строки для удаления.", reply_markup=kb)
+    ui_message = await smart_reply(callback.message, txt + "\n\nНапиши номер строки для удаления.", reply_markup=kb)
+    if ui_message:
+        await _mywords_touch_ui_msg_id(state, ui_message)
+
     await state.set_state(LessonStates.mywords_edit_delete_wait)
 
 @dp.callback_query(StateFilter(LessonStates.mywords_edit_delete_wait), F.data.in_({"mywords:page_prev", "mywords:page_next"}))
@@ -5882,14 +5996,21 @@ async def mywords_delete_nav_cb(callback: CallbackQuery, state: FSMContext):
     await state.update_data(mywords_edit_page=page)
     txt, total = await mywords_render_words_page(user_id, category, page)
     kb = mywords_words_nav_kb(page, total, back_cb="mywords:edit_open")
-    await smart_reply(callback.message, txt + "\n\nНапиши номер строки для удаления.", reply_markup=kb)
+
+    ui_message = await smart_reply(callback.message, txt + "\n\nНапиши номер строки для удаления.", reply_markup=kb)
+    if ui_message:
+        await _mywords_touch_ui_msg_id(state, ui_message)
 
 @dp.message(StateFilter(LessonStates.mywords_edit_delete_wait))
 @track_handler
 async def mywords_delete_wait_index(message: Message, state: FSMContext):
     raw = (message.text or "").strip()
+
+    await _mywords_try_delete_user_message(message)  # 💬 чистим чат
+
     if not raw.isdigit():
-        return await smart_reply(message, "Напиши номер строки числом.")  # 💬 валидация индекса
+        await _mywords_edit_ui(message, state, "Напиши номер строки числом.")
+        return
 
     idx = int(raw)
     data = await state.get_data()
@@ -5899,7 +6020,8 @@ async def mywords_delete_wait_index(message: Message, state: FSMContext):
     _, u = mywords_get_user_block(user_id)
     words = list(u.get("categories", {}).get(category, []))
     if idx < 1 or idx > len(words):
-        return await smart_reply(message, "Такого номера нет.")
+        await _mywords_edit_ui(message, state, "Такого номера нет.")
+        return
 
     w = words[idx - 1]
     await state.update_data(mywords_pending_index=idx)
@@ -5909,7 +6031,9 @@ async def mywords_delete_wait_index(message: Message, state: FSMContext):
         [InlineKeyboardButton(text="✅ Удалить", callback_data="mywords:delete_confirm")],
         [InlineKeyboardButton(text="🗑 Отмена", callback_data="mywords:edit_open")]
     ])
-    await smart_reply(message, txt, reply_markup=kb)
+
+    await _mywords_edit_ui(message, state, txt, reply_markup=kb)
+
 
 @dp.callback_query(StateFilter(LessonStates.mywords_edit_delete_wait), F.data == "mywords:delete_confirm")
 @track_handler
@@ -5929,7 +6053,7 @@ async def mywords_delete_confirm_cb(callback: CallbackQuery, state: FSMContext):
     await smart_reply(callback.message, "✅ Удалено!")
     return await mywords_open_edit_category_menu(callback.message, state, category)
 
-@dp.callback_query(StateFilter(LessonStates.mywords_edit_menu), F.data == "mywords:edit_change")
+@dp.callback_query(F.data == "mywords:edit_change")
 @track_handler
 async def mywords_edit_change_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -5941,15 +6065,22 @@ async def mywords_edit_change_cb(callback: CallbackQuery, state: FSMContext):
     kb = mywords_words_nav_kb(0, total, back_cb="mywords:edit_open")
     await state.update_data(mywords_edit_page=0)
 
-    await smart_reply(callback.message, txt + "\n\nНапиши номер строки для изменения.", reply_markup=kb)
+    ui_message = await smart_reply(callback.message, txt + "\n\nНапиши номер строки для изменения.", reply_markup=kb)
+    if ui_message:
+        await _mywords_touch_ui_msg_id(state, ui_message)
+
     await state.set_state(LessonStates.mywords_edit_edit_index_wait)
 
 @dp.message(StateFilter(LessonStates.mywords_edit_edit_index_wait))
 @track_handler
 async def mywords_edit_wait_index(message: Message, state: FSMContext):
     raw = (message.text or "").strip()
+
+    await _mywords_try_delete_user_message(message)  # 💬 чистим чат
+
     if not raw.isdigit():
-        return await smart_reply(message, "Напиши номер строки числом.")
+        await _mywords_edit_ui(message, state, "Напиши номер строки числом.")
+        return
 
     idx = int(raw)
     data = await state.get_data()
@@ -5959,19 +6090,30 @@ async def mywords_edit_wait_index(message: Message, state: FSMContext):
     _, u = mywords_get_user_block(user_id)
     words = list(u.get("categories", {}).get(category, []))
     if idx < 1 or idx > len(words):
-        return await smart_reply(message, "Такого номера нет.")
+        await _mywords_edit_ui(message, state, "Такого номера нет.")
+        return
 
     w = words[idx - 1]
     await state.update_data(mywords_pending_index=idx)
-    await smart_reply(message, f"Текущее:\n{idx}) {w.get('es','')} = {w.get('ru','')}\n\nОтправь новое: ES - RU")
+
+    await _mywords_edit_ui(
+        message,
+        state,
+        f"Текущее:\n{idx}) {w.get('es','')} = {w.get('ru','')}\n\nОтправь новое: ES - RU"
+    )
     await state.set_state(LessonStates.mywords_edit_edit_pair_wait)
+
 
 @dp.message(StateFilter(LessonStates.mywords_edit_edit_pair_wait))
 @track_handler
 async def mywords_edit_wait_pair(message: Message, state: FSMContext):
     es, ru = parse_es_ru_pair(message.text or "")
+
+    await _mywords_try_delete_user_message(message)  # 💬 чистим чат
+
     if not es or not ru:
-        return await smart_reply(message, "Формат такой: ES - RU")
+        await _mywords_edit_ui(message, state, "Формат такой: ES - RU")
+        return
 
     await state.update_data(mywords_pending_pair={"es": es, "ru": ru})
     data = await state.get_data()
@@ -5982,7 +6124,9 @@ async def mywords_edit_wait_pair(message: Message, state: FSMContext):
         [InlineKeyboardButton(text="✅ Сохранить", callback_data="mywords:edit_save")],
         [InlineKeyboardButton(text="🗑 Отмена", callback_data="mywords:edit_open")]
     ])
-    await smart_reply(message, txt, reply_markup=kb)
+
+    await _mywords_edit_ui(message, state, txt, reply_markup=kb)
+
 
 @dp.callback_query(StateFilter(LessonStates.mywords_edit_edit_pair_wait), F.data == "mywords:edit_save")
 @track_handler
