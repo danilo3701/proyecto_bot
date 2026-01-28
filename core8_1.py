@@ -5092,6 +5092,22 @@ async def _mywords_edit_ui(message: Message, state: FSMContext, text: str, *, re
         await _mywords_touch_ui_msg_id(state, ui_message)
     return ui_message
 
+async def _mywords_delete_after(chat_id: int, message_id: int, delay_sec: int = 3):
+    # 💬 автоудаление коротких уведомлений ("✅ Удалено!", "✅ Изменено!")
+    try:
+        await asyncio.sleep(delay_sec)
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:
+        pass
+
+async def _mywords_temp_note(message: Message, text: str, *, delay_sec: int = 3):
+    # 💬 отправляем короткое уведомление и удаляем через delay_sec
+    try:
+        m = await message.answer(text)
+        asyncio.create_task(_mywords_delete_after(message.chat.id, m.message_id, delay_sec))
+    except Exception:
+        pass
+
 
 async def mywords_menu(message: Message, state: FSMContext):
     # 💬 показываем меню «Мои слова» (всегда через редактирование "якоря")
@@ -5337,8 +5353,6 @@ async def mywords_settings_any_cb(callback: CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(LessonStates.mywords_settings_wait))
 @track_handler
-@dp.message(StateFilter(LessonStates.mywords_settings_wait))
-@track_handler
 async def mywords_settings_wait_number(message: Message, state: FSMContext):
     user_id = str(message.chat.id)
     raw = (message.text or "").strip()
@@ -5422,32 +5436,7 @@ async def mywords_add_choose_cat_cb(callback: CallbackQuery, state: FSMContext):
     await state.set_state(LessonStates.mywords_add_input_pair)
 
 
-@dp.callback_query(StateFilter(LessonStates.mywords_add_choose_category), F.data == "mywords:add_newcat")
-@track_handler
-async def mywords_add_newcat_cb(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
-    
-    # 💬 FREE лимит на категории: 3 категории без Premium
-    user_id = str(callback.message.chat.id)
-    store, u = mywords_get_user_block(user_id)
-    cats = u.setdefault("categories", {})
 
-    if (not is_premium_active(callback.from_user.id)) and (len(cats) >= FREE_MYWORDS_CATEGORIES_LIMIT):
-        await callback.message.answer(
-            _premium_paywall_text(callback.from_user.id),
-            reply_markup=_premium_paywall_kb("mywords:menu"),
-            parse_mode="HTML"
-        )
-        return  # 💬 не переводим в state ввода названия
-
-    
-    txt = "➕ Новая категория\n\nНапиши название категории."
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
-    try:
-        await callback.message.edit_text(txt, reply_markup=kb)
-    except Exception:
-        await smart_reply(callback.message, txt, reply_markup=kb)
-    await state.set_state(LessonStates.mywords_add_new_category)
 
 @dp.callback_query(StateFilter(LessonStates.mywords_add_choose_category), F.data == "mywords:add_newcat")
 @track_handler
@@ -5958,7 +5947,7 @@ async def mywords_edit_choose_cat_cb(callback: CallbackQuery, state: FSMContext)
 
     return await mywords_open_edit_category_menu(callback.message, state, categories[idx])
 
-@dp.callback_query(F.data == "mywords:edit_delete")
+@dp.callback_query(StateFilter(LessonStates.mywords_edit_menu), F.data == "mywords:edit_delete")
 @track_handler
 async def mywords_edit_delete_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -6050,10 +6039,10 @@ async def mywords_delete_confirm_cb(callback: CallbackQuery, state: FSMContext):
         words.pop(idx - 1)
         save_my_words_data(store)
 
-    await smart_reply(callback.message, "✅ Удалено!")
+    await _mywords_temp_note(callback.message, "✅ Удалено!") 
     return await mywords_open_edit_category_menu(callback.message, state, category)
 
-@dp.callback_query(F.data == "mywords:edit_change")
+@dp.callback_query(StateFilter(LessonStates.mywords_edit_menu), F.data == "mywords:edit_change")
 @track_handler
 async def mywords_edit_change_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -6065,11 +6054,15 @@ async def mywords_edit_change_cb(callback: CallbackQuery, state: FSMContext):
     kb = mywords_words_nav_kb(0, total, back_cb="mywords:edit_open")
     await state.update_data(mywords_edit_page=0)
 
-    ui_message = await smart_reply(callback.message, txt + "\n\nНапиши номер строки для изменения.", reply_markup=kb)
-    if ui_message:
-        await _mywords_touch_ui_msg_id(state, ui_message)
-
+    await _mywords_edit_ui(
+        callback.message,
+        state,
+        txt + "\n\nНапиши номер строки для изменения.",
+        reply_markup=kb
+    )
+    
     await state.set_state(LessonStates.mywords_edit_edit_index_wait)
+
 
 @dp.message(StateFilter(LessonStates.mywords_edit_edit_index_wait))
 @track_handler
@@ -6145,7 +6138,7 @@ async def mywords_edit_save_cb(callback: CallbackQuery, state: FSMContext):
         words[idx - 1]["ru"] = pair.get("ru", "")
         save_my_words_data(store)
 
-    await smart_reply(callback.message, "✅ Изменено!")
+    await _mywords_temp_note(callback.message, "✅ Изменено!")  # 💬 удалится через 3 сек
     return await mywords_open_edit_category_menu(callback.message, state, category)
 
 @dp.callback_query(StateFilter(LessonStates.mywords_edit_menu), F.data == "mywords:edit_rename")
@@ -6162,6 +6155,8 @@ async def mywords_edit_rename_cb(callback: CallbackQuery, state: FSMContext):
 async def mywords_rename_wait(message: Message, state: FSMContext):
     user_id = str(message.chat.id)
     new_name = (message.text or "").strip()
+    await _mywords_try_delete_user_message(message)  # 💬 чистим чат
+
     if not new_name:
         return await smart_reply(message, "Напиши новое название.")  # 💬 валидация
 
