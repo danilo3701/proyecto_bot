@@ -1,6 +1,7 @@
 # ProyectoBot/core8_1.py
 # файл корыremium_debug dump = выгрузить весь premium
 
+
 # ================================================================================
 # 🟡 Импорты и константы для core8_1.py
 # ================================================================================
@@ -2749,6 +2750,14 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
     # 🏆/⚙️ — сразу открываем соответствующие разделы
     if action == "rating":
         await callback.answer()
+
+        try:
+            await callback.message.delete()  # 💬 чистим главное меню, чтобы не копилось (как в battle)
+        except TelegramBadRequest:
+            pass
+        except Exception:
+            pass
+
     
         # 💬 сохраняем “кто нажал рейтинг”, потому что callback.message.from_user = бот
         await state.update_data(
