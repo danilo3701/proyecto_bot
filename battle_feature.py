@@ -471,7 +471,14 @@ async def _safe_send_poll(bot: Bot, chat_id: int, question: str, options: List[s
     return None
 
 
-async def _cancel_battle(user_id: int, bot: Optional[Bot] = None, chat_id: Optional[int] = None):
+async def _cancel_battle(
+    user_id: int,
+    bot: Optional[Bot] = None,
+    chat_id: Optional[int] = None,
+    *,
+    delete_result: bool = False,       # 💬 удаляем result-экран только при стопе/выходе/новом входе
+    remove_reply_kb: bool = False,     # 💬 снимаем ReplyKeyboard (STOP) при выходах
+):
     rt = BATTLES.get(user_id)
     if not rt:
         return
@@ -486,20 +493,38 @@ async def _cancel_battle(user_id: int, bot: Optional[Bot] = None, chat_id: Optio
     if rt.task_main and rt.task_main is not cur_task:
         rt.task_main.cancel()
 
-
-    # 💬 чистим сообщения битвы, чтобы после /start не оставалось хвостов
+    # 💬 чистим сообщения битвы (scoreboard/polls + опционально result), чтобы не оставалось хвостов
     if bot is not None and chat_id is not None:
         try:
             if getattr(rt, "score_msg_id", None):
-                await _safe_delete(bot, chat_id, rt.score_msg_id)  # 💬 удаляем скорборд
+                await _safe_delete(bot, chat_id, rt.score_msg_id)
         except Exception:
             pass
 
         try:
             for mid in list(getattr(rt, "poll_msg_ids", []) or []):
-                await _safe_delete(bot, chat_id, mid)  # 💬 удаляем зависшие poll-сообщения
+                await _safe_delete(bot, chat_id, mid)
         except Exception:
             pass
+
+        if delete_result:
+            try:
+                if getattr(rt, "result_msg_id", None):
+                    await _safe_delete(bot, chat_id, rt.result_msg_id)
+            except Exception:
+                pass
+
+        if remove_reply_kb:
+            # 💬 снимаем ReplyKeyboard (STOP) и тут же удаляем сервисное сообщение
+            try:
+                rm = await bot.send_message(
+                    chat_id=chat_id,
+                    text="\u00AD",
+                    reply_markup=ReplyKeyboardRemove()
+                )
+                asyncio.create_task(_safe_delete_after(bot, chat_id, rm.message_id, delay_s=0.2))
+            except Exception:
+                pass
 
     # 💬 убираем запись, чтобы poll_answer не обрабатывался после отмены
     try:
@@ -507,19 +532,6 @@ async def _cancel_battle(user_id: int, bot: Optional[Bot] = None, chat_id: Optio
     except Exception:
         pass
 
-        # 💬 удаляем результат, если он был отправлен
-        try:
-            if getattr(rt, "result_msg_id", None):
-                await _safe_delete(bot, chat_id, rt.result_msg_id)
-        except Exception:
-            pass
-
-        # 💬 снимаем ReplyKeyboard (STOP) и тут же удаляем сервисное сообщение
-        try:
-            rm = await bot.send_message(chat_id=chat_id, text="\u00AD", reply_markup=ReplyKeyboardRemove())
-            asyncio.create_task(_safe_delete_after(bot, chat_id, rm.message_id, delay_s=0.2))
-        except Exception:
-            pass
 
 
 
@@ -774,7 +786,14 @@ async def start_battle_from_lex_menu(message: Message, state: FSMContext) -> Non
     _track("start_battle_from_lex_menu")  # 💬 записываем хендлер для админ-логов
 
     # 💬 отменяем предыдущий бой если вдруг уже был
-    await _cancel_battle(message.from_user.id, bot=message.bot, chat_id=message.chat.id)  # 💬 чистим сообщения старого боя
+    await _cancel_battle(
+        message.from_user.id,
+        bot=message.bot,
+        chat_id=message.chat.id,
+        delete_result=True,      # 💬 если стоп = чистим всё
+        remove_reply_kb=True,
+    )
+
 
 
     # 💬 что делает эта часть: сначала берём battle темы из /data/battle_topics.json; если пусто = fallback на TOPICS_REF
@@ -867,20 +886,20 @@ async def _start_battle_with_topic(message: Message, state: FSMContext, bot: Bot
 async def battle_choose_topic(callback: CallbackQuery, state: FSMContext, bot: Bot):
     await callback.answer()
 
-    # 💬 удаляем экран выбора темы, чтобы не оставался в истории
+    # 💬 сначала убираем inline, чтобы не нажали 2 раза
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    # 💬 затем удаляем экран выбора темы
     try:
         await callback.message.delete()
     except Exception:
         pass
+
     try:
         await state.update_data(battle_screen_msg_id=None)
-    except Exception:
-        pass
-
-
-    # 💬 убираем inline чтобы не нажали 2 раза
-    try:
-        await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
 
@@ -904,7 +923,14 @@ async def battle_stop(message: Message, state: FSMContext, bot: Bot):
         pass
 
     # 💬 останавливаем бой и чистим хвосты (scoreboard/poll/result/клавиатура)
-    await _cancel_battle(message.from_user.id, bot=message.bot, chat_id=message.chat.id)
+    await _cancel_battle(
+        message.from_user.id,
+        bot=message.bot,
+        chat_id=message.chat.id,
+        delete_result=True,   # 💬 новый вход = чистим хвосты старого результата тоже
+        remove_reply_kb=True,
+    )
+
 
     # 💬 краткое уведомление и авто-удаление
     await _ephemeral(
@@ -957,24 +983,17 @@ async def battle_rematch(callback: CallbackQuery, state: FSMContext):
 
     await callback.answer()
 
-    # 💬 удаляем экран результата перед реваншем
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
-
-
-    # 💬 убираем inline чтобы не нажали 2 раза
+    # 💬 убираем inline, затем удаляем экран результата (без дублей и сломанного try/except)
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
-    # 💬 удаляем экран результата перед реваншем
+    except Exception:
+        pass
+
     try:
         await callback.message.delete()
     except Exception:
         pass
 
-    except Exception:
-        pass
 
     data = await state.get_data()
     topic_key = data.get("battle_last_topic")
@@ -994,25 +1013,18 @@ async def battle_menu(callback: CallbackQuery, state: FSMContext):
     _track("battle_menu")  # 💬 записываем хендлер для админ-логов
 
     await callback.answer()
-    # 💬 удаляем экран результата перед возвратом в список тем
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
 
-
-    # 💬 убираем inline чтобы не нажали 2 раза
+    # 💬 убираем inline, затем удаляем экран результата (без дублей и сломанного try/except)
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
 
-    # 💬 удаляем экран результата перед возвратом в список тем
     try:
         await callback.message.delete()
     except Exception:
         pass
 
-    except Exception:
-        pass
 
     await start_battle_from_lex_menu(callback.message, state)
 
@@ -1286,7 +1298,14 @@ async def battle_close(callback: CallbackQuery, state: FSMContext):
     _track("battle_close")  # 💬 записываем хендлер для админ-логов
 
     await callback.answer()
-    await _cancel_battle(callback.from_user.id, bot=callback.bot, chat_id=callback.message.chat.id)  # 💬 если бой шёл = останавливаем
+    await _cancel_battle(
+        callback.from_user.id,
+        bot=callback.bot,
+        chat_id=callback.message.chat.id,
+        delete_result=True,
+        remove_reply_kb=True,
+    )
+
 
 
     # 💬 удаляем экран выбора темы/битвы
