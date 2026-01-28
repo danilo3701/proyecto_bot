@@ -205,9 +205,11 @@ class BattleRuntime:
 
 
     score_msg_id: Optional[int] = None
+    match_msg_id: Optional[int] = None   # 💬 "✅ Соперник найден..." (loading/edit_text), чтобы чистить при выходе/конце
     result_msg_id: Optional[int] = None  # 💬 id сообщения результата, чтобы чистить при выходах
     poll_msg_ids: List[int] = field(default_factory=list)        # 💬 свой список на каждый бой
     edit_lock: asyncio.Lock = field(default_factory=asyncio.Lock) # 💬 защита от одновременных edit’ов
+
 
 
     task_tick: Optional[asyncio.Task] = None
@@ -471,66 +473,62 @@ async def _safe_send_poll(bot: Bot, chat_id: int, question: str, options: List[s
     return None
 
 
-async def _cancel_battle(
-    user_id: int,
-    bot: Optional[Bot] = None,
-    chat_id: Optional[int] = None,
-    *,
-    delete_result: bool = False,       # 💬 удаляем result-экран только при стопе/выходе/новом входе
-    remove_reply_kb: bool = False,     # 💬 снимаем ReplyKeyboard (STOP) при выходах
-):
+async def _cancel_battle(user_id: int, bot: Bot, chat_id: int):
     rt = BATTLES.get(user_id)
     if not rt:
         return
 
+    # 💬 сигнализируем задачам "стоп" + снимаем ожидание
     rt.stop = True
-    rt.event.set()
+    try:
+        rt.event.set()
+    except Exception:
+        pass
 
-    # 💬 отменяем фоновые таски битвы (не отменяем текущую task, если cleanup вызывается из неё)
-    cur_task = asyncio.current_task()
-    if rt.task_tick and rt.task_tick is not cur_task:
-        rt.task_tick.cancel()
-    if rt.task_main and rt.task_main is not cur_task:
-        rt.task_main.cancel()
-
-    # 💬 чистим сообщения битвы (scoreboard/polls + опционально result), чтобы не оставалось хвостов
-    if bot is not None and chat_id is not None:
+    # 💬 отменяем фоновые задачи
+    for t in (rt.task_tick, rt.task_main):
         try:
-            if getattr(rt, "score_msg_id", None):
-                await _safe_delete(bot, chat_id, rt.score_msg_id)
+            if t and not t.done():
+                t.cancel()
         except Exception:
             pass
 
-        try:
-            for mid in list(getattr(rt, "poll_msg_ids", []) or []):
-                await _safe_delete(bot, chat_id, mid)
-        except Exception:
-            pass
-
-        if delete_result:
-            try:
-                if getattr(rt, "result_msg_id", None):
-                    await _safe_delete(bot, chat_id, rt.result_msg_id)
-            except Exception:
-                pass
-
-        if remove_reply_kb:
-            # 💬 снимаем ReplyKeyboard (STOP) и тут же удаляем сервисное сообщение
-            try:
-                rm = await bot.send_message(
-                    chat_id=chat_id,
-                    text="\u00AD",
-                    reply_markup=ReplyKeyboardRemove()
-                )
-                asyncio.create_task(_safe_delete_after(bot, chat_id, rm.message_id, delay_s=0.2))
-            except Exception:
-                pass
-
-    # 💬 убираем запись, чтобы poll_answer не обрабатывался после отмены
+    # 💬 важно: удалить runtime из словаря сразу, чтобы poll_answer не продолжал обработку
     try:
         BATTLES.pop(user_id, None)
     except Exception:
         pass
+
+    # 💬 чистим сообщения
+    if bot and chat_id:
+        # scoreboard
+        if rt.score_msg_id:
+            await _safe_delete(bot, chat_id, rt.score_msg_id)
+            rt.score_msg_id = None
+
+        # "✅ Соперник найден..." (loading/edit_text)
+        if rt.match_msg_id:
+            await _safe_delete(bot, chat_id, rt.match_msg_id)
+            rt.match_msg_id = None
+
+        # polls
+        if rt.poll_msg_ids:
+            for mid in rt.poll_msg_ids:
+                await _safe_delete(bot, chat_id, mid)
+            rt.poll_msg_ids = []
+
+        # результат (если был показан)
+        if rt.result_msg_id:
+            await _safe_delete(bot, chat_id, rt.result_msg_id)
+            rt.result_msg_id = None
+
+        # 💬 убрать ReplyKeyboard (Stop) "тихим" сообщением и сразу удалить его
+        try:
+            kb_remove = await bot.send_message(chat_id, "\u00AD", reply_markup=ReplyKeyboardRemove())
+            await asyncio.sleep(0.2)
+            await _safe_delete(bot, chat_id, kb_remove.message_id)
+        except Exception:
+            pass
 
 
 
@@ -739,6 +737,12 @@ async def _battle_loop(bot: Bot, chat_id: int, user_id: int, state: FSMContext) 
 
         u["last_played"] = int(time.time())
         save_battle_data(bd)
+
+        # 💬 чистим строку "✅ Соперник найден..." при нормальном завершении боя
+        if rt.match_msg_id:
+            await _safe_delete(bot, chat_id, rt.match_msg_id)
+            rt.match_msg_id = None
+
 
         # 💬 кнопки результата
         res_msg = await bot.send_message(
