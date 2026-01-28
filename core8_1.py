@@ -3420,7 +3420,7 @@ async def settings_menu(message: Message, state: FSMContext):
             InlineKeyboardButton(text="💎 Моя подписка", callback_data="settings:subscription"),
         ],
         [
-            InlineKeyboardButton(text="🍪 Лимит слов", callback_data="settings:limit"),
+            InlineKeyboardButton(text="🍪 Цель слов", callback_data="settings:limit"),
             InlineKeyboardButton(text="⏰ Время уведомления", callback_data="settings:notify"),
         ],
         [
@@ -3598,7 +3598,7 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
                 InlineKeyboardButton(text="💎 Моя подписка", callback_data="settings:subscription"),
             ],
             [
-                InlineKeyboardButton(text="🍪 Лимит слов", callback_data="settings:limit"),
+                InlineKeyboardButton(text="🍪 Цель слов", callback_data="settings:limit"),
                 InlineKeyboardButton(text="⏰ Время уведомления", callback_data="settings:notify"),
             ],
             [
@@ -3673,7 +3673,7 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL),
-                InlineKeyboardButton(text="Лимит слов", callback_data="settings:limit"),
+                InlineKeyboardButton(text="Цель слов", callback_data="settings:limit"),
             ],
             [
                 InlineKeyboardButton(text="Время уведомления", callback_data="settings:notify"),
@@ -3727,7 +3727,7 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="Связь 💬", url=CONTACT_URL),
-                InlineKeyboardButton(text="Лимит слов", callback_data="settings:limit"),
+                InlineKeyboardButton(text="Цель слов", callback_data="settings:limit"),
             ],
             [
                 InlineKeyboardButton(text="Время уведомления", callback_data="settings:notify"),
@@ -3759,7 +3759,7 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
 
 
 # 💬 Обрабатываем только если текст не пустой и не None
-@dp.message(lambda m: m.text is not None and (m.text.startswith("🔢 Лимит слов:") or m.text.startswith("🎯 Цель слов в день:")))
+@dp.message(lambda m: m.text is not None and (m.text.startswith("🔢 Цель слов:") or m.text.startswith("🎯 Цель слов в день:")))
 
 async def set_limit(message: Message, state: FSMContext):
     # 💬 Здесь пользователь нажал на цель слов в день (старая/новая кнопка)
