@@ -472,8 +472,14 @@ async def _safe_send_poll(bot: Bot, chat_id: int, question: str, options: List[s
             return None
     return None
 
-
-async def _cancel_battle(user_id: int, bot: Bot, chat_id: int):
+async def _cancel_battle(
+    user_id: int,
+    bot: Bot,
+    chat_id: int,
+    *,
+    delete_result: bool = False,     # 💬 удалять result-экран только при stop/выходе/новом входе
+    remove_reply_kb: bool = False,   # 💬 снять ReplyKeyboard (Stop)
+):
     rt = BATTLES.get(user_id)
     if not rt:
         return
@@ -485,10 +491,11 @@ async def _cancel_battle(user_id: int, bot: Bot, chat_id: int):
     except Exception:
         pass
 
-    # 💬 отменяем фоновые задачи
+    # 💬 отменяем фоновые задачи, но НЕ отменяем текущую (иначе можно словить CancelledError в cleanup)
+    cur_task = asyncio.current_task()
     for t in (rt.task_tick, rt.task_main):
         try:
-            if t and not t.done():
+            if t and (t is not cur_task) and (not t.done()):
                 t.cancel()
         except Exception:
             pass
@@ -517,18 +524,19 @@ async def _cancel_battle(user_id: int, bot: Bot, chat_id: int):
                 await _safe_delete(bot, chat_id, mid)
             rt.poll_msg_ids = []
 
-        # результат (если был показан)
-        if rt.result_msg_id:
+        # результат (удаляем только если явно попросили)
+        if delete_result and rt.result_msg_id:
             await _safe_delete(bot, chat_id, rt.result_msg_id)
             rt.result_msg_id = None
 
-        # 💬 убрать ReplyKeyboard (Stop) "тихим" сообщением и сразу удалить его
-        try:
-            kb_remove = await bot.send_message(chat_id, "\u00AD", reply_markup=ReplyKeyboardRemove())
-            await asyncio.sleep(0.2)
-            await _safe_delete(bot, chat_id, kb_remove.message_id)
-        except Exception:
-            pass
+        # 💬 снять ReplyKeyboard (Stop)
+        if remove_reply_kb:
+            try:
+                kb_remove = await bot.send_message(chat_id, "\u00AD", reply_markup=ReplyKeyboardRemove())
+                await asyncio.sleep(0.2)
+                await _safe_delete(bot, chat_id, kb_remove.message_id)
+            except Exception:
+                pass
 
 
 
@@ -870,7 +878,12 @@ async def _start_battle_with_topic(message: Message, state: FSMContext, bot: Bot
     except TelegramBadRequest:
         pass
 
+    # 💬 это сообщение ("✅ Соперник найден...") нужно удалять при stop/выходе/конце
+    match_msg_id = loading.message_id
+
     rt = BattleRuntime()
+    rt.match_msg_id = match_msg_id  # 💬 чтобы _cancel_battle и финализация могли удалить строку "соперник найден"
+
     rt.opponent_name = opponent
     rt.topic_key = topic_key
     rt.topic_title = title
