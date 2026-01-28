@@ -3059,8 +3059,46 @@ async def show_topics_for_category_level(callback: CallbackQuery, state: FSMCont
 
     if category == "lex":
         st = get_lex_level_state(message.from_user.id)
-        pct = int(st.get("pct", 0) or 0)
+
+        # 💬 pct теперь считаем НЕ из get_lex_level_state (там часто 0),
+        # 💬 а из реальных процентов по темам (topic_summary[*]['overall_pct'])
+        try:
+            lex_keys = [k for k, inf in topics.items() if inf.get("category") == "lex"]
+        except Exception:
+            lex_keys = []
+
+        if lex_keys:
+            _sum = 0.0
+            _cnt = 0
+            for k in lex_keys:
+                r = topic_summary.get(k, {})
+                if not isinstance(r, dict):
+                    r = {}
+                v = r.get("overall_pct", r.get("vocab_pct", 0.0)) or 0.0
+
+                try:
+                    v = float(v)
+                except Exception:
+                    v = 0.0
+
+                # 💬 поддержка двух форматов: 0..1 или 0..100
+                if v > 1.0:
+                    if v <= 100.0:
+                        v = v / 100.0
+                    else:
+                        v = 0.0
+
+                v = max(0.0, min(1.0, v))
+                _sum += v
+                _cnt += 1
+
+            pct = int(round((_sum / max(1, _cnt)) * 100))
+        else:
+            # 💬 запасной вариант, если вдруг topics пустой/сломанный
+            pct = int(st.get("pct", 0) or 0)
+
         pct = max(0, min(pct, 100))  # 💬 защита
+
         lvl_num = int(st.get("lvl", 1) or 1)
         stars_total = int(st.get("stars_total", 0) or 0)
 
