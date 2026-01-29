@@ -679,7 +679,7 @@ def _lex_render_phrase_list(phrases: list) -> str:
         lines.append(f"<b><i>{i}. {es} = {ru}</i></b>")
 
     lines.append("")  # 💬 пустая строка перед инструкцией
-    lines.append("<i>✍🏽 Пришли в чат номер тех фраз, которые тебе скучны</i>")
+    lines.append("<i>✍🏽 Пришли в чат номер тех фраз, которые ты знаешь</i>")
     lines.append("<i>🗑 Они удалятся автоматически</i>")
     return "\n".join(lines)
 
