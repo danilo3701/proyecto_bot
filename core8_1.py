@@ -11688,7 +11688,47 @@ async def handle_offer_continue_vocab(message: Message, state: FSMContext):
 
     # 💬 Если пользователь выбрал выход в меню — сразу уходим в меню урока
     if next_stage == "home":
+    # 💬 Если пользователь выбрал выход в меню — сразу уходим в меню урока
+    if next_stage == "home":
+        # 💬 что делает эта часть: фикс «липкого» offer_continue
+        # = при выходе в меню мы коммитим переход вперёд, чтобы при повторном входе
+        # не показывался последний квиз прошлого раунда
+
+        data2 = await state.get_data()
+
+        # ✅ ALL IN (lex_mode) = готовим следующий раунд уже на выходе
+        if data2.get("lex_mode_active"):
+            cur_round = int(data2.get("lex_round", 0) or 0)
+            total = int(data2.get("lex_round_total", 0) or 0)
+            next_round = cur_round + 1
+
+            if total and next_round < total:
+                await _lex_prepare_round_session(state, round_idx=next_round)
+            else:
+                # 💬 что делает эта часть: если раунды закончились = чистим lex-флаги
+                await state.update_data(
+                    lex_mode_active=False,
+                    lex_session_vocab_list=None,
+                    lex_active_phrases=None,
+                    lex_round=0,
+                    lex_round_total=0,
+                    lex_textquiz_phrase_cursor=0,
+                    lex_textquiz_done_round=False
+                )
+
+        # ✅ Обычный режим = сдвигаем индекс на следующий блок
+        else:
+            vocab_list = get_vocab_list(data2)
+            cur_idx = int(data2.get("vocab_index", 0) or 0)
+            next_idx = cur_idx + 1
+            if next_idx <= len(vocab_list):
+                await state.update_data(vocab_index=next_idx)
+
+        # 💬 что делает эта часть: чтобы не «прилипала» старая сцена при возврате из меню
+        await state.update_data(current_scene=None, current_stage=None)
+
         return await lesson_menu_handler(message, state)
+
 
 
 # 💬 Если продолжаем — сначала сдвигаем индекс, потом отправляем следующий блок
