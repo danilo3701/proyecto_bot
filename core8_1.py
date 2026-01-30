@@ -995,8 +995,8 @@ def _extract_tg_id_from_checkout_session(session_obj: dict) -> Optional[int]:
                 continue
     return None
 
-
 def _premium_paywall_text(user_id: int) -> str:
+    # 💬 единый Premium текст + Telegram ID для Stripe custom field
     return (
         "🔒 <b>Premium доступ</b>\n\n"
         "<b>Ты получаешь:</b>\n\n"
@@ -1005,9 +1005,12 @@ def _premium_paywall_text(user_id: int) -> str:
         "✅ <b>Мои слова:</b> безлимит на создание категорий\n"
         "✅ <b>Грамматика:</b> доступ к разделу, когда он выйдет\n"
         "✅ <b>Обновления:</b> все новые функции включены\n\n"
-        f"👉🏼<b>Твой Telegram ID:</b> <code>{user_id}</code>\n\n"
-        "Укажи его при оплате → потом нажми <b>✅ Проверить Premium</b>\n"
-        "🔓 Замки снимутся автоматически"  # 💬 продающий paywall + инструкция по ID
+        "📋 <b>Скопировать Telegram ID:</b>\n"
+        f"<pre><code>{user_id}</code></pre>\n"
+        "➡️ Укажи свой ID при оплате\n"
+        "➡️ Потом нажми «✅ Проверить Premium»\n"
+        "🔓 Замки снимутся автоматически\n\n"
+        "❌ Отменить подписку можно в разделе: \n<b>⚙️ Настройки</b> ➜ <b>💎 Моя подписка</b>"
     )
 
 
