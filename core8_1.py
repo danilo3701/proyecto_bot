@@ -12797,17 +12797,10 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
             return await send_one_vocab(cb.message, state)
 
         if next_stage == "home":
-            await state.update_data(
-                lex_mode_active=False,
-                lex_session_vocab_list=None,
-                lex_active_phrases=None,
-                lex_round=0,
-                lex_round_total=0,
-                lex_textquiz_phrase_cursor=0,
-                lex_textquiz_done_round=False
-            )  # 💬 что делает эта часть: чистим сессию ALL IN при выходе в меню
-
+            # 💬 ВАЖНО: "Домой" здесь = возврат в меню темы, не сбрасываем lex-сессию,
+            # 💬 чтобы при повторном входе в эту же фазу продолжить с offer_continue
             return await lesson_menu_handler(cb.message, state)
+
 
 
 
