@@ -8061,18 +8061,20 @@ async def show_phase_menu(message: Message, state: FSMContext):
     for ph in phases:
         blocks     = ph.get("vocab", [])
 
-        
-        # отбираем только link-блоки (те, что имеют ключ "link" или "url")
-        link_blocks = [b for b in blocks if "link" in b or "url" in b]
-        total       = len(link_blocks)
-        phase_id = ph["phase_id"]  # 💬 что делает эта часть: единый id для чтения прогресса/кнопок
-        per_phase = data.get("vocab_done_per_phase", {})  # 💬 что делает эта часть: прогресс по пакам
-        passed = per_phase.get(str(phase_id), per_phase.get(phase_id, 0))  # 💬 поддержка str/int ключей
+        # 💬 считаем реальное число раундов в фазе (без жёсткого «5»)
+        total_quizzes_phase = 0
+        total_quizzes_phase += len(ph.get("quiz_pool", [])) + len(ph.get("textquiz_pool", []))
+        total_quizzes_phase += sum(1 for b in blocks if b.get("type") in ("quiz", "textquiz"))
+        total_quizzes_phase += sum(1 for b in blocks if b.get("quiz"))
 
-        # порог 80%, округляем вверх (если блоков нет — считаем, что фаза не заполнена)
-        threshold   = math.ceil(total * 0.8) if total else 0
-        mark = " ✅" if total and passed >= threshold else ""
+        phase_id = ph["phase_id"]  # 💬 единый id для чтения прогресса/кнопок
+        per_phase = data.get("vocab_done_per_phase", {}) or {}
+        passed = per_phase.get(str(phase_id), per_phase.get(phase_id, 0)) or 0
+
+        # 💬 фаза завершена, если пройдены все раунды в этой фазе
+        mark = " ✅" if total_quizzes_phase and passed >= total_quizzes_phase else ""
         display_name = f"📦 Блок слов {ph['phase_id']}"  # 💬 единый шаблон названий паков
+
         if mark:
             # зачёркиваем название пака и добавляем галочку
             name = strike(display_name)
@@ -8221,32 +8223,29 @@ async def topic_phase_chosen(cb: CallbackQuery, state: FSMContext):
     topic = topics.get(topic_key, {})
     # найдём нужную фазу
     phase = next((ph for ph in topic.get("vocab", []) if ph["phase_id"] == phase_id), None)
-    blocks      = phase.get("vocab", []) if phase else []
-    link_blocks = [b for b in blocks if "link" in b or "url" in b]
-    total       = len(link_blocks)
-    per_phase = data.get("vocab_done_per_phase", {})  # 💬 что делает эта часть: прогресс по пакам
-    passed = per_phase.get(str(phase_id), per_phase.get(phase_id, 0))  # 💬 поддержка str/int ключей
-    threshold   = math.ceil(total * 0.8) if total else 0
+    blocks = phase.get("vocab", []) if phase else []
 
-
-    # 💬 считаем общее число квизов внутри выбранной фазы (для прогресс-бара OfferContinue)
+    # 💬 считаем реальное число раундов в фазе (без жёсткого «5»)
     total_quizzes_phase = 0
     if phase:
         total_quizzes_phase += len(phase.get("quiz_pool", [])) + len(phase.get("textquiz_pool", []))
     total_quizzes_phase += sum(1 for b in blocks if b.get("type") in ("quiz", "textquiz"))
     total_quizzes_phase += sum(1 for b in blocks if b.get("quiz"))
 
-    # 1) фаза уже пройдена?
-    if total and passed >= threshold:
-        # 💬 Пытаемся показать pop-up, но не падаем, если callback уже «протух»
+    per_phase = data.get("vocab_done_per_phase", {}) or {}
+    passed = per_phase.get(str(phase_id), per_phase.get(phase_id, 0)) or 0
+    if passed < 0:
+        passed = 0
+
+    # 1) фаза уже пройдена? → показываем alert и не даём зайти повторно
+    if total_quizzes_phase and passed >= total_quizzes_phase:
         try:
-            await cb.answer("🎉 Фаза уже пройдена, ты красавчик!", show_alert=True)
+            await cb.answer("✅ Эта фаза уже пройдена. Молодчина!", show_alert=True)
         except TelegramBadRequest as e:
-            # 💬 Игнорируем только ситуацию «query is too old», остальные ошибки пробрасываем
             if "query is too old" not in str(e):
                 raise
-        # обновим inline-клавиатуру (зачёркнутые + ✅ остались)
         return
+
 
     # 2) иначе — сначала быстро отвечаем на callback, потом удаляем prompt и стартуем/возобновляем словарь
     try:
