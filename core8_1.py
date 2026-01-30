@@ -4582,6 +4582,7 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
             video_index=0,
             vocab_done=0,
             vocab_done_per_phase={},          # 💬 ключевое: сброс прогресса по фазам, иначе 100% наследуется
+            textquiz_done_ids=[],             # 💬 сброс учёта пройденных textquiz (иначе фаза может стать ✅ “по инерции”)
             ex_done=0,
             done_dialog=0,
             redo_stack=[],
@@ -4896,6 +4897,7 @@ async def cb_topic_reset(callback: CallbackQuery, state: FSMContext):
     await state.update_data(
         selected_topic=topic_key,
         vocab_done_per_phase={},
+        textquiz_done_ids=[],  # 💬 сброс учёта textquiz для корректного пересчёта ✅ по фазам
         vocab_index=0,
         video_index=0,
         ex_index=0,
@@ -10547,6 +10549,31 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     variants_norm = [normalize_textquiz(v) for v in variants if v]
     is_correct = user_norm in variants_norm
 
+    # 💬 Засчитываем textquiz в прогресс фазы (1 раз за уникальный вопрос),
+    # 💬 иначе passed никогда не догонит total_quizzes_phase и фаза не станет ✅
+    if is_correct:
+        phase_id = data.get("selected_phase_id")
+        if phase_id is not None:
+            # 💬 uid = стабильный ключ вопроса; extra=phase_id чтобы не пересекалось между фазами
+            tq_uid = _poll_quiz_uid(block, extra=str(phase_id))
+
+            done_ids = data.get("textquiz_done_ids") or []
+            if not isinstance(done_ids, list):
+                done_ids = []
+
+            if tq_uid and tq_uid not in done_ids:
+                done_ids.append(tq_uid)
+
+                per_phase = data.get("vocab_done_per_phase", {}) or {}
+                k = str(phase_id)  # 💬 ключ фазы = строка (стабильно для чтения в меню)
+                per_phase[k] = int(per_phase.get(k, per_phase.get(phase_id, 0)) or 0) + 1
+
+                await state.update_data(
+                    textquiz_done_ids=done_ids,
+                    vocab_done_per_phase=per_phase,
+                )
+
+
     # 💬 реакция на сообщение пользователя (✅ или случайная негативная)
     try:
         if is_correct:
@@ -10824,18 +10851,18 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     await state.update_data(failed_vocab=failed)
 
 
-    # 💬 7) Интерливинг: упрощённая логика, если активна мини-сессия pending_textquiz
+    # 💬 7) Интерливинг: мини-сессия pending_textquiz (показываем всё и пересдаём ошибки ДО offer_continue)
     data = await state.get_data()
     pending = data.get("pending_textquiz") or []
+    redo_t = data.get("redo_stack_text", []) or []
 
-    if pending:
-        # 💬 берём текущий стек ошибок для textquiz
-        redo_t = data.get("redo_stack_text", [])
-
+    # 💬 важно: пересдача должна работать даже когда pending уже пустой (последний textquiz),
+    # 💬 но redo_t ещё не пуст (были ошибки)
+    if pending or redo_t:
         # симметрия: снимаем при успехе, добавляем при ошибке
         if is_correct and idx in redo_t:
             redo_t = [i for i in redo_t if i != idx]
-        elif not is_correct and idx not in redo_t:
+        elif (not is_correct) and idx not in redo_t:
             redo_t.append(idx)
 
         # 💬 убираем текущий индекс из pending, чтобы не повторять его в этой мини-сессии
@@ -10863,66 +10890,66 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
             )  # 💬 пересдача textquiz без переноса в следующий сет
             return await send_one_vocab(message, state)
 
+        # 💬 mini-сессия textquiz закончилась → либо ALL IN продолжает раунд, либо offer_continue
         if data.get("lex_mode_active"):
-            await state.update_data(vocab_index=idx + 1)  # 💬 индекс за textquiz, чтобы send_one_vocab собрал следующий раунд
+            await state.update_data(vocab_index=idx + 1)  # 💬 чтобы send_one_vocab собрал следующий раунд
             return await send_one_vocab(message, state)
 
-            # 💬 мини-сессия textquiz закончилась → обычный offer_continue
-            oc_scene = random.choice(scenarios["offer_continue"])
-            
-            # 💬 убираем старую ReplyKeyboard, чтобы она не висела
-            try:
-                rm = await bot.send_message(message.chat.id, "\u00AD", reply_markup=ReplyKeyboardRemove())
-                await _safe_delete_message(message.chat.id, rm.message_id)
-            except Exception:
-                pass
-            
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
-                for btn in oc_scene["buttons"]
-            ]])
-            
-            await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
-            await state.set_state(LessonStates.showing_vocab)
-            
-            oc_msg = await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
-            await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 чтобы удалить после клика
+        # 💬 обычный режим → offer_continue
+        oc_scene = random.choice(scenarios["offer_continue"])
 
+        # 💬 убираем старую ReplyKeyboard, чтобы она не висела
+        try:
+            rm = await bot.send_message(message.chat.id, "\u00AD", reply_markup=ReplyKeyboardRemove())
+            await _safe_delete_message(message.chat.id, rm.message_id)
+        except Exception:
+            pass
 
-            data2 = await state.get_data()
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=btn, callback_data=f"offer_continue:{btn}")
+            for btn in oc_scene["buttons"]
+        ]])
 
-            # 💬 что делает эта часть: OfferContinue показывает тот же poll progress-bar, что и основной поток poll-квизов
-            done_ids = data2.get("poll_done_ids")
-            if not isinstance(done_ids, list):
-                done_ids = []
+        await state.update_data(current_stage="offer_continue", current_scene=oc_scene)
+        await state.set_state(LessonStates.showing_vocab)
 
-            poll_done = len(done_ids)
+        oc_msg = await smart_reply(message, oc_scene["text"], reply_markup=kb, parse_mode="HTML")
+        await state.update_data(last_oc_msg_id=oc_msg.message_id)  # 💬 чтобы удалить после клика
 
-            poll_total = data2.get("poll_total_phase")
-            if poll_total is None:
-                vocab_list2 = get_vocab_list(data2)
-                uids2 = {
-                    _poll_quiz_uid(b, extra=str(data2.get("selected_phase_id", "")))
-                    for b in vocab_list2
-                    if (b or {}).get("type") == "quiz"
-                }
-                poll_total = len(uids2)
-                await state.update_data(poll_total_phase=poll_total)
+        data2 = await state.get_data()
 
-            progress_text = _render_vocab_quiz_progress(poll_done, poll_total, phrase="")  # 💬 единый стиль █░ + %
+        # 💬 OfferContinue показывает тот же poll progress-bar, что и основной поток poll-квизов
+        done_ids = data2.get("poll_done_ids")
+        if not isinstance(done_ids, list):
+            done_ids = []
 
+        poll_done = len(done_ids)
 
-            # 💬 не блокируем поток: показываем прогресс и удаляем его через 5 секунд
-            asyncio.create_task(
-                send_and_auto_delete_text(
-                    bot,
-                    message.chat.id,
-                    progress_text,
-                    delay=5.0,  # ⏳ держим прогресс 5 секунд
-                )
+        poll_total = data2.get("poll_total_phase")
+        if poll_total is None:
+            vocab_list2 = get_vocab_list(data2)
+            uids2 = {
+                _poll_quiz_uid(b, extra=str(data2.get("selected_phase_id", "")))
+                for b in vocab_list2
+                if (b or {}).get("type") == "quiz"
+            }
+            poll_total = len(uids2)
+            await state.update_data(poll_total_phase=poll_total)
+
+        progress_text = _render_vocab_quiz_progress(poll_done, poll_total, phrase="")
+
+        asyncio.create_task(
+            send_and_auto_delete_text(
+                bot,
+                message.chat.id,
+                progress_text,
+                delay=5.0,
+                parse_mode="HTML"
             )
+        )
 
-            return oc_msg
+        return oc_msg
+
 
 
 
