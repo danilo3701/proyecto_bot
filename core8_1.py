@@ -8148,23 +8148,31 @@ async def start_vocab(message: Message, state: FSMContext):
             pass
         await state.update_data(last_menu_msg_id=None)
 
+    async def _autodelete_msg(m: Message, delay_s: float = 5.0):
+        await asyncio.sleep(delay_s)
+        try:
+            await m.delete()
+        except Exception:
+            pass
+
     # 💬 дополнительно прячем клавиатуру, чтобы кнопки меню исчезли
-    await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    clear_msg = await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
+    asyncio.create_task(_autodelete_msg(clear_msg, 5.0))  # 💬 убираем пустую строку через 5 сек
+
     try:
         # 💬 можно убрать и сам пользовательский клик «Учить слова» для чистоты
         await message.delete()
     except Exception:
         pass
 
-
     # 1) Регистрируем пользователя (имя, время и т.п.)
     await register_or_update_user(message)
+
     # 2) Дайс-анимация
     dice_msg = await message.answer_dice(reply_markup=ReplyKeyboardRemove())
+    asyncio.create_task(_autodelete_msg(dice_msg, 5.0))  # 💬 убираем кубик через 5 сек
     await asyncio.sleep(DICE_DELETE_DELAY_S)  # 💬 короткая задержка под анимацию
 
-    try: await dice_msg.delete()
-    except: pass
 
     data = await state.get_data()
     # 3) Если фаза уже выбрана — get_vocab_list вернёт только словарь по фазе
@@ -8198,7 +8206,9 @@ async def start_vocab(message: Message, state: FSMContext):
         phrase = random.choice(vocab_start_phrases)
     else:
         phrase = random.choice(vocab_return_phrases)
-    await smart_reply(message, phrase, reply_markup=ReplyKeyboardRemove())
+    phrase_msg = await smart_reply(message, phrase, reply_markup=ReplyKeyboardRemove())
+    asyncio.create_task(_autodelete_msg(phrase_msg, 5.0))  # 💬 убираем фразу через 5 сек
+
 
     # 8) Переходим в showing_vocab и идём в send_one_vocab
     await state.set_state(LessonStates.showing_vocab)
