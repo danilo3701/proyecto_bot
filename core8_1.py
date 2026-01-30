@@ -4473,12 +4473,16 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
     # 💬 Попробуем показать pop-up с коротким описанием темы
     topic_key = query.data.split(":", 1)[1]
     desc = topics.get(topic_key, {}).get("description", "")
-    if desc:
+    desc_clean = (desc or "").strip()
+
+    # 💬 если в админке стоит просто "-" (или типографские тире), то алерт не показываем
+    if desc_clean and desc_clean not in {"-", "–", "—"}:
         MAX_ALERT = 200
-        alert_text = desc if len(desc) <= MAX_ALERT else desc[:MAX_ALERT - 3].rstrip() + "..."
+        alert_text = desc_clean if len(desc_clean) <= MAX_ALERT else desc_clean[:MAX_ALERT - 3].rstrip() + "..."
         await query.answer(text=alert_text, show_alert=True)
     else:
         await query.answer()
+
 
     # 💬 В грамматике обычно редактируем это же сообщение (edit_text) = не удаляем его заранее
     is_gram = topics.get(topic_key, {}).get("category") == "gram"
