@@ -6475,27 +6475,19 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
     for ph in phases:
         phase_id = ph.get("phase_id")
 
-        # 💬 что делает эта часть: определяем "норму" фазы
-        # 💬 PHRASE PACK v2 = 5 раундов (4 poll + 1 text), старые фазы = по количеству link/url
-        phrases_cnt = len(ph.get("phrases", []) or [])
         vocab_blocks = ph.get("vocab", []) or []
 
-        # 💬 что делает эта часть: определяем реальную "норму" фазы по контенту
-        # 💬 считаем все quiz/textquiz и inline quiz внутри блоков, плюс pool-ы
-        base_units = sum(
-            1 for b in vocab_blocks
-            if b.get("type") in ("quiz", "textquiz") or b.get("quiz")
-        )
-        pool_units = len(ph.get("quiz_pool", []) or []) + len(ph.get("textquiz_pool", []) or [])
-        content_units = base_units + pool_units
+        # 💬 фикс: "норма" фазы = реальное число раундов, как в show_phase_menu (без жёсткого 5)
+        need = 0
+        need += len(ph.get("quiz_pool", []) or []) + len(ph.get("textquiz_pool", []) or [])
+        need += sum(1 for b in vocab_blocks if b.get("type") in ("quiz", "textquiz"))
+        need += sum(1 for b in vocab_blocks if b.get("quiz"))
 
-        link_cnt = len([b for b in vocab_blocks if "link" in b or "url" in b])
+        # 💬 fallback для legacy-фаз, где только ссылки
+        if need <= 0:
+            link_cnt = len([b for b in vocab_blocks if "link" in b or "url" in b])
+            need = link_cnt
 
-        # 💬 PHRASE PACK бывает на 4 или на 5 раундов, берём факт по блокам
-        if content_units > 0:
-            need = min(5, content_units)  # 💬 4 или 5, как реально задано в теме
-        else:
-            need = 5 if phrases_cnt > 0 else link_cnt  # 💬 fallback для legacy
 
         if need <= 0:
             continue  # 💬 пустая фаза не участвует в % и не может быть пройдена
@@ -9037,13 +9029,30 @@ async def handle_vocab_phrase_select(message: Message, state: FSMContext):
 
     txt = (message.text or "").strip()
 
-    # чистим чат = удаляем любой мусорный ввод
+    # чистим чат = удаляем любой мусорный ввод + показываем короткую подсказку
     if not txt.isdigit():
+        hint = (
+            "❌ <b>Неправильно</b>\n"
+            "<b>Как нужно:</b>\n"
+            "отправь <b>только число</b> из списка\n"
+            "<b>Пример:</b> <code>3</code>"
+        )
+        asyncio.create_task(
+            send_and_auto_delete_text(
+                bot,
+                message.chat.id,
+                hint,
+                delay=3,
+                parse_mode="HTML"
+            )
+        )  # 💬 подсказка исчезнет сама
+
         try:
             await bot.delete_message(message.chat.id, message.message_id)
         except Exception:
             pass
         return
+
 
     idx = int(txt)
     data = await state.get_data()
@@ -9081,21 +9090,50 @@ async def handle_vocab_phrase_select(message: Message, state: FSMContext):
             pass
         return
 
-    # жёсткая валидация диапазона
+    # жёсткая валидация диапазона + подсказка
     if idx < 1 or idx > len(phrases):
+        hint = (
+            "❌ <b>Неправильно</b>\n"
+            f"Номер должен быть от <b>1</b> до <b>{len(phrases)}</b>\n"
+            "<b>Пример:</b> <code>2</code>"
+        )
+        asyncio.create_task(
+            send_and_auto_delete_text(
+                bot,
+                message.chat.id,
+                hint,
+                delay=3,
+                parse_mode="HTML"
+            )
+        )
         try:
             await bot.delete_message(message.chat.id, message.message_id)
         except Exception:
             pass
         return
 
-    # нельзя удалить последнюю фразу = оставляем минимум 1
+
+    # нельзя удалить последнюю фразу = оставляем минимум 1 + подсказка
     if len(phrases) == 1:
+        hint = (
+            "⚠️ Нужно оставить <b>минимум 1</b> фразу\n"
+            "Нажми <b>✅ Готово</b>"
+        )
+        asyncio.create_task(
+            send_and_auto_delete_text(
+                bot,
+                message.chat.id,
+                hint,
+                delay=3,
+                parse_mode="HTML"
+            )
+        )
         try:
             await bot.delete_message(message.chat.id, message.message_id)
         except Exception:
             pass
         return
+
 
     # удаляем выбранную фразу (индексы 1..N)
     phrases.pop(idx - 1)
@@ -9132,45 +9170,6 @@ async def handle_vocab_phrase_select(message: Message, state: FSMContext):
     except Exception:
         pass
 
-@dp.message(LessonStates.vocab_phrase_select)
-@track_handler
-async def handle_vocab_phrase_select(message: Message, state: FSMContext):
-    # 💬 пользователь пишет номер фразы, мы убираем её из сессионного списка и обновляем сообщение
-    txt = (message.text or "").strip()
-
-    if not txt.isdigit():
-        try:
-            await message.delete()
-        except TelegramBadRequest:
-            pass
-        return
-
-    idx = int(txt)
-    data = await state.get_data()
-    active = data.get("lex_active_phrases", [])
-
-    # жёсткая валидация индекса
-    if idx < 1 or idx > len(active):
-        try:
-            await message.delete()
-        except TelegramBadRequest:
-            pass
-        return
-
-    # удаляем выбранную фразу из сессионного списка
-    active.pop(idx - 1)
-    await state.update_data(lex_active_phrases=active)
-
-    # удаляем сообщение пользователя с цифрой, чтобы не засорять чат
-    try:
-        await message.delete()
-    except TelegramBadRequest:
-        pass
-
-    # обновляем текст списка фраз (через edit_text у уже отправленного сообщения)
-    phrases_msg_id = data.get("lex_phrases_msg_id")
-    if phrases_msg_id:
-        await _lex_update_phrase_list(message.chat.id, phrases_msg_id, state)  # 💬 перерисовываем список + кнопку "Готово"
 
 @dp.callback_query(F.data == "lex_phrases_back", StateFilter(LessonStates.vocab_phrase_select))
 @track_handler
@@ -10177,13 +10176,28 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
         if quiz_uid and quiz_uid not in done_ids:
             done_ids.append(quiz_uid)
-            await state.update_data(
-                poll_done_ids=done_ids,
-                quiz_correct_phase=len(done_ids),
-                quiz_correct_total=data.get("quiz_correct_total", 0) + 1
-            )
+
+            # 💬 фикс: засчитываем poll-quiz в прогресс фазы (1 раз за уникальный вопрос)
+            if phase_id is not None:
+                per_phase = data.get("vocab_done_per_phase", {}) or {}
+                k = str(phase_id)  # 💬 ключ фазы = строка (стабильно для меню/✅)
+                per_phase[k] = int(per_phase.get(k, per_phase.get(phase_id, 0)) or 0) + 1
+
+                await state.update_data(
+                    poll_done_ids=done_ids,
+                    vocab_done_per_phase=per_phase,
+                    quiz_correct_phase=len(done_ids),
+                    quiz_correct_total=data.get("quiz_correct_total", 0) + 1
+                )
+            else:
+                await state.update_data(
+                    poll_done_ids=done_ids,
+                    quiz_correct_phase=len(done_ids),
+                    quiz_correct_total=data.get("quiz_correct_total", 0) + 1
+                )
         else:
             await state.update_data(poll_done_ids=done_ids)  # 💬 redo = уже было зачтено
+
 
 
 
@@ -10723,10 +10737,18 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     completed_phases = 0
     for ph in phases:
         phase_id = ph.get("phase_id")
-        need_quizzes = len([b for b in ph.get("vocab", []) if b.get("type") in ("quiz", "textquiz")])
-        done_here = per_phase.get(phase_id, 0)
-        if need_quizzes > 0 and done_here >= need_quizzes:
+        blocks = ph.get("vocab", []) or []
+
+        # 💬 норма фазы = реальное число раундов (pool + quiz/textquiz + inline quiz)
+        need_quizzes = 0
+        need_quizzes += len(ph.get("quiz_pool", []) or []) + len(ph.get("textquiz_pool", []) or [])
+        need_quizzes += sum(1 for b in blocks if b.get("type") in ("quiz", "textquiz"))
+        need_quizzes += sum(1 for b in blocks if b.get("quiz"))
+
+        done_here = per_phase.get(str(phase_id), per_phase.get(phase_id, 0)) or 0
+        if need_quizzes > 0 and int(done_here) >= int(need_quizzes):
             completed_phases += 1
+
     
     vocab_unlock_percent = (completed_phases / total_phases * 100) if total_phases else 100
     if not data2.get("unlocked", False) and vocab_unlock_percent >= 70:
