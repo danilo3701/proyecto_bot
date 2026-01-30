@@ -1668,6 +1668,11 @@ async def register_or_update_user(message: Message):
     if "stats" not in user_data:
         user_data["stats"] = {"words_learned": 0, "exercises_done": 0}
         updated = True
+    # 💬 XP по лексике (общий, по всем lex-темам)
+    if "xp_total_lex" not in user_data:
+        user_data["xp_total_lex"] = 0
+        updated = True
+
 
 
     # 💬 Инициализация счетчиков недели и месяца для рейтинга
@@ -1728,6 +1733,18 @@ async def add_xp(user_id: int, topic: str, amount: int, action: str = None, acti
     # 1. Общий XP
     if amount > 0:
         user["total_xp"] = user.get("total_xp", 0) + amount  # 💬 total_xp никогда не уменьшаем
+    # 💬 общий XP только по лексике (lex), чтобы уровень/прогресс считались по всем lex-темам вместе
+    if "xp_total_lex" not in user:
+        user["xp_total_lex"] = 0
+
+    try:
+        is_lex_topic = (topics.get(topic, {}).get("category") == "lex")
+    except Exception:
+        is_lex_topic = False
+
+    if is_lex_topic:
+        user["xp_total_lex"] = user.get("xp_total_lex", 0) + amount
+
     else:
         user["total_xp"] = user.get("total_xp", 0)  # 💬 минусы не трогают общий XP
 
@@ -4844,6 +4861,15 @@ async def cb_topic_reset(callback: CallbackQuery, state: FSMContext):
     if prev_topic_xp > 0:
         usr["total_xp"] = max(0, int(usr.get("total_xp", 0) or 0) - prev_topic_xp)  # 💬 минусуем опыт по теме
 
+        # 💬 синхронизируем общий XP по лексике, если это lex-тема
+        try:
+            is_lex_topic = (topics.get(topic_key, {}).get("category") == "lex")
+        except Exception:
+            is_lex_topic = False
+
+        if is_lex_topic:
+            usr["xp_total_lex"] = max(0, int(usr.get("xp_total_lex", 0) or 0) - prev_topic_xp)
+
     by_topic.pop(topic_key, None)
     usr["by_topic"] = by_topic
 
@@ -6450,9 +6476,25 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         # 💬 что делает эта часть: определяем "норму" фазы
         # 💬 PHRASE PACK v2 = 5 раундов (4 poll + 1 text), старые фазы = по количеству link/url
         phrases_cnt = len(ph.get("phrases", []) or [])
-        link_cnt = len([b for b in ph.get("vocab", []) if "link" in b or "url" in b])
+        vocab_blocks = ph.get("vocab", []) or []
 
-        need = 5 if phrases_cnt > 0 else link_cnt  # 💬 фиксируем 5 раундов для phrase-pack
+        # 💬 что делает эта часть: определяем реальную "норму" фазы по контенту
+        # 💬 считаем все quiz/textquiz и inline quiz внутри блоков, плюс pool-ы
+        base_units = sum(
+            1 for b in vocab_blocks
+            if b.get("type") in ("quiz", "textquiz") or b.get("quiz")
+        )
+        pool_units = len(ph.get("quiz_pool", []) or []) + len(ph.get("textquiz_pool", []) or [])
+        content_units = base_units + pool_units
+
+        link_cnt = len([b for b in vocab_blocks if "link" in b or "url" in b])
+
+        # 💬 PHRASE PACK бывает на 4 или на 5 раундов, берём факт по блокам
+        if content_units > 0:
+            need = min(5, content_units)  # 💬 4 или 5, как реально задано в теме
+        else:
+            need = 5 if phrases_cnt > 0 else link_cnt  # 💬 fallback для legacy
+
         if need <= 0:
             continue  # 💬 пустая фаза не участвует в % и не может быть пройдена
 
