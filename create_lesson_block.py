@@ -411,6 +411,7 @@ class EditGrammarStates(StatesGroup):
 
 class AdminInlineEditStates(StatesGroup):
     # 💬 FSM для ввода индексов и контента в админ-inline редакторе
+    idle = State()  # 💬 нейтральное состояние, когда ждём inline-действие (без ввода текста)
     waiting_phase_name = State()        # 💬 добавление фазы
     waiting_reading_title = State()     # 💬 добавление пака чтения
     waiting_delete_index = State()      # 💬 ввод индекса для удаления
@@ -5312,6 +5313,7 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     await state.set_state(NewTopicStates.waiting_category)
+
 
 
 
