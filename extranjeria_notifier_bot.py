@@ -619,7 +619,6 @@ async def cb_toggle_on(call: CallbackQuery):
 
 @router.callback_query(F.data == "sub:check")
 async def cb_sub_check(call: CallbackQuery):
-    await call.answer()
     store = _load_json(DATA_PATH)
     user_id = str(call.message.chat.id)
     u = _ensure_user(store, user_id)
@@ -627,14 +626,19 @@ async def cb_sub_check(call: CallbackQuery):
     ok = await _is_subscribed(bot, call.from_user.id)
 
     if not ok:
-        # 💬 просили = показать, подождать 3 сек, вернуться в меню
-        await _flash_then_main(
-            chat_id=call.message.chat.id,
-            user_id=user_id,
-            text="Не бачу підписку. Підпишись на канал і спробуй ще раз.",
-            seconds=FLASH_SEC,
-        )
+        # 💬 Минимализм: показываем toast снизу и НЕ трогаем текущие кнопки/экран
+        try:
+            await call.answer("Не бачу підписку. Підпишись і натисни «Перевірити» ще раз.", show_alert=False)
+        except Exception:
+            pass
         return
+
+    # 💬 подписка ок — включаем
+    u["enabled"] = True
+    _save_json_atomic(DATA_PATH, store)
+
+    await call.answer()  # 💬 гасим крутилку
+
 
     # 💬 подписка ок — включаем
     u["enabled"] = True
