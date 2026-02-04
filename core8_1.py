@@ -2402,6 +2402,13 @@ async def start_handler(message: Message, state: FSMContext):
     u.setdefault("last_subscription_channel_index", -1)  # 💬 для ротации каналов
 
 
+    # 💬 ГАРАНТИРУЕМ дефолтные настройки (чтобы уведомления работали даже если юзер не заходил в настройки)
+    s = u.setdefault("settings", {})
+    s.setdefault("daily_limit_words", 20)
+    s.setdefault("notify_time", "08:00")  # 💬 дефолт 08:00 по Мадриду
+
+
+
     # 💬 Текущее время
     now = int(time.time())
     # — время первого входа
@@ -3435,7 +3442,16 @@ async def settings_menu(message: Message, state: FSMContext):
     settings = user_data.get(user_id, {}).get("settings", {})
 
     daily_limit_words = settings.get("daily_limit_words", 20)  # 💬 дефолт если нет
-    notify_time = settings.get("notify_time", "09:00")  # 💬 дефолт если нет
+    notify_time = settings.get("notify_time", "08:00")  # 💬 дефолт если нет
+
+    # 💬 если уведомления отключены = notify_time хранится как "" (пусто)
+    notify_line = notify_time if (notify_time and str(notify_time).strip()) else "выключено"
+
+    toggle_btn = (
+        InlineKeyboardButton(text="🔕 Отключить уведомление", callback_data="settings:notify_off")
+        if (notify_time and str(notify_time).strip())
+        else InlineKeyboardButton(text="🔔 Включить уведомление", callback_data="settings:notify_on")
+    )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -3447,18 +3463,20 @@ async def settings_menu(message: Message, state: FSMContext):
             InlineKeyboardButton(text="⏰ Время уведомления", callback_data="settings:notify"),
         ],
         [
+            toggle_btn,
+        ],
+        [
             InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back"),
         ],
-    ])  # 💬 меню настроек + вход в «Моя подписка»
-
-
+    ])  # 💬 меню настроек + быстрый toggle уведомлений
 
     txt = (
         "⚙️ <b>Настройки</b>\n\n"
         f"📌 Цель слов в день = <b>{daily_limit_words}</b>\n"
-        f"⏰ Время уведомления = <b>{notify_time}</b>\n\n"
+        f"⏰ Время уведомления = <b>{notify_line}</b>\n\n"
         "Выбери действие:"
     )  # 💬 показываем текущие значения настроек
+
 
 
     try:
@@ -3559,6 +3577,103 @@ async def settings_notify_cb(callback: CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")]
         ])
     )
+
+@dp.callback_query(F.data == "settings:notify_off")
+async def settings_notify_off_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+
+    user_data = load_user_data()
+    user_id = str(callback.from_user.id)
+    user_data.setdefault(user_id, {}).setdefault("settings", {})
+
+    # 💬 отключаем: оставляем ключ, но делаем пустым (чтобы отправлялка не совпала по времени)
+    user_data[user_id]["settings"]["notify_time"] = ""
+    save_user_data(user_data)
+
+    # 💬 перерисовываем настройки (редактируем то же сообщение)
+    settings = user_data[user_id]["settings"]
+    daily_limit_words = settings.get("daily_limit_words", 20)
+    notify_time = settings.get("notify_time", "08:00")
+    notify_line = notify_time if (notify_time and str(notify_time).strip()) else "выключено"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💬 Связь", url=CONTACT_URL),
+            InlineKeyboardButton(text="💎 Моя подписка", callback_data="settings:subscription"),
+        ],
+        [
+            InlineKeyboardButton(text="🍪 Цель слов", callback_data="settings:limit"),
+            InlineKeyboardButton(text="⏰ Время уведомления", callback_data="settings:notify"),
+        ],
+        [
+            InlineKeyboardButton(text="🔔 Включить уведомление", callback_data="settings:notify_on"),
+        ],
+        [
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back"),
+        ],
+    ])
+
+    txt = (
+        "⚙️ <b>Настройки</b>\n\n"
+        f"📌 Цель слов в день = <b>{daily_limit_words}</b>\n"
+        f"⏰ Время уведомления = <b>{notify_line}</b>\n\n"
+        "Выбери действие:"
+    )
+
+    try:
+        await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data == "settings:notify_on")
+async def settings_notify_on_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+
+    user_data = load_user_data()
+    user_id = str(callback.from_user.id)
+    user_data.setdefault(user_id, {}).setdefault("settings", {})
+
+    # 💬 включаем: если было пусто = ставим дефолт 08:00 (Madrid)
+    cur = user_data[user_id]["settings"].get("notify_time", "")
+    if not (cur and str(cur).strip()):
+        user_data[user_id]["settings"]["notify_time"] = "08:00"
+    save_user_data(user_data)
+
+    # 💬 перерисовываем настройки
+    settings = user_data[user_id]["settings"]
+    daily_limit_words = settings.get("daily_limit_words", 20)
+    notify_time = settings.get("notify_time", "08:00")
+    notify_line = notify_time if (notify_time and str(notify_time).strip()) else "выключено"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💬 Связь", url=CONTACT_URL),
+            InlineKeyboardButton(text="💎 Моя подписка", callback_data="settings:subscription"),
+        ],
+        [
+            InlineKeyboardButton(text="🍪 Цель слов", callback_data="settings:limit"),
+            InlineKeyboardButton(text="⏰ Время уведомления", callback_data="settings:notify"),
+        ],
+        [
+            InlineKeyboardButton(text="🔕 Отключить уведомление", callback_data="settings:notify_off"),
+        ],
+        [
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back"),
+        ],
+    ])
+
+    txt = (
+        "⚙️ <b>Настройки</b>\n\n"
+        f"📌 Цель слов в день = <b>{daily_limit_words}</b>\n"
+        f"⏰ Время уведомления = <b>{notify_line}</b>\n\n"
+        "Выбери действие:"
+    )
+
+    try:
+        await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
 
 
 @dp.message(StateFilter("settings_inline_input"), F.text, ~F.text.startswith("/"))
@@ -3679,6 +3794,10 @@ async def settings_inline_input_router(message: Message, state: FSMContext):
         notify_time = f"{hour_norm:02d}:00"  # 💬 храним как HH:00, ввод всегда по Мадриду
 
         user_data[user_id]["settings"]["notify_time"] = notify_time  # 💬 сохраняем время уведомления
+        # 💬 если юзер ввёл время = считаем, что уведомления включены (на случай если было "")
+        if not str(notify_time).strip():
+            user_data[user_id]["settings"]["notify_time"] = "08:00"
+
         save_user_data(user_data)
 
         # 💬 синхронизируем час со старой логикой (xp_data), чтобы напоминания брали новое время
