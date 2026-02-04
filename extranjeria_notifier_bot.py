@@ -155,11 +155,8 @@ def _minute_index_in_window(now_madrid: dt.datetime) -> int | None:
 # =========================
 @router.message(CommandStart())
 async def on_start(message: Message):
-    # 💬 чистим клик пользователя, если можно
-    try:
-        await message.delete()
-    except Exception:
-        pass
+    user_msg_id = message.message_id  # 💬 запомним id, удалим после ответа бота
+
 
     store = _load_json(DATA_PATH)
     user_id = str(message.chat.id)
@@ -184,6 +181,12 @@ async def on_start(message: Message):
         kb=_kb_main(True)
     )
     _save_json_atomic(DATA_PATH, store)
+    # 💬 теперь чистим /start, но уже после того как бот показал UI
+    try:
+        await bot.delete_message(chat_id=message.chat.id, message_id=user_msg_id)
+    except Exception:
+        pass
+
 
 
 @router.callback_query(F.data == "notif:disable")
