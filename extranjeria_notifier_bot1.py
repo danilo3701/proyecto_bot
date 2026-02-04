@@ -1,0 +1,787 @@
+import os
+import json
+import asyncio
+import random
+import datetime as dt
+from zoneinfo import ZoneInfo
+from typing import Any
+
+from aiogram import Bot, Dispatcher, Router, F
+from aiogram.filters import CommandStart
+from aiogram.types import (
+    Message, CallbackQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+)
+from aiogram.exceptions import TelegramBadRequest
+
+
+# =========================
+# CONFIG
+# =========================
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+DATA_PATH = os.getenv("DATA_PATH", "/data/notifier_users.json").strip()
+
+# 💬 Канал, на який треба підписатися, щоб увімкнути сповіщення
+REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@espanolingooo").strip()
+
+# 💬 Куди веде кнопка в сповіщенні (поки можна залишити так, потім заміниш)
+BOOKING_URL = os.getenv("BOOKING_URL", "https://sede.administracionespublicas.gob.es/icpplus/index.html").strip()
+
+# 💬 Вікно сповіщень (не показуємо користувачу)
+MADRID_TZ = ZoneInfo("Europe/Madrid")
+WINDOW_START = os.getenv("WINDOW_START", "14:00")  # HH:MM
+WINDOW_END = os.getenv("WINDOW_END", "16:00")      # HH:MM
+
+# 💬 Скільки рандом-сповіщень на день (для кожного увімкненого користувача)
+PINGS_PER_DAY = int(os.getenv("PINGS_PER_DAY", "6"))
+
+# 💬 Авто-видалення сповіщення, щоб чат був чистий
+ALERT_DELETE_AFTER_SEC = int(os.getenv("ALERT_DELETE_AFTER_SEC", "180"))
+
+# 💬 “Мигалка” для повідомлення "не бачу підписку"
+FLASH_SEC = 3
+
+
+# =========================
+# DEMO DATA (поки тест) — потім заміниш своїми
+# =========================
+PROVINCES: dict[str, dict[str, Any]] = {
+    "Madrid": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            {"id": "m1", "title": "OFICINA MADRID = Calle Example 1"},
+            {"id": "m2", "title": "OFICINA VALLECAS = Plaza Example 2"},
+        ],
+        "services": [
+            {"id": "ua_temp", "title": "🇺🇦 Тимчасовий захист (Ucrania)"},
+            {"id": "huellas", "title": "🖐️ Toma de huellas (renovación)"},
+        ],
+    },
+    "Barcelona": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            {"id": "b1", "title": "EXTRANJERIA BCN = Rambla Example 10"},
+            {"id": "b2", "title": "CNP BCN = Calle Example 11"},
+        ],
+        "services": [
+            {"id": "ua_temp", "title": "🇺🇦 Тимчасовий захист (Ucrania)"},
+            {"id": "huellas", "title": "🖐️ Toma de huellas (renovación)"},
+        ],
+    },
+    "Valencia": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            {"id": "v1", "title": "PATERNA = Example 21"},
+            {"id": "v2", "title": "VALENCIA ZAPADORES = Example 22"},
+        ],
+        "services": [
+            {"id": "ua_temp", "title": "🇺🇦 Тимчасовий захист (Ucrania)"},
+            {"id": "huellas", "title": "🖐️ Toma de huellas (renovación)"},
+        ],
+    },
+    "Alicante": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            {"id": "a1", "title": "ALICANTE CENTRO = Example 31"},
+            {"id": "a2", "title": "ELCHE = Example 32"},
+        ],
+        "services": [
+            {"id": "ua_temp", "title": "🇺🇦 Тимчасовий захист (Ucrania)"},
+            {"id": "huellas", "title": "🖐️ Toma de huellas (renovación)"},
+        ],
+    },
+}
+
+
+# =========================
+# STORAGE
+# =========================
+def _ensure_dir_for_file(path: str) -> None:
+    folder = os.path.dirname(path)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+
+
+def _load_json(path: str) -> dict:
+    _ensure_dir_for_file(path)
+    if not os.path.exists(path):
+        return {"users": {}}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f) or {"users": {}}
+    except Exception:
+        return {"users": {}}
+
+
+def _save_json_atomic(path: str, data: dict) -> None:
+    _ensure_dir_for_file(path)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _ensure_user(store: dict, user_id: str) -> dict:
+    users = store.setdefault("users", {})
+    u = users.setdefault(user_id, {})
+    u.setdefault("enabled", False)          # 💬 /start = НЕ вмикаємо автоматом
+    u.setdefault("ui_msg_id", None)         # 💬 id “якорного” повідомлення
+    u.setdefault("province", None)
+    u.setdefault("office_id", None)
+    u.setdefault("service_id", None)
+    u.setdefault("notify_minutes", [])      # 💬 хвилини доби, коли пінгати
+    u.setdefault("daily_key", None)         # 💬 YYYY-MM-DD
+    u.setdefault("last_notified", None)     # 💬 YYYY-MM-DD:MIN
+    u.setdefault("ui_seq", 0)              # 💬 щоб “мигалка” не перетирала інший екран
+    return u
+
+
+# =========================
+# UI HELPERS (чистий чат)
+# =========================
+bot: Bot  # 💬 буде ініціалізовано нижче
+
+
+async def _safe_delete_message(chat_id: int, message_id: int | None) -> None:
+    if not message_id:
+        return
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
+
+
+def _main_text(u: dict) -> str:
+    status = "✅ Увімкнені" if u.get("enabled") else "⛔️ Вимкнені"
+
+    prov = u.get("province") or "не обрано"
+    office = u.get("office_id") or "не обрано"
+    svc = u.get("service_id") or "не обрано"
+
+    # 💬 показуємо офіс красивіше, якщо він в словнику
+    office_title = office
+    if u.get("province") in PROVINCES:
+        for o in PROVINCES[u["province"]]["offices"]:
+            if o["id"] == office:
+                office_title = o["title"]
+                break
+
+    svc_title = svc
+    if u.get("province") in PROVINCES:
+        for s in PROVINCES[u["province"]]["services"]:
+            if s["id"] == svc:
+                svc_title = s["title"]
+                break
+
+    text = (
+        "🧷 Extranjería Citas\n\n"
+        f"🔔 Сповіщення = {status}\n\n"
+        "🎯 Обрано:\n"
+        f"• Місто/провінція = {prov}\n"
+        f"• Офіс = {office_title}\n"
+        f"• Послуга = {svc_title}\n\n"
+        "Тут усе просто. Обери сервіс. Потім вмикай сповіщення.\n"
+        "Без зайвих слів. Без драми."
+    )
+    return text
+
+
+def _kb_main(u: dict) -> InlineKeyboardMarkup:
+    enabled = bool(u.get("enabled"))
+
+    toggle_text = "🔕 Вимкнути сповіщення" if enabled else "🔔 Увімкнути сповіщення"
+    toggle_cb = "ui:toggle_off" if enabled else "ui:toggle_on"
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=toggle_text, callback_data=toggle_cb)],
+        [
+            InlineKeyboardButton(text="🗺️ Обрати сервіс", callback_data="pick:province"),
+            InlineKeyboardButton(text="📌 Важливо", callback_data="info:important:0"),
+        ],
+        [InlineKeyboardButton(text="ℹ️ Як це працює", callback_data="info:how:0")],
+    ])
+
+
+def _kb_back(to: str = "ui:main") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=to)]
+    ])
+
+
+def _grid_buttons(btns: list[InlineKeyboardButton], cols: int = 3) -> list[list[InlineKeyboardButton]]:
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for b in btns:
+        row.append(b)
+        if len(row) >= cols:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return rows
+
+
+async def _edit_or_send_ui(
+    *,
+    chat_id: int,
+    store: dict,
+    user_id: str,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    kb: InlineKeyboardMarkup | None = None,
+    bot: Bot | None = None,
+) -> None:
+    # 💬 совместимость: где-то зовём reply_markup=..., где-то kb=...
+    if reply_markup is None:
+        reply_markup = kb
+
+    bot_client = bot or globals()["bot"]
+    u = _ensure_user(store, user_id)
+    ui_msg_id = u.get("ui_msg_id")
+
+    # 💬 чтобы “мигалка” не перетирала другой экран
+    u["ui_seq"] = int(u.get("ui_seq", 0)) + 1
+    current_seq = u["ui_seq"]
+
+    if ui_msg_id:
+        try:
+            await bot_client.edit_message_text(
+                chat_id=chat_id,
+                message_id=ui_msg_id,
+                text=text,
+                reply_markup=reply_markup,
+            )
+            _save_json_atomic(DATA_PATH, store)
+            return
+        except TelegramBadRequest:
+            pass
+        except Exception:
+            pass
+
+    # 💬 если edit не вышел — шлём новый “якорь”
+    msg = await bot_client.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+    u["ui_msg_id"] = msg.message_id
+    # 💬 фиксируем seq (на всякий)
+    u["ui_seq"] = current_seq
+    _save_json_atomic(DATA_PATH, store)
+
+
+async def _flash_then_main(chat_id: int, user_id: str, text: str, seconds: int = FLASH_SEC) -> None:
+    store = _load_json(DATA_PATH)
+    u = _ensure_user(store, user_id)
+    seq = int(u.get("ui_seq", 0))
+
+    await _edit_or_send_ui(chat_id=chat_id, store=store, user_id=user_id, text=text, kb=_kb_back("ui:main"))
+    await asyncio.sleep(seconds)
+
+    store2 = _load_json(DATA_PATH)
+    u2 = _ensure_user(store2, user_id)
+    # 💬 если пользователь уже ушёл на другой экран — не перетираем
+    if int(u2.get("ui_seq", 0)) != seq + 1:
+        return
+
+    await _edit_or_send_ui(chat_id=chat_id, store=store2, user_id=user_id, text=_main_text(u2), kb=_kb_main(u2))
+
+
+# =========================
+# INFO PAGES (листать)
+# =========================
+IMPORTANT_PAGES = [
+    "📌 Важливо (1/4)\n\n"
+    "Я не продаю слоти.\n"
+    "Я не “вирішую питання”.\n"
+    "Я просто даю сигнал = “може з’явилось”.",
+    "📌 Важливо (2/4)\n\n"
+    "Сповіщення не гарантує слот.\n"
+    "У конкуренції немає чесності.\n"
+    "Ти побачив = ти побіг перевіряти.",
+    "📌 Важливо (3/4)\n\n"
+    "Дані тут мінімальні.\n"
+    "Telegram ID + твої вибори (місто/офіс/послуга).\n"
+    "Паспортів, NIE, карток = нуль.",
+    "📌 Важливо (4/4)\n\n"
+    "Сервіс “як є”.\n"
+    "Якщо слот зник за секунду = це нормальна реальність.\n"
+    "Цей бот = помічник, не чарівник.",
+]
+
+HOW_PAGES = [
+    "ℹ️ Як це працює (1/3)\n\n"
+    "1) Натисни “Обрати сервіс”.\n"
+    "2) Вибери місто → офіс → послугу.\n"
+    "3) Повернешся в меню з вибором.",
+    "ℹ️ Як це працює (2/3)\n\n"
+    "Після вибору сервісу натисни “Увімкнути сповіщення”.\n"
+    "Бот попросить підписку на канал.\n"
+    "Без підписки = без сповіщень.",
+    "ℹ️ Як це працює (3/3)\n\n"
+    "Коли бот пінгує — з’являється коротке повідомлення.\n"
+    "Там буде кнопка “Відкрити сайт”.\n"
+    "І далі = твої руки, твій шанс.",
+]
+
+
+def _kb_pager(prefix: str, page: int, total: int) -> InlineKeyboardMarkup:
+    prev_page = max(0, page - 1)
+    next_page = min(total - 1, page + 1)
+
+    left_cb = f"info:{prefix}:{prev_page}" if page > 0 else "ui:noop"
+    right_cb = f"info:{prefix}:{next_page}" if page < total - 1 else "ui:noop"
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="◀️", callback_data=left_cb),
+            InlineKeyboardButton(text=f"{page+1}/{total}", callback_data="ui:noop"),
+            InlineKeyboardButton(text="▶️", callback_data=right_cb),
+        ],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="ui:main")]
+    ])
+
+
+# =========================
+# SUBSCRIBE GATE
+# =========================
+def _kb_subscribe_gate() -> InlineKeyboardMarkup:
+    channel_url = f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📣 Підписатися на канал", url=channel_url)],
+        [InlineKeyboardButton(text="✅ Перевірити підписку", callback_data="sub:check")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="ui:main")],
+    ])
+
+
+async def _is_subscribed(bot_client: Bot, user_id_int: int) -> bool:
+    try:
+        member = await bot_client.get_chat_member(chat_id=REQUIRED_CHANNEL, user_id=user_id_int)
+        return member.status in ("member", "administrator", "creator")
+    except TelegramBadRequest:
+        return False
+    except Exception:
+        return False
+
+
+# =========================
+# PICK FLOW
+# =========================
+def _kb_pick_province() -> InlineKeyboardMarkup:
+    btns: list[InlineKeyboardButton] = []
+    for name in PROVINCES.keys():
+        btns.append(InlineKeyboardButton(text=name, callback_data=f"pick:prov:{name}"))
+    rows = _grid_buttons(btns, cols=3)
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ui:main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _kb_pick_office(province: str) -> InlineKeyboardMarkup:
+    offices = PROVINCES.get(province, {}).get("offices", [])
+    btns = [
+        InlineKeyboardButton(text=o["title"], callback_data=f"pick:office:{province}:{o['id']}")
+        for o in offices
+    ]
+    rows = _grid_buttons(btns, cols=1)
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ui:main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _kb_pick_service(province: str, office_id: str) -> InlineKeyboardMarkup:
+    services = PROVINCES.get(province, {}).get("services", [])
+    rows = [
+        [InlineKeyboardButton(text=s["title"], callback_data=f"pick:service:{province}:{office_id}:{s['id']}")]
+        for s in services
+    ]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ui:main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# =========================
+# NOTIFICATIONS (рандом)
+# =========================
+def _parse_hhmm(s: str) -> tuple[int, int]:
+    hh, mm = s.split(":")
+    return int(hh), int(mm)
+
+
+def _generate_minutes_for_today() -> list[int]:
+    sh, sm = _parse_hhmm(WINDOW_START)
+    eh, em = _parse_hhmm(WINDOW_END)
+
+    start_min = sh * 60 + sm
+    end_min = eh * 60 + em
+    if end_min <= start_min:
+        end_min = start_min + 1
+
+    pool = list(range(start_min, end_min))
+    if not pool:
+        pool = [start_min]
+
+    k = min(PINGS_PER_DAY, len(pool))
+    minutes = sorted(random.sample(pool, k=k))
+    return minutes
+
+
+def _today_key(now: dt.datetime) -> str:
+    return now.strftime("%Y-%m-%d")
+
+
+async def _send_alert(user_chat_id: int, text: str) -> None:
+    try:
+        msg = await bot.send_message(
+            chat_id=user_chat_id,
+            text=text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🌐 Відкрити сайт", url=BOOKING_URL)],
+                [InlineKeyboardButton(text="🧷 Меню", callback_data="ui:main")],
+            ])
+        )
+        # 💬 авто-видалення
+        asyncio.create_task(_safe_delete_message(user_chat_id, msg.message_id))
+        # 💬 але видаляти треба з затримкою
+        async def _del_later():
+            await asyncio.sleep(ALERT_DELETE_AFTER_SEC)
+            await _safe_delete_message(user_chat_id, msg.message_id)
+        asyncio.create_task(_del_later())
+    except Exception:
+        pass
+
+
+async def notifier_loop() -> None:
+    while True:
+        try:
+            now = dt.datetime.now(MADRID_TZ)
+            store = _load_json(DATA_PATH)
+            users = store.get("users", {})
+
+            now_min = now.hour * 60 + now.minute
+            key = _today_key(now)
+
+            changed = False
+
+            for user_id, u in users.items():
+                u = _ensure_user(store, user_id)
+
+                if not u.get("enabled"):
+                    continue
+
+                # 💬 если день сменился — генерим минуты заново
+                if u.get("daily_key") != key or not u.get("notify_minutes"):
+                    u["daily_key"] = key
+                    u["notify_minutes"] = _generate_minutes_for_today()
+                    u["last_notified"] = None
+                    changed = True
+
+                last = u.get("last_notified")
+                stamp = f"{key}:{now_min}"
+
+                if now_min in u.get("notify_minutes", []) and last != stamp:
+                    u["last_notified"] = stamp
+                    changed = True
+
+                    # 💬 текст уведомления максимально короткий
+                    alert_text = "⚡️ Можливо, з’явилось вікно. Перевір швидко."
+                    await _send_alert(int(user_id), alert_text)
+
+            if changed:
+                _save_json_atomic(DATA_PATH, store)
+
+        except Exception:
+            pass
+
+        await asyncio.sleep(20)
+
+
+# =========================
+# ROUTES
+# =========================
+router = Router()
+
+
+@router.message(CommandStart())
+async def on_start(message: Message):
+    # 💬 удаляем /start пользователя, чтобы чат был чище
+    user_msg_id = message.message_id
+
+    store = _load_json(DATA_PATH)
+    user_id = str(message.chat.id)
+    u = _ensure_user(store, user_id)
+
+    # 💬 /start не включает уведомления, просто показывает меню
+    await _edit_or_send_ui(
+        chat_id=message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=_main_text(u),
+        kb=_kb_main(u),
+    )
+
+    _save_json_atomic(DATA_PATH, store)
+
+    try:
+        await bot.delete_message(chat_id=message.chat.id, message_id=user_msg_id)
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data == "ui:noop")
+async def cb_noop(call: CallbackQuery):
+    await call.answer()
+
+
+@router.callback_query(F.data == "ui:main")
+async def cb_main(call: CallbackQuery):
+    await call.answer()
+    store = _load_json(DATA_PATH)
+    user_id = str(call.message.chat.id)
+    u = _ensure_user(store, user_id)
+
+    await _edit_or_send_ui(
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=_main_text(u),
+        kb=_kb_main(u),
+    )
+
+
+@router.callback_query(F.data == "ui:toggle_on")
+async def cb_toggle_on(call: CallbackQuery):
+    await call.answer()
+    store = _load_json(DATA_PATH)
+    user_id = str(call.message.chat.id)
+    u = _ensure_user(store, user_id)
+
+    # 💬 нельзя включить, если не выбран сервис
+    if not u.get("province") or not u.get("office_id") or not u.get("service_id"):
+        # 💬 просили = лучше Telegram alert без лишних сообщений
+        try:
+            await call.answer("Спочатку обери сервіс в меню.", show_alert=True)
+        except Exception:
+            pass
+        return
+
+    # 💬 показываем “ворота подписки” в том же якорном сообщении
+    text = (
+        "Щоб увімкнути сповіщення, потрібно бути підписаним на канал.\n\n"
+        "Підпишись. Потім натисни “Перевірити”."
+    )
+    await _edit_or_send_ui(
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=text,
+        kb=_kb_subscribe_gate(),
+    )
+
+
+@router.callback_query(F.data == "sub:check")
+async def cb_sub_check(call: CallbackQuery):
+    await call.answer()
+    store = _load_json(DATA_PATH)
+    user_id = str(call.message.chat.id)
+    u = _ensure_user(store, user_id)
+
+    ok = await _is_subscribed(bot, call.from_user.id)
+
+    if not ok:
+        # 💬 просили = показать, подождать 3 сек, вернуться в меню
+        await _flash_then_main(
+            chat_id=call.message.chat.id,
+            user_id=user_id,
+            text="Не бачу підписку. Підпишись на канал і спробуй ще раз.",
+            seconds=FLASH_SEC,
+        )
+        return
+
+    # 💬 подписка ок — включаем
+    u["enabled"] = True
+    _save_json_atomic(DATA_PATH, store)
+
+    await _edit_or_send_ui(
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=_main_text(u),
+        kb=_kb_main(u),
+    )
+
+
+@router.callback_query(F.data == "ui:toggle_off")
+async def cb_toggle_off(call: CallbackQuery):
+    await call.answer()
+    store = _load_json(DATA_PATH)
+    user_id = str(call.message.chat.id)
+    u = _ensure_user(store, user_id)
+
+    u["enabled"] = False
+    _save_json_atomic(DATA_PATH, store)
+
+    await _edit_or_send_ui(
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=_main_text(u),
+        kb=_kb_main(u),
+    )
+
+
+@router.callback_query(F.data == "pick:province")
+async def cb_pick_province(call: CallbackQuery):
+    await call.answer()
+    store = _load_json(DATA_PATH)
+    user_id = str(call.message.chat.id)
+    _ensure_user(store, user_id)
+
+    text = "🗺️ Обери місто/провінцію:"
+    await _edit_or_send_ui(
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=text,
+        kb=_kb_pick_province(),
+    )
+
+
+@router.callback_query(F.data.startswith("pick:prov:"))
+async def cb_pick_prov_value(call: CallbackQuery):
+    await call.answer()
+    province = call.data.split("pick:prov:", 1)[1]
+
+    store = _load_json(DATA_PATH)
+    user_id = str(call.message.chat.id)
+    u = _ensure_user(store, user_id)
+
+    if province not in PROVINCES:
+        await call.answer("Невідоме місто.", show_alert=True)
+        return
+
+    u["province"] = province
+    u["office_id"] = None
+    u["service_id"] = None
+    u["enabled"] = False  # 💬 смена сервиса = лучше выключить, чтобы не путать
+
+    _save_json_atomic(DATA_PATH, store)
+
+    text = f"🏢 Обери офіс в {province}:"
+    await _edit_or_send_ui(
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=text,
+        kb=_kb_pick_office(province),
+    )
+
+
+@router.callback_query(F.data.startswith("pick:office:"))
+async def cb_pick_office(call: CallbackQuery):
+    await call.answer()
+    _, _, province, office_id = call.data.split(":", 3)  # pick:office:PROV:OFFICE
+
+    store = _load_json(DATA_PATH)
+    user_id = str(call.message.chat.id)
+    u = _ensure_user(store, user_id)
+
+    if province not in PROVINCES:
+        await call.answer("Невідоме місто.", show_alert=True)
+        return
+
+    u["province"] = province
+    u["office_id"] = office_id
+    u["service_id"] = None
+    u["enabled"] = False
+
+    _save_json_atomic(DATA_PATH, store)
+
+    text = "🧩 Обери послугу:"
+    await _edit_or_send_ui(
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=text,
+        kb=_kb_pick_service(province, office_id),
+    )
+
+
+@router.callback_query(F.data.startswith("pick:service:"))
+async def cb_pick_service(call: CallbackQuery):
+    await call.answer()
+    # pick:service:PROV:OFFICE:SVC
+    parts = call.data.split(":")
+    province = parts[2]
+    office_id = parts[3]
+    service_id = parts[4]
+
+    store = _load_json(DATA_PATH)
+    user_id = str(call.message.chat.id)
+    u = _ensure_user(store, user_id)
+
+    if province not in PROVINCES:
+        await call.answer("Невідоме місто.", show_alert=True)
+        return
+
+    u["province"] = province
+    u["office_id"] = office_id
+    u["service_id"] = service_id
+    u["enabled"] = False  # 💬 включение только после подписки
+
+    _save_json_atomic(DATA_PATH, store)
+
+    await _edit_or_send_ui(
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=_main_text(u),
+        kb=_kb_main(u),
+    )
+
+
+@router.callback_query(F.data.startswith("info:"))
+async def cb_info(call: CallbackQuery):
+    await call.answer()
+    # info:important:0  или info:how:1
+    parts = call.data.split(":")
+    kind = parts[1]
+    page = int(parts[2]) if len(parts) > 2 else 0
+
+    store = _load_json(DATA_PATH)
+    user_id = str(call.message.chat.id)
+    _ensure_user(store, user_id)
+
+    if kind == "important":
+        pages = IMPORTANT_PAGES
+        page = max(0, min(page, len(pages) - 1))
+        text = pages[page]
+        kb = _kb_pager("important", page, len(pages))
+    else:
+        pages = HOW_PAGES
+        page = max(0, min(page, len(pages) - 1))
+        text = pages[page]
+        kb = _kb_pager("how", page, len(pages))
+
+    await _edit_or_send_ui(
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=text,
+        kb=kb,
+    )
+
+
+# =========================
+# MAIN
+# =========================
+async def main() -> None:
+    global bot
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN is empty. Set Railway variable BOT_TOKEN.")
+
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher()
+    dp.include_router(router)
+
+    # 💬 запускаем фоновую задачу уведомлений
+    asyncio.create_task(notifier_loop())
+
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
