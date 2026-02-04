@@ -93,9 +93,104 @@ async def _safe_delete_message(chat_id: int, message_id: int | None):
 
 
 # =========================
-# UI (якорное сообщение)
+# UI (якорное сообщение) = 1 сообщение, только edit
 # =========================
-_kb_main(enabled: bool) -> Inlin
+def _kb_main(enabled: bool) -> InlineKeyboardMarkup:
+    toggle_text = "🔕 Выключить уведомления" if enabled else "🔔 Включить уведомления"
+    toggle_cb = "notif:disable" if enabled else "notif:enable"
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=toggle_text, callback_data=toggle_cb)],
+        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="notif:info")],
+        [InlineKeyboardButton(text="📜 Правила", callback_data="notif:rules")],
+    ])
+
+
+def _kb_back() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="notif:main")]
+    ])
+
+
+def _base_text(enabled: bool) -> str:
+    status = "✅ Включены" if enabled else "🔕 Выключены"
+    return (
+        "🇪🇸 Extranjería = уведомления о слотах\n\n"
+        f"Статус: {status}\n"
+        "Окно: 14:00–16:00 (Мадрид)\n\n"
+        "Внутри этого окна я несколько раз обновляю это сообщение в случайные минуты.\n"
+        "Увидел обновление = сразу проверь запись."
+    )
+
+
+def _how_text() -> str:
+    return (
+        "ℹ️ Как это работает\n\n"
+        "1) Ты включаешь уведомления\n"
+        "2) Каждый день, только в 14:00–16:00 (Мадрид), я делаю несколько обновлений этого сообщения\n"
+        "3) Увидел обновление = проверяешь сайт записи\n\n"
+        "Я ничего не бронирую и не прошу никаких данных."
+    )
+
+
+def _rules_text() -> str:
+    return (
+        "📜 Правила\n\n"
+        "• Бот не просит личные данные, логины или пароли\n"
+        "• Бот ничего не бронирует и не гарантирует наличие слотов\n"
+        "• Если слоты были и исчезли = их мог взять кто-то другой\n"
+        "• Это просто помощник, использование на твой риск"
+    )
+
+
+def _ensure_user(store: dict, user_id: str) -> dict:
+    store.setdefault("users", {})
+    u = store["users"].get(user_id)
+    if not isinstance(u, dict):
+        u = {}
+
+    u.setdefault("enabled", True)
+    u.setdefault("ui_msg_id", None)
+    u.setdefault("daily_key", None)
+    u.setdefault("daily_minutes", [])
+
+    store["users"][user_id] = u
+    return u
+
+
+async def _touch_ui_msg_id(store: dict, user_id: str, ui_msg_id: int) -> None:
+    u = _ensure_user(store, user_id)
+    u["ui_msg_id"] = ui_msg_id
+
+
+async def _edit_or_send_ui(
+    chat_id: int,
+    store: dict,
+    user_id: str,
+    text: str,
+    reply_markup: InlineKeyboardMarkup,
+) -> None:
+    u = _ensure_user(store, user_id)
+    ui_msg_id = u.get("ui_msg_id")
+
+    if ui_msg_id:
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=ui_msg_id,
+                text=text,
+                reply_markup=reply_markup,
+            )
+            return
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e).lower():
+                return
+        except Exception:
+            pass
+
+    msg = await bot.send_message(chat_id, text, reply_markup=reply_markup)
+    await _touch_ui_msg_id(store, user_id, msg.message_id)
+
 
 # =========================
 # Daily schedule generation
