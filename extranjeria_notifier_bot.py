@@ -54,11 +54,20 @@ def _load_json(path: str) -> dict:
         return {"users": {}}
 
 def _save_json_atomic(path: str, data: dict) -> None:
+    # 💬 гарантируем, что директория существует (Railway может не иметь /data без Volume)
+    dir_name = os.path.dirname(path) or "."
+    try:
+        os.makedirs(dir_name, exist_ok=True)
+    except Exception:
+        # 💬 если директорию создать нельзя (очень редкий кейс), пусть дальше упадёт честно
+        pass
+
     # 💬 упрощённый атомарный сейв: tmp -> replace
     tmp = f"{path}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
+
 
 
 # =========================
