@@ -351,13 +351,34 @@ def _kb_subscribe_gate() -> InlineKeyboardMarkup:
 
 
 async def _is_subscribed(bot_client: Bot, user_id_int: int) -> bool:
+    # 💬 поддерживаем @username и -100123... (если позже захочешь хранить id канала)
+    chat_id = REQUIRED_CHANNEL
+    if isinstance(chat_id, str):
+        chat_id = chat_id.strip()
+        if chat_id and chat_id[0].isdigit():
+            # 💬 строка-число -> int
+            try:
+                chat_id = int(chat_id)
+            except Exception:
+                pass
+
     try:
-        member = await bot_client.get_chat_member(chat_id=REQUIRED_CHANNEL, user_id=user_id_int)
+        member = await bot_client.get_chat_member(chat_id=chat_id, user_id=user_id_int)
         return member.status in ("member", "administrator", "creator")
-    except TelegramBadRequest:
+    except TelegramBadRequest as e:
+        # 💬 ключевое: если бот НЕ админ/не видит канал -> тут будет "chat not found" или похожее
+        try:
+            print(f"[SUB_CHECK] TelegramBadRequest chat_id={chat_id} user_id={user_id_int} err={e}")
+        except Exception:
+            pass
         return False
-    except Exception:
+    except Exception as e:
+        try:
+            print(f"[SUB_CHECK] ERROR chat_id={chat_id} user_id={user_id_int} err={e}")
+        except Exception:
+            pass
         return False
+
 
 
 # =========================
@@ -544,19 +565,21 @@ async def cb_main(call: CallbackQuery):
 
 @router.callback_query(F.data == "ui:toggle_on")
 async def cb_toggle_on(call: CallbackQuery):
-    await call.answer()
     store = _load_json(DATA_PATH)
     user_id = str(call.message.chat.id)
     u = _ensure_user(store, user_id)
 
     # 💬 нельзя включить, если не выбран сервис
     if not u.get("province") or not u.get("office_id") or not u.get("service_id"):
-        # 💬 просили = лучше Telegram alert без лишних сообщений
+        # 💬 ВАЖНО: отвечаем ОДИН раз, сразу show_alert=True (иначе второй answer может не показаться)
         try:
             await call.answer("Спочатку обери сервіс в меню.", show_alert=True)
         except Exception:
             pass
         return
+
+    # 💬 гасим “крутилку” перед редактированием UI
+    await call.answer()
 
     # 💬 показываем “ворота подписки” в том же якорном сообщении
     text = (
@@ -570,6 +593,7 @@ async def cb_toggle_on(call: CallbackQuery):
         text=text,
         kb=_kb_subscribe_gate(),
     )
+
 
 
 @router.callback_query(F.data == "sub:check")
