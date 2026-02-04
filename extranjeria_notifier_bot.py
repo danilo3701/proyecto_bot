@@ -168,8 +168,13 @@ async def _edit_or_send_ui(
     store: dict,
     user_id: str,
     text: str,
-    reply_markup: InlineKeyboardMarkup,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    kb: InlineKeyboardMarkup | None = None,
 ) -> None:
+    # 💬 совместимость: где-то зовём reply_markup=..., где-то kb=...
+    if reply_markup is None:
+        reply_markup = kb
+
     u = _ensure_user(store, user_id)
     ui_msg_id = u.get("ui_msg_id")
 
@@ -183,6 +188,7 @@ async def _edit_or_send_ui(
             )
             return
         except TelegramBadRequest as e:
+            # 💬 если текст тот же — не плодим попытки
             if "message is not modified" in str(e).lower():
                 return
         except Exception:
