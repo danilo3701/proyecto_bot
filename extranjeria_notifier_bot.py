@@ -170,17 +170,21 @@ async def _edit_or_send_ui(
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
     kb: InlineKeyboardMarkup | None = None,
+    bot: Bot | None = None,
 ) -> None:
     # 💬 совместимость: где-то зовём reply_markup=..., где-то kb=...
     if reply_markup is None:
         reply_markup = kb
+
+    # 💬 совместимость: где-то зовём bot=bot, но можно не передавать
+    bot_client = bot or globals()["bot"]
 
     u = _ensure_user(store, user_id)
     ui_msg_id = u.get("ui_msg_id")
 
     if ui_msg_id:
         try:
-            await bot.edit_message_text(
+            await bot_client.edit_message_text(
                 chat_id=chat_id,
                 message_id=ui_msg_id,
                 text=text,
@@ -188,14 +192,14 @@ async def _edit_or_send_ui(
             )
             return
         except TelegramBadRequest as e:
-            # 💬 если текст тот же — не плодим попытки
             if "message is not modified" in str(e).lower():
                 return
         except Exception:
             pass
 
-    msg = await bot.send_message(chat_id, text, reply_markup=reply_markup)
+    msg = await bot_client.send_message(chat_id, text, reply_markup=reply_markup)
     await _touch_ui_msg_id(store, user_id, msg.message_id)
+
 
 
 # =========================
