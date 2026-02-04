@@ -54,19 +54,17 @@ def _load_json(path: str) -> dict:
         return {"users": {}}
 
 def _save_json_atomic(path: str, data: dict) -> None:
-    # 💬 гарантируем, что директория существует (Railway может не иметь /data без Volume)
-    dir_name = os.path.dirname(path) or "."
-    try:
-        os.makedirs(dir_name, exist_ok=True)
-    except Exception:
-        # 💬 если директорию создать нельзя (очень редкий кейс), пусть дальше упадёт честно
-        pass
-
-    # 💬 упрощённый атомарный сейв: tmp -> replace
     tmp = f"{path}.tmp"
+
+    # 💬 гарантируем, что папка существует (иначе FileNotFoundError на /data/*.tmp)
+    dir_name = os.path.dirname(path) or "."
+    os.makedirs(dir_name, exist_ok=True)
+
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
     os.replace(tmp, path)
+
 
 
 
@@ -97,47 +95,7 @@ async def _safe_delete_message(chat_id: int, message_id: int | None):
 # =========================
 # UI (якорное сообщение)
 # =========================
-def _kb_main(enabled: bool) -> InlineKeyboardMarkup:
-    if enabled:
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔕 Отключить уведомления", callback_data="notif:disable")],
-            [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="notif:info")],
-        ])
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔔 Включить уведомления", callback_data="notif:enable")],
-        [InlineKeyboardButton(text="ℹ️ Как это работает", callback_data="notif:info")],
-    ])
-
-def _base_text(enabled: bool) -> str:
-    if enabled:
-        return (
-            "✅ Уведомления включены\n\n"
-            "Я пингану тебя в окне 14:00–16:00 (Мадрид), когда обычно появляются слоты.\n"
-            "Чат будет чистый = я обновляю это сообщение."
-        )
-    return (
-        "🔕 Уведомления выключены\n\n"
-        "Нажми кнопку ниже, чтобы включить."
-    )
-
-async def _touch_ui_msg_id(store: dict, user_id: str, ui_msg_id: int):
-    # 💬 аналог _mywords_touch_ui_msg_id
-    store["users"][user_id]["ui_msg_id"] = ui_msg_id
-
-async def _edit_or_send_ui(chat_id: int, store: dict, user_id: str, text: str, kb: InlineKeyboardMarkup):
-    # 💬 аналог _mywords_edit_ui: пытаемся редактировать якорь, иначе создаём новый
-    ui_msg_id = store["users"][user_id].get("ui_msg_id")
-    if ui_msg_id:
-        try:
-            await bot.edit_message_text(chat_id=chat_id, message_id=ui_msg_id, text=text, reply_markup=kb)
-            return
-        except Exception:
-            # 💬 если якорь удалён/не найден = шлём новый
-            pass
-
-    m = await bot.send_message(chat_id, text, reply_markup=kb)
-    await _touch_ui_msg_id(store, user_id, m.message_id)
-
+_kb_main(enabled: bool) -> Inlin
 
 # =========================
 # Daily schedule generation
@@ -246,15 +204,59 @@ async def cb_enable(call: CallbackQuery):
     _save_json_atomic(DATA_PATH, store)
 
 
+@router.callback_query(F.data == "notif:main")
+async def cb_main(call: CallbackQuery):
+    await call.answer()
+    store = _load_json(DATA_PATH)
+    user_id = str(call.from_user.id)
+
+    u = _ensure_user(store, user_id)
+    enabled = bool(u.get("enabled", True))
+
+    await _edit_or_send_ui(
+        bot=bot,
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=_base_text(enabled),
+        reply_markup=_kb_main(enabled),
+    )
+    _save_json_atomic(DATA_PATH, store)
+
+
 @router.callback_query(F.data == "notif:info")
 async def cb_info(call: CallbackQuery):
     await call.answer()
-    # 💬 короткая заметка и автоудаление (паттерн как в core)
-    await send_and_auto_delete_text(
-        bot, call.message.chat.id,
-        "ℹ️ Я работаю так: в 14:00–16:00 (Мадрид) я несколько раз случайно обновляю это сообщение, если пора.",
-        delay=6
+    store = _load_json(DATA_PATH)
+    user_id = str(call.from_user.id)
+
+    await _edit_or_send_ui(
+        bot=bot,
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=_how_text(),
+        reply_markup=_kb_back(),
     )
+    _save_json_atomic(DATA_PATH, store)
+
+
+@router.callback_query(F.data == "notif:rules")
+async def cb_rules(call: CallbackQuery):
+    await call.answer()
+    store = _load_json(DATA_PATH)
+    user_id = str(call.from_user.id)
+
+    await _edit_or_send_ui(
+        bot=bot,
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=_rules_text(),
+        reply_markup=_kb_back(),
+    )
+    _save_json_atomic(DATA_PATH, store)
+
 
 
 # =========================
