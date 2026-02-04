@@ -198,8 +198,12 @@ def _kb_main(u: dict) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🗺️ Обрати сервіс", callback_data="pick:province"),
             InlineKeyboardButton(text="📌 Важливо", callback_data="info:important:0"),
         ],
-        [InlineKeyboardButton(text="ℹ️ Як це працює", callback_data="info:how:0")],
+        [
+            InlineKeyboardButton(text="ℹ️ Як це працює", callback_data="info:how:0"),
+            InlineKeyboardButton(text="🌐 Сайт сіти", url=BOOKING_URL),  # 💬 прямий доступ
+        ],
     ])
+
 
 
 def _kb_back(to: str = "ui:main") -> InlineKeyboardMarkup:
@@ -334,8 +338,10 @@ def _kb_pager(prefix: str, page: int, total: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=f"{page+1}/{total}", callback_data="ui:noop"),
             InlineKeyboardButton(text="▶️", callback_data=right_cb),
         ],
+        [InlineKeyboardButton(text="🌐 Сайт сіти", url=BOOKING_URL)],  # 💬 сайт завжди під рукою
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="ui:main")]
     ])
+
 
 
 # =========================
