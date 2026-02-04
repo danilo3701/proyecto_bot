@@ -5,6 +5,7 @@ import random
 import datetime as dt
 from zoneinfo import ZoneInfo
 from typing import Any
+from html import escape as _h  # 💬 HTML-екранирование для значений в тексте
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import CommandStart
@@ -152,7 +153,8 @@ async def _safe_delete_message(chat_id: int, message_id: int | None) -> None:
 
 
 def _main_text(u: dict) -> str:
-    status = "✅ Увімкнені" if u.get("enabled") else "⛔️ Вимкнені"
+    enabled = bool(u.get("enabled"))
+    status = "✅ ON" if enabled else "⛔️ OFF"
 
     prov = u.get("province") or "не обрано"
     office = u.get("office_id") or "не обрано"
@@ -173,17 +175,22 @@ def _main_text(u: dict) -> str:
                 svc_title = s["title"]
                 break
 
+    # 💬 HTML-safe (щоб не ламати <b>/<i> якщо в назвах є спецсимволи)
+    prov_h = _h(str(prov))
+    office_h = _h(str(office_title))
+    svc_h = _h(str(svc_title))
+    status_h = _h(str(status))
+
     text = (
-        "🧷 Extranjería Citas\n\n"
-        f"🔔 Сповіщення = {status}\n\n"
-        "🎯 Обрано:\n"
-        f"• Місто/провінція = {prov}\n"
-        f"• Офіс = {office_title}\n"
-        f"• Послуга = {svc_title}\n\n"
-        "Тут усе просто. Обери сервіс. Потім вмикай сповіщення.\n"
-        "Без зайвих слів. Без драми."
+        "<b>🏛 Extranjería Citas</b>\n\n"
+        f"<i>🔔 Сповіщення:</i> <b>{status_h}</b>\n\n"
+        "🎯 <i>Обрано:</i>\n"
+        f"<i>• Місто/провінція:</i> <b>{prov_h}</b>\n"
+        f"<i>• Офіс:</i> <b>{office_h}</b>\n"
+        f"<i>• Послуга:</i> <b>{svc_h}</b>"
     )
     return text
+
 
 
 def _kb_main(u: dict) -> InlineKeyboardMarkup:
@@ -253,6 +260,7 @@ async def _edit_or_send_ui(
                 chat_id=chat_id,
                 message_id=ui_msg_id,
                 text=text,
+                parse_mode="HTML",  # 💬 включаем <b>/<i>
                 reply_markup=reply_markup,
             )
             _save_json_atomic(DATA_PATH, store)
@@ -263,7 +271,12 @@ async def _edit_or_send_ui(
             pass
 
     # 💬 если edit не вышел — шлём новый “якорь”
-    msg = await bot_client.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+    msg = await bot_client.send_message(
+        chat_id=chat_id,
+        text=text,
+        parse_mode="HTML",  # 💬 включаем <b>/<i>
+        reply_markup=reply_markup,
+    )
     u["ui_msg_id"] = msg.message_id
     # 💬 фиксируем seq (на всякий)
     u["ui_seq"] = current_seq
@@ -455,11 +468,13 @@ async def _send_alert(user_chat_id: int, text: str) -> None:
         msg = await bot.send_message(
             chat_id=user_chat_id,
             text=text,
+            parse_mode="HTML",  # 💬 на будущее (если захочешь форматировать алерты)
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🌐 Відкрити сайт", url=BOOKING_URL)],
                 [InlineKeyboardButton(text="🧷 Меню", callback_data="ui:main")],
             ])
         )
+
         # 💬 авто-видалення
         asyncio.create_task(_safe_delete_message(user_chat_id, msg.message_id))
         # 💬 але видаляти треба з затримкою
