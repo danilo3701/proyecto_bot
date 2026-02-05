@@ -79,12 +79,13 @@ FLASH_SEC = 3
 PROVINCES: dict[str, dict[str, Any]] = {
     "Valencia": {
         "offices": [
-            # 💬 ТОП місця, куди реально їздять “на conflicto”
-            {"id": "val_patraix_gremis_6", "title": "CNP COMISARIA PATRAIX EXTRANJERIA — GREMIS 6 (VALENCIA)"},
-            {"id": "val_gandia_laval_5", "title": "CNP GANDIA EXPEDICION TIE — Ciudad de Laval 5 (GANDIA)"},
-            {"id": "val_alzira_pere_morell_4", "title": "CNP COMISARIA DE ALZIRA — Pere Morell 4 (ALZIRA)"},
-            {"id": "val_ontinyent_escura_2", "title": "CNP COMISARIA DE ONTENIENTE — Plaza de Escura 2 (ONTINYENT)"},
-            {"id": "val_sagunto_progreso_14", "title": "CNP COMISARIA DE SAGUNTO — Progreso 14 (SAGUNTO)"},
+            # 💬 куди реально їздять “на conflicto”
+            {"id": "val_patraix_gremis_6", "title": "VALÈNCIA (Patraix) — C/ dels Gremis 6"},
+            {"id": "val_valencia_zapadores_52", "title": "VALÈNCIA — C/ Zapadores 52"},
+            {"id": "val_gandia_laval_5", "title": "GANDIA — C/ Ciudad de Laval 5"},
+            {"id": "val_alzira_pere_morell_4", "title": "ALZIRA — C/ Pere Morell 4"},
+            {"id": "val_ontinyent_escura_2", "title": "ONTINYENT — Plaça de l'Escura 2"},
+            {"id": "val_sagunto_progreso_14", "title": "SAGUNT — C/ Progreso 14"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -95,9 +96,10 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Madrid": {
         "offices": [
-            {"id": "mad_poblados_51", "title": "MADRID — Av. de los Poblados 51"},
-            {"id": "mad_leganes_8", "title": "LEGANÉS — Av. de la Universidad 8"},
-            {"id": "mad_alcala_16", "title": "ALCALÁ DE HENARES — C/ Brihuega 16"},
+            {"id": "mad_poblados_51", "title": "MADRID (Latina) — Av. de los Poblados 51"},
+            {"id": "mad_padre_piquer_18", "title": "MADRID — Av. Padre Piquer 18"},
+            {"id": "mad_leganes_universidad_27", "title": "LEGANÉS — Av. de la Universidad 27"},
+            {"id": "mad_alcala_meco_sn", "title": "ALCALÁ DE HENARES — Avda de Meco s/n"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -108,8 +110,13 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Barcelona": {
         "offices": [
+            # 💬 Часто встречается как офис TIE/huellas в Барселоне (Rambla Guipúscoa)
             {"id": "bcn_rambla_guipuscoa_74", "title": "BARCELONA — Rambla de Guipúscoa 74"},
-            {"id": "bcn_sant_adrià_eduard_maristany_128", "title": "SANT ADRIÀ — Eduard Maristany 128"},
+
+            # 💬 Реальные comisarías в провинции Barcelona (часто выбирают при записи)
+            {"id": "bcn_badalona_av_dels_vents_9_13", "title": "BADALONA — Av. dels Vents 9-13"},
+            {"id": "bcn_santa_coloma_irlanda_67", "title": "SANTA COLOMA DE GRAMENET — C/ Irlanda 67"},
+            {"id": "bcn_mataro_gatassa_15", "title": "MATARÓ — Av. Gatassa 15"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -120,8 +127,15 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Alicante": {
         "offices": [
-            {"id": "ali_alacant_isabel_la_catolica_1", "title": "ALICANTE — Av. Isabel La Católica 1"},
-            {"id": "ali_elche_diagonal_21", "title": "ELCHE — C/ Diagonal 21"},
+            # 💬 Реальные comisarías в провинции Alicante (локатор Policía Nacional)
+            {"id": "ali_alicante_centro_medico_pascual_perez_27", "title": "ALICANTE — C/ Médico Pascual Pérez 27"},
+            {"id": "ali_alicante_norte_joaquin_fuster_2", "title": "ALICANTE — C/ Diputado Joaquín Fuster 2"},
+
+            # 💬 Elche/Elx: реальный адрес comisaría (administracion.gob.es)
+            {"id": "ali_elche_abeto_1", "title": "ELCHE/ELX — C/ Abeto 1"},
+
+            # 💬 Benidorm: часто нужен людям по провинции (administracion.gob.es)
+            {"id": "ali_benidorm_apolo_xi_36", "title": "BENIDORM — C/ Apolo XI 36"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -132,8 +146,11 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Murcia": {
         "offices": [
-            {"id": "mur_murcia_avenida_ronda_sur", "title": "MURCIA — Ronda Sur"},
-            {"id": "mur_cartagena_alfonso_xiii", "title": "CARTAGENA — Alfonso XIII"},
+            {"id": "mur_murcia_el_carmen_pl_industria_1", "title": "MURCIA — Comisaría El Carmen (Pl. de la Industria 1)"},
+            {"id": "mur_murcia_san_andres_escultor_sanchez_lozano_2", "title": "MURCIA — Comisaría San Andrés (C/ Escultor José Sánchez Lozano 2)"},
+            {"id": "mur_cartagena_menendez_y_pelayo_6", "title": "CARTAGENA — Comisaría (C/ Menéndez y Pelayo 6)"},
+            {"id": "mur_molina_de_segura_canarias_2", "title": "MOLINA DE SEGURA — Comisaría (C/ Canarias 2)"},
+            {"id": "mur_lorca_pl_policia_nacional_1", "title": "LORCA — Comisaría (Pl. de la Policía Nacional 1)"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -144,8 +161,12 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Zaragoza": {
         "offices": [
-            {"id": "zar_zaragoza_ramiro_i", "title": "ZARAGOZA — Ramiro I"},
-            {"id": "zar_calatayud", "title": "CALATAYUD — Comisaría"},
+            {"id": "zar_jefatura_aragon_maria_agustin_34", "title": "ZARAGOZA — Jefatura Superior de Policía de Aragón (P.º de María Agustín 34)"},
+            {"id": "zar_actur_jose_atares_105", "title": "ZARAGOZA — Comisaría Actur-Rey Fernando (Avda. Jose Atarés 105)"},
+            {"id": "zar_centro_general_mayandia_3", "title": "ZARAGOZA — Comisaría Zaragoza-Centro (C/ General Mayandía 3)"},
+            {"id": "zar_delicias_av_valencia_50", "title": "ZARAGOZA — Comisaría Zaragoza-Delicias (Avda. de Valencia 50)"},
+            {"id": "zar_arrabal_almadieros_roncal_5", "title": "ZARAGOZA — Comisaría Zaragoza-Arrabal (C/ Almadieros del Roncal 5)"},
+            {"id": "zar_calatayud_coral_bilbilitana_8", "title": "CALATAYUD — Comisaría (C/ Coral Bilbilitana 8)"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -156,8 +177,8 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Bilbao": {
         "offices": [
-            {"id": "bil_bilbao", "title": "BILBAO — Comisaría"},
-            {"id": "bil_barakaldo", "title": "BARAKALDO — Comisaría"},
+            # 💬 Jefatura Superior в Bizkaia: официальный адрес (часто используют под trámites)
+            {"id": "biz_bilbao_gordoniz_8", "title": "BILBAO — C/ Gordóniz 8 (Jefatura Superior País Vasco)"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -168,8 +189,11 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Valladolid": {
         "offices": [
-            {"id": "vad_valladolid", "title": "VALLADOLID — Comisaría"},
-            {"id": "vad_medina_del_campo", "title": "MEDINA DEL CAMPO — Comisaría"},
+            # 💬 Официальные dependencias в провинции Valladolid (Policía Nacional)
+            {"id": "vad_delicias_gerona_sn", "title": "VALLADOLID — C/ Gerona s/n (Delicias)"},
+            {"id": "vad_fray_luis_5", "title": "VALLADOLID — C/ Fray Luis de Granada 5"},
+            {"id": "vad_parquesol_enrique_cubero_sn", "title": "VALLADOLID — C/ Enrique Cubero s/n (Parquesol)"},
+            {"id": "vad_medina_del_campo_valladolid_30_32", "title": "MEDINA DEL CAMPO — C/ Valladolid 30-32"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -178,10 +202,16 @@ PROVINCES: dict[str, dict[str, Any]] = {
         ],
     },
 
+
     "Malaga": {
         "offices": [
-            {"id": "mal_malaga", "title": "MÁLAGA — Comisaría"},
-            {"id": "mal_marbella", "title": "MARBELLA — Comisaría"},
+            # 💬 Официальные dependencias Policía Nacional по провинции Málaga
+            {"id": "mal_malaga_oeste", "title": "MÁLAGA (Oeste) — Pl. Manuel Azaña, 3"},
+            {"id": "mal_malaga_centro", "title": "MÁLAGA (Centro-La Merced) — C/ Ramos Marín, 4"},
+            {"id": "mal_malaga_este", "title": "MÁLAGA (Este-El Palo) — Avda. Sebastián Elcano, 144"},
+            {"id": "mal_marbella", "title": "MARBELLA — Avda. Arias de Velasco, 25"},
+            {"id": "mal_fuengirola", "title": "FUENGIROLA — Avda. Conde San Isidro, 98"},
+            {"id": "mal_torremolinos_benalmadena", "title": "TORREMOLINOS–BENALMÁDENA — C/ Skal, 12"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -192,8 +222,13 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Sevilla": {
         "offices": [
-            {"id": "sev_sevilla", "title": "SEVILLA — Comisaría"},
-            {"id": "sev_dos_hermanas", "title": "DOS HERMANAS — Comisaría"},
+            # 💬 Официальные dependencias Policía Nacional по провинции Sevilla
+            {"id": "sev_centro", "title": "SEVILLA (Centro) — Pza. de la Alameda, 39"},
+            {"id": "sev_nervion", "title": "SEVILLA (Nervión) — Avda. Cruz del Campo, 17"},
+            {"id": "sev_triana", "title": "SEVILLA (Triana) — C.º de los Descubrimientos, 2"},
+            {"id": "sev_sur", "title": "SEVILLA (Sur) — C/ Castillo Alcalá de Guadaira, 17 A"},
+            {"id": "sev_dos_hermanas", "title": "DOS HERMANAS — C/ Luis Ortega Bru s/n"},
+            {"id": "sev_alcala_guadaira", "title": "ALCALÁ DE GUADAÍRA — C/ Maestro Casado s/n"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -201,11 +236,15 @@ PROVINCES: dict[str, dict[str, Any]] = {
             {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
         ],
     },
+
 
     "Granada": {
         "offices": [
-            {"id": "gra_granada", "title": "GRANADA — Comisaría"},
-            {"id": "gra_motril", "title": "MOTRIL — Comisaría"},
+            # 💬 Policía Nacional (Granada): Granada-Centro / Granada-Norte / Motril
+            {"id": "gra_granada", "title": "GRANADA — Granada-Centro (Pl. de los Campos, 3)"},
+            {"id": "gra_motril", "title": "MOTRIL — Comisaría (C/ Aguas del Hospital s/n)"},
+            # 💬 если захочешь 3-й офис — можно добавить Granada-Norte отдельным пунктом
+            # {"id": "gra_granada_norte", "title": "GRANADA — Granada-Norte (C/ La Palmita, 1)"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -213,11 +252,13 @@ PROVINCES: dict[str, dict[str, Any]] = {
             {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
         ],
     },
+
 
     "A Coruña": {
         "offices": [
-            {"id": "cor_coruna", "title": "A CORUÑA — Comisaría"},
-            {"id": "cor_santiago", "title": "SANTIAGO — Comisaría"},
+            # 💬 A Coruña: Jefatura Superior (zona Puerto) / Santiago (Rodrigo del Padrón)
+            {"id": "cor_coruna", "title": "A CORUÑA — Jefatura Superior (Avda. do Porto, 5–7)"},
+            {"id": "cor_santiago", "title": "SANTIAGO DE COMPOSTELA — Comisaría (Avda. de Rodrigo del Padrón, 3)"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -225,11 +266,12 @@ PROVINCES: dict[str, dict[str, Any]] = {
             {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
         ],
     },
+
 
     "Asturias": {
         "offices": [
-            {"id": "ast_oviedo", "title": "OVIEDO — Comisaría"},
-            {"id": "ast_gijon", "title": "GIJÓN — Comisaría"},
+            {"id": "ast_oviedo_placido_arango_9", "title": "OVIEDO — C/ Plácido Arango Arias 9 (Jefatura Superior)"},
+            {"id": "ast_gijon_padre_maximo_gonzalez", "title": "GIJÓN — Pl. Padre Máximo González s/n (Comisaría)"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -237,11 +279,12 @@ PROVINCES: dict[str, dict[str, Any]] = {
             {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
         ],
     },
+
 
     "Cantabria": {
         "offices": [
-            {"id": "can_santander", "title": "SANTANDER — Comisaría"},
-            {"id": "can_torrelavega", "title": "TORRELAVEGA — Comisaría"},
+            {"id": "can_santander_avda_del_deporte_4", "title": "SANTANDER — Avda. del Deporte 4 (Jefatura Superior)"},
+            {"id": "can_torrelavega_joaquin_hoyos_18", "title": "TORRELAVEGA — C/ Joaquín Hoyos 18 (Comisaría)"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -249,11 +292,13 @@ PROVINCES: dict[str, dict[str, Any]] = {
             {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
         ],
     },
+
 
     "Illes Balears": {
         "offices": [
-            {"id": "bal_palma", "title": "PALMA — Comisaría"},
-            {"id": "bal_ibiza", "title": "EIVISSA/IBIZA — Comisaría"},
+            # 💬 Palma (Mallorca): Comisaría Oeste / Ibiza: Comisaría de Eivissa
+            {"id": "bal_palma", "title": "PALMA (Comisaría Oeste) — Ctra. Valldemossa, 13"},
+            {"id": "bal_ibiza", "title": "EIVISSA/IBIZA — Avda. de la Paz s/n"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -262,10 +307,12 @@ PROVINCES: dict[str, dict[str, Any]] = {
         ],
     },
 
+
     "Las Palmas": {
         "offices": [
-            {"id": "lpa_las_palmas", "title": "LAS PALMAS — Comisaría"},
-            {"id": "lpa_arrecife", "title": "ARRECIFE — Comisaría"},
+            # 💬 Las Palmas GC (Centro) / Arrecife (Lanzarote)
+            {"id": "lpa_las_palmas", "title": "LAS PALMAS G.C. (Centro) — C/ Luis Doreste Silva, 68"},
+            {"id": "lpa_arrecife", "title": "ARRECIFE (Lanzarote) — C/ Mastelero s/n"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -276,8 +323,40 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Santa Cruz de Tenerife": {
         "offices": [
-            {"id": "tfe_santa_cruz", "title": "SANTA CRUZ — Comisaría"},
-            {"id": "tfe_la_laguna", "title": "LA LAGUNA — Comisaría"},
+            # 💬 DIR3 (administracion.gob.es): Calle Robayna 23
+            {"id": "tfe_santa_cruz_robayna_23", "title": "SANTA CRUZ DE TENERIFE — Calle Robayna 23"},
+            # 💬 DIR3 (administracion.gob.es): Avenida Tres de Mayo 32
+            {"id": "tfe_tenerife_sur_tres_de_mayo_32", "title": "TENERIFE-SUR (Distrito) — Avda. Tres de Mayo 32"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Girona": {
+        "offices": [
+            # 💬 DIR3 + localizador dependencias Policía: C/ Sant Pau 2
+            {"id": "gir_girona_sant_pau_2", "title": "GIRONA — C/ Sant Pau 2 (Comisaría Provincial)"},
+            # 💬 Localizador dependencias Policía: C/ Verge de Loreto 51
+            {"id": "gir_lloret_de_mar_verge_de_loreto_51", "title": "LLORET DE MAR — C/ Verge de Loreto 51"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Tarragona": {
+        "offices": [
+            # 💬 DIR3 (administracion.gob.es): Plaça d'Orleans s/n
+            {"id": "tar_tarragona_orleans_sn", "title": "TARRAGONA — Plaça d'Orleans s/n (Comisaría Provincial)"},
+            # 💬 Localizador dependencias Policía: C/ General Moragues 54
+            {"id": "tar_reus_general_moragues_54", "title": "REUS — C/ General Moragues 54"},
+            # 💬 DIR3 (administracion.gob.es): Paseo Joan Moreira 3
+            {"id": "tar_tortosa_joan_moreira_3", "title": "TORTOSA — Paseo Joan Moreira 3 (Comisaría Local)"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -286,6 +365,7 @@ PROVINCES: dict[str, dict[str, Any]] = {
         ],
     },
 }
+
 
 
 
