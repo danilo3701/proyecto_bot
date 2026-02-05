@@ -53,26 +53,19 @@ PROVINCES: dict[str, dict[str, Any]] = {
         "offices": [
             {"id": "any", "title": "Будь-який офіс"},
 
-            # 💬 Valencia (місто)
-            {
-                "id": "val_patraix_gremis_6",
-                "title": "Valencia: Comisaría Patraix (C/ D' Els Gremis 6)",
-                "service_flags": {
-                    "ua_card": True,
-                    "huellas_tie": True,
-                    "recogida_tie": True,  # 💬 як точка по TIE/expedición
-                },
-            },
-            {
-                "id": "val_zapadores_52",
-                "title": "Valencia: Brigada Extranjería (C/ Zapadores 52)",
-                "service_flags": {
-                    # 💬 обережно: тут часто йде protección internacional/інфо, TIE може бути не по всіх потоках
-                    "ua_card": True,
-                    "huellas_tie": False,
-                    "recogida_tie": False,
-                },
-            },
+            # 💬 SOLO “CONFLICTO UCRANIA” (основні офіси в провінції Valencia)
+            {"id": "val_patraix_gremis_6", "title": "CNP COMISARIA PATRAIX EXTRANJERIA — GREMIS 6 (VALENCIA)"},
+            {"id": "val_gandia_laval_5", "title": "CNP GANDIA EXPEDICION TIE — Ciudad de Laval 5 (Gandia)"},
+            {"id": "val_alzira_pere_morell_4", "title": "CNP COMISARIA DE ALZIRA — Pere Morell 4 (ALZIRA)"},
+            {"id": "val_ontinyent_escura_2", "title": "CNP COMISARIA DE ONTENIENTE — Plaza de Escura 2 (ONTENIENTE)"},
+            {"id": "val_sagunto_progreso_14", "title": "CNP COMISARIA DE SAGUNTO — Progreso 14 (SAGUNTO)"},
+        ],
+        "services": [
+            # 💬 Зараз показуємо тільки те, що тобі треба: “конфлікт-Україна”
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+        ],
+    },
+
 
             # 💬 Міста провінції Valencia (за локатором Policía / держ. довідниками)
             {
