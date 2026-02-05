@@ -47,15 +47,18 @@ FLASH_SEC = 3
 # DEMO DATA (поки тест) — потім заміниш своїми
 # =========================
 PROVINCES: dict[str, dict[str, Any]] = {
+# ✅ общие “якорные” названия как в ICP (без эмодзи)
+# 💬 Важно: названия длинные — это нормально, зато 1:1 с сайтом.
+PROVINCES: dict[str, dict[str, Any]] = {
     "Madrid": {
         "offices": [
             {"id": "any", "title": "Будь-який офіс"},
             {"id": "mad_poblados_51", "title": "Madrid: Av. de los Poblados 51"},
         ],
         "services": [
-            {"id": "ua_card", "title": "🇺🇦 Tarjeta conflicto Ucrania"},
-            {"id": "huellas_tie", "title": "🖐️ Toma de huellas (expedición TIE)"},
-            {"id": "recogida_tie", "title": "🪪 Recogida / entrega TIE"},
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
         ],
     },
 
@@ -69,11 +72,12 @@ PROVINCES: dict[str, dict[str, Any]] = {
             {"id": "terrassa_baldrich_9", "title": "Terrassa: C/ Baldrich 9-13"},
         ],
         "services": [
-            {"id": "ua_card", "title": "🇺🇦 Tarjeta conflicto Ucrania"},
-            {"id": "huellas_tie", "title": "🖐️ Toma de huellas (expedición TIE)"},
-            {"id": "recogida_tie", "title": "🪪 Recogida / entrega TIE"},
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
         ],
     },
+
     "Valencia": {
         "offices": [
             {"id": "any", "title": "Будь-який офіс"},
@@ -81,9 +85,9 @@ PROVINCES: dict[str, dict[str, Any]] = {
             {"id": "val_zapadores_52", "title": "València: C/ Zapadores 52 (Ruzafa)"},
         ],
         "services": [
-            {"id": "ua_card", "title": "🇺🇦 Tarjeta conflicto Ucrania"},
-            {"id": "huellas_tie", "title": "🖐️ Toma de huellas (expedición TIE)"},
-            {"id": "recogida_tie", "title": "🪪 Recogida / entrega TIE"},
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
         ],
     },
 
@@ -93,12 +97,15 @@ PROVINCES: dict[str, dict[str, Any]] = {
             {"id": "a1", "title": "ALICANTE CENTRO = Example 31"},
             {"id": "a2", "title": "ELCHE = Example 32"},
         ],
+        # 💬 Приводим к тем же id, что и у остальных провинций
         "services": [
-            {"id": "ua_temp", "title": "🇺🇦 Тимчасовий захист (Ucrania)"},
-            {"id": "huellas", "title": "🖐️ Toma de huellas (renovación)"},
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
         ],
     },
 }
+
 
 
 # =========================
@@ -137,6 +144,14 @@ def _ensure_user(store: dict, user_id: str) -> dict:
     u.setdefault("province", None)
     u.setdefault("office_id", None)
     u.setdefault("service_id", None)
+    # 💬 миграция старых значений service_id (если юзер выбирал раньше)
+    legacy_map = {
+        "ua_temp": "ua_card",
+        "huellas": "huellas_tie",
+    }
+    if u.get("service_id") in legacy_map:
+        u["service_id"] = legacy_map[u["service_id"]]
+
     u.setdefault("notify_minutes", [])      # 💬 хвилини доби, коли пінгати
     u.setdefault("daily_key", None)         # 💬 YYYY-MM-DD
     u.setdefault("last_notified", None)     # 💬 YYYY-MM-DD:MIN
@@ -474,10 +489,30 @@ def _kb_pick_office(province: str) -> InlineKeyboardMarkup:
 
 def _kb_pick_service(province: str, office_id: str) -> InlineKeyboardMarkup:
     services = PROVINCES.get(province, {}).get("services", [])
-    rows = [
-        [InlineKeyboardButton(text=s["title"], callback_data=f"pick:service:{province}:{office_id}:{s['id']}")]
-        for s in services
-    ]
+    offices = PROVINCES.get(province, {}).get("offices", [])
+
+    # 💬 Ищем офис и его флаги доступности услуг
+    office = next((o for o in offices if o.get("id") == office_id), None)
+    flags = (office or {}).get("service_flags") or {}  # {service_id: True/False}
+
+    rows: list[list[InlineKeyboardButton]] = []
+
+    for s in services:
+        sid = s["id"]
+        title = s["title"]
+
+        # 💬 По умолчанию = доступно (чтобы старые данные работали)
+        allowed = flags.get(sid, True)
+
+        prefix = "✅ " if allowed else "🚫 "
+        cb = (
+            f"pick:service:{province}:{office_id}:{sid}"
+            if allowed
+            else f"pick:service_blocked:{province}:{office_id}:{sid}"
+        )
+
+        rows.append([InlineKeyboardButton(text=prefix + title, callback_data=cb)])
+
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ui:main")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -829,6 +864,11 @@ async def cb_pick_service(call: CallbackQuery):
         text=_main_text(u),
         kb=_kb_main(u),
     )
+    
+@router.callback_query(F.data.startswith("pick:service_blocked:"))
+async def cb_pick_service_blocked(call: CallbackQuery):
+    # pick:service_blocked:PROV:OFFICE:SVC
+    await call.answer("🚫 Ця послуга недоступна в цьому офісі. /nОбери інший офіс або іншу послугу.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("info:"))
