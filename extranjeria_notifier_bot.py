@@ -33,6 +33,23 @@ MADRID_TZ = ZoneInfo("Europe/Madrid")
 WINDOW_START = os.getenv("WINDOW_START", "14:00")  # HH:MM
 WINDOW_END = os.getenv("WINDOW_END", "17:00")      # HH:MM  # 💬 14:00–17:00 = 3 години
 
+# 💬 Окна времени (Мадрид)
+WINDOW_START = "14:00"
+WINDOW_END   = "17:00"
+
+# 💬 По выходным не шлём вообще
+WEEKDAYS_ONLY = True  # Mon-Fri
+
+# 💬 “Тихий день”: иногда вообще 0 уведомлений (правдоподобие)
+QUIET_DAY_PROB = 0.40  # 40% дней тишина
+
+# 💬 Редкие утренние всплески по будням
+MORNING_BURST_PROB = 0.12  # 12% уведомлений могут попасть утром
+MORNING_START = "09:10"
+MORNING_END   = "11:20"
+
+# 💬 Чтобы не долбило слишком часто
+COOLDOWN_MINUTES = 18  # минимум 18 минут между уведомлениями
 
 # 💬 Скільки рандом-сповіщень на день (для кожного увімкненого користувача)
 PINGS_PER_DAY = int(os.getenv("PINGS_PER_DAY", "6"))
@@ -675,22 +692,80 @@ def _parse_hhmm(s: str) -> tuple[int, int]:
     return int(hh), int(mm)
 
 
-def _generate_minutes_for_today() -> list[int]:
-    sh, sm = _parse_hhmm(WINDOW_START)
-    eh, em = _parse_hhmm(WINDOW_END)
+def _generate_minutes_for_today(now: dt.datetime | None = None) -> list[int]:
+    """
+    💬 Генерим уведомления правдоподобно:
+    - Пн–Пт (если WEEKDAYS_ONLY)
+    - иногда 0 уведомлений (QUIET_DAY_PROB)
+    - в основном в окне 14:00–17:00
+    - редко добавляем утренние минуты
+    - неравномерный рандом (triangular, пик ближе к середине окна)
+    - кулдаун между минутами
+    """
+    if now is None:
+        now = dt.datetime.now(MADRID_TZ)
 
-    start_min = sh * 60 + sm
-    end_min = eh * 60 + em
-    if end_min <= start_min:
-        end_min = start_min + 1
+    # 💬 По выходным — тишина
+    if WEEKDAYS_ONLY and now.weekday() >= 5:
+        return []
 
-    pool = list(range(start_min, end_min))
-    if not pool:
-        pool = [start_min]
+    # 💬 Иногда “тихий день”
+    if random.random() < QUIET_DAY_PROB:
+        return []
 
-    k = min(PINGS_PER_DAY, len(pool))
-    minutes = sorted(random.sample(pool, k=k))
-    return minutes
+    def _to_min(hhmm: str) -> int:
+        hh, mm = _parse_hhmm(hhmm)
+        return hh * 60 + mm
+
+    def _pick_biased(start_m: int, end_m: int) -> int:
+        # 💬 "колокол": чаще ближе к середине окна
+        mid = (start_m + end_m) / 2
+        x = random.triangular(start_m, end_m, mid)
+        return int(x)
+
+    main_start = _to_min(WINDOW_START)
+    main_end   = _to_min(WINDOW_END)
+    if main_end <= main_start:
+        main_end = main_start + 1
+
+    morning_start = _to_min(MORNING_START)
+    morning_end   = _to_min(MORNING_END)
+    if morning_end <= morning_start:
+        morning_end = morning_start + 1
+
+    # 💬 Сколько уведомлений на день (не всегда PINGS_PER_DAY!)
+    # 1 — чаще всего, 2 — иногда, 3 — редко
+    max_k = max(1, int(PINGS_PER_DAY))
+    roll = random.random()
+    if roll < 0.65:
+        k = 1
+    elif roll < 0.90:
+        k = 2
+    else:
+        k = 3
+    k = min(k, max_k)
+
+    picked: list[int] = []
+    tries = 0
+    while len(picked) < k and tries < 200:
+        tries += 1
+
+        # 💬 Иногда берём утро (редко)
+        use_morning = (random.random() < MORNING_BURST_PROB)
+
+        if use_morning:
+            cand = _pick_biased(morning_start, morning_end)
+        else:
+            cand = _pick_biased(main_start, main_end)
+
+        # 💬 Кулдаун: не ближе COOLDOWN_MINUTES
+        if any(abs(cand - m) < COOLDOWN_MINUTES for m in picked):
+            continue
+
+        picked.append(cand)
+
+    return sorted(set(picked))
+
 
 
 def _today_key(now: dt.datetime) -> str:
@@ -813,6 +888,11 @@ async def notifier_loop() -> None:
     while True:
         try:
             now = dt.datetime.now(MADRID_TZ)
+            # 💬 По выходным вообще не шлём (и не создаём минуты)
+            if WEEKDAYS_ONLY and now.weekday() >= 5:
+                await asyncio.sleep(60)
+                continue
+
             key = _today_key(now)
             now_min = now.hour * 60 + now.minute
             now_epoch_min = int(now.timestamp() // 60)
