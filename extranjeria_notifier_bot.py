@@ -336,11 +336,13 @@ def _ensure_user(store: dict, user_id: str) -> dict:
         u["service_id"] = legacy_map[u["service_id"]]
 
     u.setdefault("ui_seq", 0)              # 💬 щоб “мигалка” не перетирала інший екран
-    return u
-    
+
     # 💬 Статистика: не храним локально, всё в JSON
-    u.setdefault("first_seen_date", None)   # "YYYY-MM-DD" (Madrid)
-    u.setdefault("last_seen_date", None)    # "YYYY-MM-DD" (Madrid)
+    u.setdefault("first_seen_date", None)  # "YYYY-MM-DD" (Madrid)
+    u.setdefault("last_seen_date", None)   # "YYYY-MM-DD" (Madrid)
+
+    return u
+
 
 
 # =========================
@@ -1217,13 +1219,6 @@ async def admin_test_notify(message: Message):
 
 @router.message(F.text.startswith("/stats"))
 async def admin_stats(message: Message):
-    # 💬 админ-статистика (без ключей, но доступ только ADMIN_IDS)
-    if not _is_admin_chat(message.chat.id):
-        try:
-            await message.answer("Нема доступу.")
-        except Exception:
-            pass
-        return
 
     store = _load_json(DATA_PATH)
     users = store.get("users", {}) or {}
