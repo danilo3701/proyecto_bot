@@ -46,43 +46,80 @@ FLASH_SEC = 3
 # =========================
 # DEMO DATA (поки тест) — потім заміниш своїми
 # =========================
-PROVINCES: dict[str, dict[str, Any]] = {
 # ✅ общие “якорные” названия как в ICP (без эмодзи)
 # 💬 Важно: названия длинные — это нормально, зато 1:1 с сайтом.
 PROVINCES: dict[str, dict[str, Any]] = {
-    "Madrid": {
-        "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            {"id": "mad_poblados_51", "title": "Madrid: Av. de los Poblados 51"},
-        ],
-        "services": [
-            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
-            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
-            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
-        ],
-    },
-
-    "Barcelona": {
-        "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            {"id": "bcn_mallorca_213", "title": "Barcelona: C/ Mallorca 213 (Enric Granados)"},
-            {"id": "bcn_guipuzcoa_74", "title": "Barcelona: Rambla Guipuzcoa 74"},
-            {"id": "manresa_soler_5", "title": "Manresa: C/ Soler i March 5"},
-            {"id": "hospitalet_rep_8", "title": "L'Hospitalet: Pl. Repartidor 8"},
-            {"id": "terrassa_baldrich_9", "title": "Terrassa: C/ Baldrich 9-13"},
-        ],
-        "services": [
-            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
-            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
-            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
-        ],
-    },
-
     "Valencia": {
         "offices": [
             {"id": "any", "title": "Будь-який офіс"},
-            {"id": "val_gremis_6", "title": "València: C/ Dels Gremis 6 (Patraix)"},
-            {"id": "val_zapadores_52", "title": "València: C/ Zapadores 52 (Ruzafa)"},
+
+            # 💬 Valencia (місто)
+            {
+                "id": "val_patraix_gremis_6",
+                "title": "Valencia: Comisaría Patraix (C/ D' Els Gremis 6)",
+                "service_flags": {
+                    "ua_card": True,
+                    "huellas_tie": True,
+                    "recogida_tie": True,  # 💬 як точка по TIE/expedición
+                },
+            },
+            {
+                "id": "val_zapadores_52",
+                "title": "Valencia: Brigada Extranjería (C/ Zapadores 52)",
+                "service_flags": {
+                    # 💬 обережно: тут часто йде protección internacional/інфо, TIE може бути не по всіх потоках
+                    "ua_card": True,
+                    "huellas_tie": False,
+                    "recogida_tie": False,
+                },
+            },
+
+            # 💬 Міста провінції Valencia (за локатором Policía / держ. довідниками)
+            {
+                "id": "val_gandia_laval_5",
+                "title": "Gandía: C/ Ciudad de Laval 5 (EXPEDICIÓN TIE)",
+                "service_flags": {
+                    "ua_card": True,
+                    "huellas_tie": True,
+                    "recogida_tie": True,
+                },
+            },
+            {
+                "id": "val_sagunto_progreso_35",
+                "title": "Sagunto: C/ Progreso 35",
+                "service_flags": {
+                    "ua_card": True,
+                    "huellas_tie": True,
+                    "recogida_tie": False,  # 💬 поки не підтверджено = блокуємо
+                },
+            },
+            {
+                "id": "val_paterna_rosas_27",
+                "title": "Paterna: C/ de las Rosas 27",
+                "service_flags": {
+                    "ua_card": True,
+                    "huellas_tie": True,
+                    "recogida_tie": False,
+                },
+            },
+            {
+                "id": "val_onteniente_escura_2",
+                "title": "Ontinyent: Placeta L'Escura 2",
+                "service_flags": {
+                    "ua_card": True,
+                    "huellas_tie": True,
+                    "recogida_tie": False,
+                },
+            },
+            {
+                "id": "val_alzira_pere_morell_4",
+                "title": "Alzira: C/ Pere Morell 4",
+                "service_flags": {
+                    "ua_card": True,
+                    "huellas_tie": True,
+                    "recogida_tie": False,
+                },
+            },
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -91,20 +128,6 @@ PROVINCES: dict[str, dict[str, Any]] = {
         ],
     },
 
-    "Alicante": {
-        "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            {"id": "a1", "title": "ALICANTE CENTRO = Example 31"},
-            {"id": "a2", "title": "ELCHE = Example 32"},
-        ],
-        # 💬 Приводим к тем же id, что и у остальных провинций
-        "services": [
-            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
-            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
-            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
-        ],
-    },
-}
 
 
 
@@ -868,7 +891,7 @@ async def cb_pick_service(call: CallbackQuery):
 @router.callback_query(F.data.startswith("pick:service_blocked:"))
 async def cb_pick_service_blocked(call: CallbackQuery):
     # pick:service_blocked:PROV:OFFICE:SVC
-    await call.answer("🚫 Ця послуга недоступна в цьому офісі. /nОбери інший офіс або іншу послугу.", show_alert=True)
+    await call.answer("🚫 Ця послуга недоступна в цьому офісі. \nОбери інший офіс або іншу послугу.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("info:"))
