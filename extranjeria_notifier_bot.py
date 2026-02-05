@@ -1601,7 +1601,8 @@ async def cb_pick_office(call: CallbackQuery):
         store=store,
         user_id=user_id,
         text="🧩 Обери послугу:",
-        kb=_kb_pick_service(province),
+        kb=_kb_pick_service(province, office_id=office_id, selected_service_id=u.get("service_id")),
+
     )
 
 
@@ -1678,7 +1679,8 @@ async def cb_pick_service(call: CallbackQuery):
             store=store,
             user_id=user_id,
             text="🧩 Обери послугу:",
-            kb=_kb_pick_service(province, selected_service_id=u.get("service_id")),
+            kb=_kb_pick_service(province, office_id=office_id, selected_service_id=u.get("service_id")),
+
         )
         return
 
@@ -1700,8 +1702,11 @@ async def cb_pick_service(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("pick:service_blocked:"))
 async def cb_pick_service_blocked(call: CallbackQuery):
-    # pick:service_blocked:PROV:OFFICE:SVC
-    await call.answer("🚫 Ця послуга недоступна в цьому офісі. \nОбери інший офіс або іншу послугу.", show_alert=True)
+    # 💬 callback короткий: pick:service_blocked:<idx>
+    try:
+        await call.answer("🚫 Ця послуга недоступна. Обери іншу.", show_alert=True)
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data.startswith("info:"))
