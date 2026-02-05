@@ -128,6 +128,31 @@ PROVINCES: dict[str, dict[str, Any]] = {
         ],
     },
 
+    "Madrid": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            {
+                "id": "mad_poblados_51",
+                "title": "Madrid: Av. de los Poblados 51",
+                # 💬 Якщо не вкажеш service_flags, дефолт працює так:
+                # 💬 ua_card/huellas_tie = ✅, recogida_tie = 🚫
+                "service_flags": {
+                    "ua_card": True,
+                    "huellas_tie": True,
+                    "recogida_tie": False,
+                },
+            },
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+}
+
+
+
 
 
 
