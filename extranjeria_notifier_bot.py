@@ -546,7 +546,14 @@ def _kb_pick_service(province: str, office_id: str) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
 
     for s in services:
-        sid = s["id"]
+        # 💬 ЖЕСТКИЙ РЕЖИМ (как ты сказал):
+        # 💬 1) ua_card и huellas_tie = всегда доступны (пока не углубляемся в правдивость по офисам)
+        # 💬 2) recogida_tie = всегда заблокирована (пока вообще не проверяем)
+        if sid == "recogida_tie":
+            allowed = False
+        else:
+            allowed = True
+
         title = s["title"]
 
         # 💬 Дефолты по доступности:
