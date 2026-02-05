@@ -857,14 +857,27 @@ def _kb_pick_office(province: str) -> InlineKeyboardMarkup:
 
 
 
-def _kb_pick_service(province: str) -> InlineKeyboardMarkup:
+def _kb_pick_service(province: str, office_id: str | None = None, selected_service_id: str | None = None) -> InlineKeyboardMarkup:
     services = PROVINCES.get(province, {}).get("services", []) or []
-    rows = []
+    rows: list[list[InlineKeyboardButton]] = []
 
     for i, s in enumerate(services):
         title = s.get("title", "Service")
-        # 💬 callback короткий: только индекс
-        rows.append([InlineKeyboardButton(text=title, callback_data=f"pick:service:{i}")])
+        sid = s.get("id")
+
+        # 💬 “как раньше”: первые 2 = ✅, третья = 🚫
+        # 💬 если в будущем захочешь реальную матрицу доступности по офисам — сюда же вставим.
+        is_blocked = (i == 2)  # 3-я услуга
+        mark = "🚫 " if is_blocked else "✅ "
+
+        # 💬 если выбрана именно эта услуга — добавим вторую метку (чтобы видно было выбор)
+        if selected_service_id and sid == selected_service_id:
+            mark = "✅✅ " if not is_blocked else "🚫 "
+
+        btn_text = _clip_btn_text(f"{mark}{title}", max_bytes=56)
+
+        cb = f"pick:service_blocked:{i}" if is_blocked else f"pick:service:{i}"
+        rows.append([InlineKeyboardButton(text=btn_text, callback_data=cb)])
 
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pick:office_back")])
     rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="ui:main")])
