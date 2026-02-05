@@ -33,9 +33,7 @@ MADRID_TZ = ZoneInfo("Europe/Madrid")
 WINDOW_START = os.getenv("WINDOW_START", "14:00")  # HH:MM
 WINDOW_END = os.getenv("WINDOW_END", "17:00")      # HH:MM  # 💬 14:00–17:00 = 3 години
 
-# 💬 Окна времени (Мадрид)
-WINDOW_START = "14:00"
-WINDOW_END   = "17:00"
+
 
 # 💬 По выходным не шлём вообще
 WEEKDAYS_ONLY = True  # Mon-Fri
@@ -1162,11 +1160,7 @@ async def cb_sub_check(call: CallbackQuery):
             pass
         return
 
-    # 💬 подписка ок — включаем
-    u["enabled"] = True
-    _save_json_atomic(DATA_PATH, store)
 
-    await call.answer()  # 💬 гасим крутилку
 
 
     # 💬 подписка ок — включаем
