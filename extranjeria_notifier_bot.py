@@ -39,6 +39,10 @@ PINGS_PER_DAY = int(os.getenv("PINGS_PER_DAY", "6"))
 # 💬 Авто-видалення сповіщення, щоб чат був чистий
 ALERT_DELETE_AFTER_SEC = int(os.getenv("ALERT_DELETE_AFTER_SEC", "180"))
 
+# 💬 Секрет для ручного теста уведомлений (админ-команда)
+ADMIN_TEST_KEY = os.getenv("ADMIN_TEST_KEY", "").strip()
+
+
 # 💬 “Мигалка” для повідомлення "не бачу підписку"
 FLASH_SEC = 3
 
@@ -772,25 +776,19 @@ def _today_key(now: dt.datetime) -> str:
 
 async def _send_alert(user_chat_id: int, text: str) -> None:
     try:
-        msg = await bot.send_message(
+        await bot.send_message(
             chat_id=user_chat_id,
             text=text,
-            parse_mode="HTML",  # 💬 на будущее (если захочешь форматировать алерты)
+            parse_mode="HTML",  # 💬 можно жирный/курсив в тексте уведомления
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🌐 Відкрити сайт", url=BOOKING_URL)],
                 [InlineKeyboardButton(text="🧷 Меню", callback_data="ui:main")],
             ])
         )
-
-        # 💬 авто-видалення
-        asyncio.create_task(_safe_delete_message(user_chat_id, msg.message_id))
-        # 💬 але видаляти треба з затримкою
-        async def _del_later():
-            await asyncio.sleep(ALERT_DELETE_AFTER_SEC)
-            await _safe_delete_message(user_chat_id, msg.message_id)
-        asyncio.create_task(_del_later())
+        # 💬 ВАЖНО: ничего не удаляем. Уведомление остаётся в чате.
     except Exception:
         pass
+
 
 
 async def notifier_loop() -> None:
@@ -826,8 +824,33 @@ async def notifier_loop() -> None:
                     changed = True
 
                     # 💬 текст уведомления максимально короткий
-                    alert_text = "⚡️ Можливо, з’явилось вікно. Перевір швидко."
+                    # 💬 текст уведомления с контекстом (что выбрано)
+                    prov = u.get("province") or "не обрано"
+                    office_id = u.get("office_id")
+                    svc_id = u.get("service_id")
+                    
+                    office_title = office_id or "не обрано"
+                    svc_title = svc_id or "не обрано"
+                    
+                    if prov in PROVINCES:
+                        for o in PROVINCES[prov].get("offices", []):
+                            if o.get("id") == office_id:
+                                office_title = o.get("title", office_title)
+                                break
+                        for s in PROVINCES[prov].get("services", []):
+                            if s.get("id") == svc_id:
+                                svc_title = s.get("title", svc_title)
+                                break
+                    
+                    alert_text = (
+                        "⚡️ <b>Можливо, з’явилось вікно</b>\n\n"
+                        f"<i>Провінція:</i> <b>{_h(str(prov))}</b>\n"
+                        f"<i>Офіс:</i> <b>{_h(str(office_title))}</b>\n"
+                        f"<i>Послуга:</i> <b>{_h(str(svc_title))}</b>\n\n"
+                    )
+                    
                     await _send_alert(int(user_id), alert_text)
+                    
 
             if changed:
                 _save_json_atomic(DATA_PATH, store)
@@ -868,6 +891,66 @@ async def on_start(message: Message):
         await bot.delete_message(chat_id=message.chat.id, message_id=user_msg_id)
     except Exception:
         pass
+
+@router.message(F.text.startswith("/testnotify"))
+async def admin_test_notify(message: Message):
+    """
+    💬 Ручной тест уведомления:
+    /testnotify <ключ>
+    """
+    try:
+        parts = (message.text or "").strip().split(maxsplit=1)
+        key = parts[1].strip() if len(parts) > 1 else ""
+    except Exception:
+        key = ""
+
+    if not ADMIN_TEST_KEY or key != ADMIN_TEST_KEY:
+        # 💬 не светим причину, просто отказываем
+        try:
+            await message.answer("🚫 Немає доступу.")
+        except Exception:
+            pass
+        return
+
+    store = _load_json(DATA_PATH)
+    user_id = str(message.chat.id)
+    u = _ensure_user(store, user_id)
+
+    # 💬 тестовый текст = как реальное уведомление (с контекстом выбора)
+    prov = u.get("province") or "не обрано"
+    office_id = u.get("office_id")
+    svc_id = u.get("service_id")
+
+    office_title = office_id or "не обрано"
+    svc_title = svc_id or "не обрано"
+
+    if prov in PROVINCES:
+        for o in PROVINCES[prov].get("offices", []):
+            if o.get("id") == office_id:
+                office_title = o.get("title", office_title)
+                break
+        for s in PROVINCES[prov].get("services", []):
+            if s.get("id") == svc_id:
+                svc_title = s.get("title", svc_title)
+                break
+
+    alert_text = (
+        "🧪 <b>Тест сповіщення</b>\n\n"
+        f"<i>Провінція:</i> <b>{_h(str(prov))}</b>\n"
+        f"<i>Офіс:</i> <b>{_h(str(office_title))}</b>\n"
+        f"<i>Послуга:</i> <b>{_h(str(svc_title))}</b>\n\n"
+        "Якщо це прийшло = доставка працює.\n"
+        "<b>Далі перевіряємо вже логіку тригерів.</b>"
+    )
+
+    await _send_alert(message.chat.id, alert_text)
+
+    # 💬 чистим чат (по желанию): удалим команду пользователя
+    try:
+        await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+    except Exception:
+        pass
+
 
 
 @router.callback_query(F.data == "ui:noop")
