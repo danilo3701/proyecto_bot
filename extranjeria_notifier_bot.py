@@ -106,6 +106,226 @@ PROVINCES: dict[str, dict[str, Any]] = {
             {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
         ],
     },
+    "Malaga": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            # 💬 Málaga (провінція): офіси, які реально фігурують у списках по cita previa
+            {"id": "mal_creade_sorolla_145", "title": "CNP CREADE-MÁLAGA — Av. Pintor Joaquín Sorolla 145 (MÁLAGA)"},
+            {"id": "mal_prov_manuel_azana_3", "title": "CNP MÁLAGA Provincial — Plaza de Manuel Azaña 3 (MÁLAGA)"},
+            {"id": "mal_fuengirola_condes_98", "title": "CNP Fuengirola — Av. Condes de San Isidro 98 (FUENGIROLA)"},
+            {"id": "mal_marbella_duque_lerma_l3", "title": "CNP Marbella — Av. Duque de Lerma L3 (MARBELLA)"},
+            {"id": "mal_torremolinos_skal_12", "title": "CNP Torremolinos — C/ Skal 12 (TORREMOLINOS)"},
+            {"id": "mal_estepona_valle_inclan_1", "title": "CNP Estepona — C/ Valle Inclán 1 (ESTEPONA)"},
+            {"id": "mal_velez_puerta_mar_4", "title": "CNP Vélez-Málaga — C/ Puerta del Mar 4 (TORRE DEL MAR)"},
+            {"id": "mal_antequera_oaxaca_sn", "title": "CNP Antequera — C/ Ciudad de Oaxaca S/N (ANTEQUERA)"},
+            {"id": "mal_ronda_rio_tinto_2", "title": "CNP Ronda — C/ Río Tinto 2 (RONDA)"},
+            {"id": "mal_benalmadena_flores_6", "title": "CNP Benalmádena — C/ Las Flores 6 (BENALMÁDENA)"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Sevilla": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            # 💬 Sevilla (провінція): ключові точки (BPEF / Torre Norte)
+            {"id": "sev_bpef_grupo_1_dr_rafael_sn", "title": "BPEF GRUPO 1 — C/ Doctor Rafael Martínez Domínguez S/N (SEVILLA)"},
+            {"id": "sev_doc_extran_plaza_espana_torre_norte_sn", "title": "Documentación de Extranjeros — Plaza de España (Torre Norte) S/N (SEVILLA)"},
+            {"id": "sev_policia_bpef_plaza_espana_torre_norte_sn", "title": "POLICÍA BPEF — Plaza de España (Torre Norte) S/N (SEVILLA)"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Murcia": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            # 💬 Murcia (провінція): офіси, що є в переліку по cita previa
+            {"id": "mur_cartagena_menendez_pelayo_6", "title": "CNP Cartagena — Menéndez y Pelayo 6 (CARTAGENA)"},
+            {"id": "mur_lorca_pza_policia_1", "title": "CNP Lorca — Pza. Policía Nacional 1 (LORCA)"},
+            {"id": "mur_molina_canonigo_moreno_11", "title": "CNP Molina de Segura — C/ Canónigo Moreno 11 (MOLINA DE SEGURA)"},
+            {"id": "mur_sangonera_mercamurcia_15", "title": "CNP Murcia Sangonera — Avda. Mercamurcia 15 (SANGONERA LA VERDE)"},
+            {"id": "mur_yecla_rambla_34", "title": "CNP Yecla — Rambla 34 (YECLA)"},
+            {"id": "mur_oficina_extranjeros_n301_km388", "title": "Oficina de Extranjeros — Ctra Nacional 301 Km 388 (MURCIA)"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+    "Sevilla": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            {"id": "sev_blas_infante_2", "title": "Sevilla: Avenida Blas Infante 2"},
+            {"id": "sev_veintiocho_febrero_59", "title": "Sevilla: C/ Veintiocho de Febrero 59"},
+            {"id": "sev_castillo_alcala_17a", "title": "Sevilla: C/ Castillo Alcalá de Guadaira 17A"},
+        ],
+        "services": [
+            # 💬 единый набор сервисов по всем провинциям (2 доступны, 3-й всегда заблокирован логикой UI)
+            {"id": "ua_card", "title": "Tarjeta conflicto Ucrania"},
+            {"id": "huellas_tie", "title": "Toma de huellas (expedición TIE)"},
+            {"id": "recogida_tie", "title": "Recogida / entrega TIE"},
+        ],
+    },
+
+    "Malaga": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            {"id": "mal_pl_manuel_azania_3", "title": "Málaga: Pl. Manuel Azaña 3"},
+            {"id": "marbella_juan_xxiii_2", "title": "Marbella: C/ Juan XXIII 2"},
+            {"id": "fuengirola_boliches_60", "title": "Fuengirola: Av. de los Boliches 60"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "Tarjeta conflicto Ucrania"},
+            {"id": "huellas_tie", "title": "Toma de huellas (expedición TIE)"},
+            {"id": "recogida_tie", "title": "Recogida / entrega TIE"},
+        ],
+    },
+
+    "Granada": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            # 💬 Granada (provincia): сейчас в списках по “conflicto” фигурирует Baza
+            {"id": "gra_baza_alhondiga_18", "title": "BAZA — Comisaría de Baza, Alhóndiga 18"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Zaragoza": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            {"id": "zar_udex_obispo_covarrubias_sn", "title": "ZARAGOZA — Unidad Doc. Extranjeros, C/ Obispo Covarrubias s/n"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Bizkaia": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            {"id": "biz_bilbao_gordoniz_8", "title": "BILBAO — CNP Bilbao (JSP País Vasco), Gordóniz 8"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+    "Illes Balears": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            # 💬 Oficinas disponibles (Tarjeta conflicto Ucrania)
+            {"id": "bal_ciutadella_republica_arg_4", "title": "CIUTADELLA (Menorca) — República Argentina 4"},
+            {"id": "bal_mahon_san_sebastian_2", "title": "MAHÓN (Menorca) — C/ San Sebastian 2"},
+            {"id": "bal_palma_felicia_fuster_7", "title": "PALMA (Mallorca) — Felicià Fuster 7"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Las Palmas": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            # 💬 Oficinas disponibles (Tarjeta conflicto Ucrania)
+            {"id": "lp_maspalomas_moya_4", "title": "MASPALOMAS — Avenida de Moya 4"},
+            {"id": "lp_puerto_rosario_herbania_28", "title": "PUERTO ROSARIO — Herbania 28"},
+            {"id": "lp_santa_lucia_negrin_10", "title": "VECINDARIO — Doctor Negrín 10 (Santa Lucía de Tirajana)"},
+            {"id": "lp_tuineje_paco_hierro_sn", "title": "TUINEJE — Paco Hierro s/n"},
+            {"id": "lp_arrecife_mastelero_sn", "title": "ARRECIFE — Mastelero s/n"},
+            {"id": "lp_las_palmas_concordia_5", "title": "LAS PALMAS G.C. — Plaza de la Concordia 5"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Santa Cruz de Tenerife": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            # 💬 Oficinas disponibles (Tarjeta conflicto Ucrania)
+            {"id": "tfe_oue_marina_20", "title": "SANTA CRUZ — OUE, C/ La Marina 20"},
+            {"id": "tfe_adeje_pueblos_2", "title": "ADEJE — Playa de las Américas, Av. de los Pueblos 2"},
+            {"id": "tfe_puerto_cruz_campo_llarena_3", "title": "PUERTO DE LA CRUZ — Av. José del Campo y Llarena 3"},
+            {"id": "tfe_laguna_nava_grimon_66", "title": "LA LAGUNA — C/ Nava y Grimón 66"},
+            {"id": "tfe_sc_robayna_23", "title": "SANTA CRUZ — Robayna 23"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+    "Illes Balears": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            # 💬 Oficinas disponibles (Tarjeta conflicto Ucrania)
+            {"id": "bal_ciutadella_republica_arg_4", "title": "CIUTADELLA (Menorca) — República Argentina 4"},
+            {"id": "bal_mahon_san_sebastian_2", "title": "MAHÓN (Menorca) — C/ San Sebastian 2"},
+            {"id": "bal_palma_felicia_fuster_7", "title": "PALMA (Mallorca) — Felicià Fuster 7"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Las Palmas": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            # 💬 Oficinas disponibles (Tarjeta conflicto Ucrania)
+            {"id": "lp_maspalomas_moya_4", "title": "MASPALOMAS — Avenida de Moya 4"},
+            {"id": "lp_puerto_rosario_herbania_28", "title": "PUERTO ROSARIO — Herbania 28"},
+            {"id": "lp_santa_lucia_negrin_10", "title": "VECINDARIO — Doctor Negrín 10 (Santa Lucía de Tirajana)"},
+            {"id": "lp_tuineje_paco_hierro_sn", "title": "TUINEJE — Paco Hierro s/n"},
+            {"id": "lp_arrecife_mastelero_sn", "title": "ARRECIFE — Mastelero s/n"},
+            {"id": "lp_las_palmas_concordia_5", "title": "LAS PALMAS G.C. — Plaza de la Concordia 5"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Santa Cruz de Tenerife": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            # 💬 Oficinas disponibles (Tarjeta conflicto Ucrania)
+            {"id": "tfe_oue_marina_20", "title": "SANTA CRUZ — OUE, C/ La Marina 20"},
+            {"id": "tfe_adeje_pueblos_2", "title": "ADEJE — Playa de las Américas, Av. de los Pueblos 2"},
+            {"id": "tfe_puerto_cruz_campo_llarena_3", "title": "PUERTO DE LA CRUZ — Av. José del Campo y Llarena 3"},
+            {"id": "tfe_laguna_nava_grimon_66", "title": "LA LAGUNA — C/ Nava y Grimón 66"},
+            {"id": "tfe_sc_robayna_23", "title": "SANTA CRUZ — Robayna 23"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    
+
 }
 
 
