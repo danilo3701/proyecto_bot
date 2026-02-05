@@ -44,75 +44,18 @@ FLASH_SEC = 3
 
 
 # =========================
-# DEMO DATA (поки тест) — потім заміниш своїми
+
 # =========================
-# ✅ общие “якорные” названия как в ICP (без эмодзи)
-# 💬 Важно: названия длинные — это нормально, зато 1:1 с сайтом.
 PROVINCES: dict[str, dict[str, Any]] = {
     "Valencia": {
         "offices": [
             {"id": "any", "title": "Будь-який офіс"},
-
-            # 💬 SOLO “CONFLICTO UCRANIA” (основні офіси в провінції Valencia)
+            # 💬 ТОП місця, куди реально їздять “на conflicto”
             {"id": "val_patraix_gremis_6", "title": "CNP COMISARIA PATRAIX EXTRANJERIA — GREMIS 6 (VALENCIA)"},
-            {"id": "val_gandia_laval_5", "title": "CNP GANDIA EXPEDICION TIE — Ciudad de Laval 5 (Gandia)"},
+            {"id": "val_gandia_laval_5", "title": "CNP GANDIA EXPEDICION TIE — Ciudad de Laval 5 (GANDIA)"},
             {"id": "val_alzira_pere_morell_4", "title": "CNP COMISARIA DE ALZIRA — Pere Morell 4 (ALZIRA)"},
-            {"id": "val_ontinyent_escura_2", "title": "CNP COMISARIA DE ONTENIENTE — Plaza de Escura 2 (ONTENIENTE)"},
+            {"id": "val_ontinyent_escura_2", "title": "CNP COMISARIA DE ONTENIENTE — Plaza de Escura 2 (ONTINYENT)"},
             {"id": "val_sagunto_progreso_14", "title": "CNP COMISARIA DE SAGUNTO — Progreso 14 (SAGUNTO)"},
-        ],
-        "services": [
-            # 💬 Зараз показуємо тільки те, що тобі треба: “конфлікт-Україна”
-            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
-        ],
-    },
-
-
-            # 💬 Міста провінції Valencia (за локатором Policía / держ. довідниками)
-            {
-                "id": "val_gandia_laval_5",
-                "title": "Gandía: C/ Ciudad de Laval 5 (EXPEDICIÓN TIE)",
-                "service_flags": {
-                    "ua_card": True,
-                    "huellas_tie": True,
-                    "recogida_tie": True,
-                },
-            },
-            {
-                "id": "val_sagunto_progreso_35",
-                "title": "Sagunto: C/ Progreso 35",
-                "service_flags": {
-                    "ua_card": True,
-                    "huellas_tie": True,
-                    "recogida_tie": False,  # 💬 поки не підтверджено = блокуємо
-                },
-            },
-            {
-                "id": "val_paterna_rosas_27",
-                "title": "Paterna: C/ de las Rosas 27",
-                "service_flags": {
-                    "ua_card": True,
-                    "huellas_tie": True,
-                    "recogida_tie": False,
-                },
-            },
-            {
-                "id": "val_onteniente_escura_2",
-                "title": "Ontinyent: Placeta L'Escura 2",
-                "service_flags": {
-                    "ua_card": True,
-                    "huellas_tie": True,
-                    "recogida_tie": False,
-                },
-            },
-            {
-                "id": "val_alzira_pere_morell_4",
-                "title": "Alzira: C/ Pere Morell 4",
-                "service_flags": {
-                    "ua_card": True,
-                    "huellas_tie": True,
-                    "recogida_tie": False,
-                },
-            },
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -124,17 +67,38 @@ PROVINCES: dict[str, dict[str, Any]] = {
     "Madrid": {
         "offices": [
             {"id": "any", "title": "Будь-який офіс"},
-            {
-                "id": "mad_poblados_51",
-                "title": "Madrid: Av. de los Poblados 51",
-                # 💬 Якщо не вкажеш service_flags, дефолт працює так:
-                # 💬 ua_card/huellas_tie = ✅, recogida_tie = 🚫
-                "service_flags": {
-                    "ua_card": True,
-                    "huellas_tie": True,
-                    "recogida_tie": False,
-                },
-            },
+            {"id": "mad_poblados_51", "title": "MADRID — Av. de los Poblados 51"},
+            {"id": "mad_padre_piquer_18", "title": "MADRID — Av. del Padre Piquer 18"},
+            {"id": "mad_general_pardinas_90", "title": "MADRID — General Pardiñas 90"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Barcelona": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            {"id": "bcn_mallorca_213", "title": "BARCELONA — C/ Mallorca 213 (Enric Granados)"},
+            {"id": "bcn_rambla_guipuzcoa_74", "title": "BARCELONA — Rambla Guipúzcoa 74"},
+            {"id": "hospitalet_rep_8", "title": "L'HOSPITALET — Plaça del Repartidor 8"},
+            {"id": "terrassa_baldrich_9", "title": "TERRASSA — C/ Baldrich 9-13"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Alicante": {
+        "offices": [
+            {"id": "any", "title": "Будь-який офіс"},
+            {"id": "ali_alicante_centro", "title": "ALICANTE — Comisaría (Centro)"},
+            {"id": "ali_elche", "title": "ELCHE — Comisaría"},
+            {"id": "ali_torrevieja", "title": "TORREVIEJA — Comisaría"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -143,6 +107,7 @@ PROVINCES: dict[str, dict[str, Any]] = {
         ],
     },
 }
+
 
 
 
@@ -530,31 +495,17 @@ def _kb_pick_office(province: str) -> InlineKeyboardMarkup:
 
 def _kb_pick_service(province: str, office_id: str) -> InlineKeyboardMarkup:
     services = PROVINCES.get(province, {}).get("services", [])
-    offices = PROVINCES.get(province, {}).get("offices", [])
-
-    # 💬 Ищем офис и его флаги доступности услуг
-    office = next((o for o in offices if o.get("id") == office_id), None)
-    flags = (office or {}).get("service_flags") or {}  # {service_id: True/False}
 
     rows: list[list[InlineKeyboardButton]] = []
 
     for s in services:
-        # 💬 ЖЕСТКИЙ РЕЖИМ (как ты сказал):
-        # 💬 1) ua_card и huellas_tie = всегда доступны (пока не углубляемся в правдивость по офисам)
-        # 💬 2) recogida_tie = всегда заблокирована (пока вообще не проверяем)
-        if sid == "recogida_tie":
-            allowed = False
-        else:
-            allowed = True
-
+        sid = s["id"]  # 💬 важно: без этого у тебя падало/ломалось
         title = s["title"]
 
-        # 💬 Дефолты по доступности:
-        # 💬 - recogida_tie: по умолчанию ЗАБЛОКИРОВАНА (пока явно не разрешишь для офиса)
-        # 💬 - остальное: по умолчанию доступно (чтобы старые данные работали)
-        default_allowed = False if sid == "recogida_tie" else True
-        allowed = flags.get(sid, default_allowed)
-
+        # 💬 ЖЕСТКИЙ РЕЖИМ (как ты сказал):
+        # 💬 1) ua_card и huellas_tie = ✅ всегда
+        # 💬 2) recogida_tie = 🚫 всегда
+        allowed = (sid != "recogida_tie")
 
         prefix = "✅ " if allowed else "🚫 "
         cb = (
