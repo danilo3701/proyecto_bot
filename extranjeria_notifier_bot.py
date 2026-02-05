@@ -1135,7 +1135,7 @@ async def notifier_loop() -> None:
                             break
 
                 alert_text = (
-                    "⚡️ <b>Можливо, з’явився слот</b>\n\n"
+                    "‼️ <b>Можливо, з’явився слот</b> ‼️\n\n"
                     f"<i>Провінція:</i> <b>{_h(str(prov))}</b>\n"
                     f"<i>Офіс:</i> <b>{_h(str(office_title))}</b>\n"
                     f"<i>Послуга:</i> <b>{_h(str(svc_title))}</b>\n\n"
