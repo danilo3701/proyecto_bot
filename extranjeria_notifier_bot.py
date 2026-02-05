@@ -790,70 +790,214 @@ async def _send_alert(user_chat_id: int, text: str) -> None:
 
 
 async def notifier_loop() -> None:
+    """
+    Вариант S (безопасный):
+    - Не генерим "минуты" для каждого юзера.
+    - Генерим 0–3 "групповых события" в день (внутри окна времени).
+    - Каждое событие = (prov, office_id, service_id) + минута отправки.
+    - Отправка идёт только тем, у кого enabled=True и выбран совпадающий prov/service (+ office если не any).
+    - Добавляем "тишину" (иногда день без сообщений), "частичный пропуск" и cooldown, чтобы не палился паттерн.
+    """
+
+    def _window_pool_minutes() -> list[int]:
+        # 💬 Берём окно из _generate_minutes_for_today(), но тут нам нужен просто список минут
+        try:
+            sh, sm = [int(x) for x in WINDOW_START.split(":", 1)]
+            eh, em = [int(x) for x in WINDOW_END.split(":", 1)]
+        except Exception:
+            sh, sm, eh, em = 14, 0, 17, 0  # 💬 fallback
+
+        start_min = sh * 60 + sm
+        end_min = eh * 60 + em
+        if end_min <= start_min:
+            end_min = start_min + 1
+
+        pool = list(range(start_min, end_min))
+        if not pool:
+            pool = [start_min]
+        return pool
+
+    def _pick_daily_events(store: dict, day_key: str) -> dict:
+        """
+        daily_events[day_key] = {
+          "events": [{"min": 860, "prov": "...", "office_id": "...", "service_id": "..."}],
+          "fired":  ["2026-02-05:860:Valencia:any:ua_card", ...]
+        }
+        """
+        daily_events = store.setdefault("daily_events", {})
+
+        existing = daily_events.get(day_key)
+        if isinstance(existing, dict) and isinstance(existing.get("events"), list):
+            return existing
+
+        users = store.get("users", {}) or {}
+
+        # 💬 Собираем все "активные группы" по текущим выборкам пользователей
+        groups: set[tuple[str, str, str]] = set()
+        for uid, u0 in users.items():
+            u = _ensure_user(store, str(uid))
+            if not u.get("enabled"):
+                continue
+            prov = u.get("province")
+            svc = u.get("service_id")
+            office = u.get("office_id") or "any"
+            if not prov or not svc:
+                continue
+            groups.add((str(prov), str(office), str(svc)))
+
+        pool = _window_pool_minutes()
+
+        # 💬 “реалистичность”: иногда вообще тишина
+        #    25% = 0 событий, 50% = 1, 20% = 2, 5% = 3
+        r = random.random()
+        if r < 0.25:
+            n_events = 0
+        elif r < 0.75:
+            n_events = 1
+        elif r < 0.95:
+            n_events = 2
+        else:
+            n_events = 3
+
+        # 💬 Если нет групп/нет пользователей = тишина
+        if not groups or n_events == 0:
+            daily_events[day_key] = {"events": [], "fired": []}
+            return daily_events[day_key]
+
+        # 💬 Выбираем минуты и группы
+        n_events = min(n_events, len(pool))
+        chosen_minutes = sorted(random.sample(pool, k=n_events))
+
+        groups_list = list(groups)
+        events: list[dict] = []
+        for m in chosen_minutes:
+            prov, office_id, service_id = random.choice(groups_list)
+            events.append(
+                {"min": int(m), "prov": prov, "office_id": office_id, "service_id": service_id}
+            )
+
+        daily_events[day_key] = {"events": events, "fired": []}
+        return daily_events[day_key]
+
+    async def _send_after_delay(chat_id: int, text: str, delay_sec: float) -> None:
+        try:
+            if delay_sec > 0:
+                await asyncio.sleep(delay_sec)
+            await _send_alert(chat_id, text)
+        except Exception:
+            pass
+
     while True:
         try:
             now = dt.datetime.now(MADRID_TZ)
-            store = _load_json(DATA_PATH)
-            users = store.get("users", {})
-
-            now_min = now.hour * 60 + now.minute
             key = _today_key(now)
+            now_min = now.hour * 60 + now.minute
+            now_epoch_min = int(now.timestamp() // 60)
+
+            store = _load_json(DATA_PATH)
+            users = store.get("users", {}) or {}
+
+            # 💬 Получаем/создаём события дня
+            day_plan = _pick_daily_events(store, key)
+            events = day_plan.get("events", []) or []
+            fired = set(day_plan.get("fired", []) or [])
 
             changed = False
 
-            for user_id, u in users.items():
-                u = _ensure_user(store, user_id)
-
-                if not u.get("enabled"):
+            # 💬 Проверяем: нужно ли стрелять сейчас
+            for ev in events:
+                try:
+                    ev_min = int(ev.get("min"))
+                except Exception:
                     continue
 
-                # 💬 если день сменился — генерим минуты заново
-                if u.get("daily_key") != key or not u.get("notify_minutes"):
-                    u["daily_key"] = key
-                    u["notify_minutes"] = _generate_minutes_for_today()
-                    u["last_notified"] = None
+                if ev_min != now_min:
+                    continue
+
+                prov = str(ev.get("prov") or "")
+                office_id = str(ev.get("office_id") or "any")
+                svc_id = str(ev.get("service_id") or "")
+
+                if not prov or not svc_id:
+                    continue
+
+                stamp = f"{key}:{ev_min}:{prov}:{office_id}:{svc_id}"
+                if stamp in fired:
+                    continue
+
+                # 💬 фиксируем, что это событие уже отработали (важно при рестартах)
+                fired.add(stamp)
+                day_plan.setdefault("fired", []).append(stamp)
+                changed = True
+
+                # 💬 формируем текст уведомления один раз на событие
+                office_title = office_id or "не обрано"
+                svc_title = svc_id or "не обрано"
+
+                if prov in PROVINCES:
+                    for o in PROVINCES[prov].get("offices", []):
+                        if o.get("id") == office_id:
+                            office_title = o.get("title", office_title)
+                            break
+                    for s in PROVINCES[prov].get("services", []):
+                        if s.get("id") == svc_id:
+                            svc_title = s.get("title", svc_title)
+                            break
+
+                alert_text = (
+                    "⚡️ <b>Можливо, з’явився слот</b>\n\n"
+                    f"<i>Провінція:</i> <b>{_h(str(prov))}</b>\n"
+                    f"<i>Офіс:</i> <b>{_h(str(office_title))}</b>\n"
+                    f"<i>Послуга:</i> <b>{_h(str(svc_title))}</b>\n\n"
+                )
+
+                # 💬 рассылаем только по совпадающей группе
+                for user_id, u0 in users.items():
+                    u = _ensure_user(store, str(user_id))
+
+                    if not u.get("enabled"):
+                        continue
+
+                    # 💬 обязательные совпадения
+                    if str(u.get("province") or "") != prov:
+                        continue
+                    if str(u.get("service_id") or "") != svc_id:
+                        continue
+
+                    u_office = str(u.get("office_id") or "any")
+
+                    # 💬 office-логика:
+                    # - если пользователь выбрал "any" = подходит любой office_id в этом prov
+                    # - если пользователь выбрал конкретный office = подходит только он
+                    if u_office != "any" and u_office != office_id:
+                        continue
+
+                    # 💬 анти-палево: иногда пропускаем часть людей (чтобы не всем “одинаково”)
+                    if random.random() < 0.15:
+                        continue
+
+                    # 💬 cooldown на пользователя (чтобы не спамить 2 события подряд)
+                    last_min = u.get("last_alert_min")
+                    try:
+                        last_min = int(last_min) if last_min is not None else None
+                    except Exception:
+                        last_min = None
+
+                    if last_min is not None and (now_epoch_min - last_min) < 25:
+                        continue
+
+                    u["last_alert_min"] = now_epoch_min
                     changed = True
 
-                last = u.get("last_notified")
-                stamp = f"{key}:{now_min}"
-
-                if now_min in u.get("notify_minutes", []) and last != stamp:
-                    u["last_notified"] = stamp
-                    changed = True
-
-                    # 💬 текст уведомления максимально короткий
-                    # 💬 текст уведомления с контекстом (что выбрано)
-                    prov = u.get("province") or "не обрано"
-                    office_id = u.get("office_id")
-                    svc_id = u.get("service_id")
-                    
-                    office_title = office_id or "не обрано"
-                    svc_title = svc_id or "не обрано"
-                    
-                    if prov in PROVINCES:
-                        for o in PROVINCES[prov].get("offices", []):
-                            if o.get("id") == office_id:
-                                office_title = o.get("title", office_title)
-                                break
-                        for s in PROVINCES[prov].get("services", []):
-                            if s.get("id") == svc_id:
-                                svc_title = s.get("title", svc_title)
-                                break
-                    
-                    alert_text = (
-                        "⚡️ <b>Можливо, з’явилось вікно</b>\n\n"
-                        f"<i>Провінція:</i> <b>{_h(str(prov))}</b>\n"
-                        f"<i>Офіс:</i> <b>{_h(str(office_title))}</b>\n"
-                        f"<i>Послуга:</i> <b>{_h(str(svc_title))}</b>\n\n"
-                    )
-                    
-                    await _send_alert(int(user_id), alert_text)
-                    
+                    # 💬 лёгкий джиттер 0–120 сек, чтобы рассылка выглядела "живой"
+                    jitter = random.randint(0, 120)
+                    asyncio.create_task(_send_after_delay(int(user_id), alert_text, float(jitter)))
 
             if changed:
                 _save_json_atomic(DATA_PATH, store)
 
         except Exception:
+            # 💬 не падаем из-за одной ошибки — цикл живёт дальше
             pass
 
         await asyncio.sleep(20)
