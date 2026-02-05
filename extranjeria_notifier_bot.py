@@ -522,6 +522,29 @@ def _grid_buttons(btns: list[InlineKeyboardButton], cols: int = 3) -> list[list[
     if row:
         rows.append(row)
     return rows
+    
+def _clip_btn_text(text: str, max_bytes: int = 56) -> str:
+    # 💬 Telegram ограничивает длину текста кнопки (и в целом лучше не рисковать).
+    # 💬 Режем по UTF-8 байтам, чтобы не ломать эмодзи/акценты.
+    raw = (text or "").strip()
+    b = raw.encode("utf-8")
+    if len(b) <= max_bytes:
+        return raw
+
+    out_chars: list[str] = []
+    used = 0
+    # 💬 оставим место под "…"
+    limit = max(1, max_bytes - len("…".encode("utf-8")))
+
+    for ch in raw:
+        cb = ch.encode("utf-8")
+        if used + len(cb) > limit:
+            break
+        out_chars.append(ch)
+        used += len(cb)
+
+    return "".join(out_chars).rstrip() + "…"
+
 
 
 async def _edit_or_send_ui(
@@ -1581,29 +1604,76 @@ async def _go_pick_province(call: CallbackQuery) -> None:
         kb=_kb_pick_province(),
     )
 
-
-@router.callback_query(F.data.startswith("pick:service:"))
-async def cb_pick_service(call: CallbackQuery):
-    await call.answer()
-    # pick:service:PROV:OFFICE:SVC
-    parts = call.data.split(":")
-    province = parts[2]
-    office_id = parts[3]
-    service_id = parts[4]
+@router.callback_query(F.data == "pick:office_back")
+async def cb_pick_office_back(call: CallbackQuery):
+    try:
+        await call.answer()
+    except Exception:
+        pass
 
     store = _load_json(DATA_PATH)
     user_id = str(call.message.chat.id)
     u = _ensure_user(store, user_id)
 
-    if province not in PROVINCES:
-        await call.answer("Невідоме місто.", show_alert=True)
+    province = u.get("province")
+    if not province or province not in PROVINCES:
+        await _go_pick_province(call)
         return
 
-    u["province"] = province
-    u["office_id"] = office_id
+    await _edit_or_send_ui(
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text=f"🏢 Обери офіс в {province}:",
+        kb=_kb_pick_office(province),
+    )
+
+@router.callback_query(F.data.startswith("pick:service:"))
+async def cb_pick_service(call: CallbackQuery):
+    # 💬 один ответ на callback
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
+    parts = (call.data or "").split(":")
+    if len(parts) < 3:
+        return
+
+    try:
+        service_idx = int(parts[2])
+    except Exception:
+        return
+
+    store = _load_json(DATA_PATH)
+    user_id = str(call.message.chat.id)
+    u = _ensure_user(store, user_id)
+
+    province = u.get("province")
+    office_id = u.get("office_id")
+
+    # 💬 если контекста нет — возвращаем в выбор провинции
+    if (not province) or (province not in PROVINCES) or (not office_id):
+        await _go_pick_province(call)
+        return
+
+    services = PROVINCES[province].get("services", []) or []
+    if service_idx < 0 or service_idx >= len(services):
+        # 💬 список обновился/битый индекс — перерисуем услуги
+        await _edit_or_send_ui(
+            chat_id=call.message.chat.id,
+            store=store,
+            user_id=user_id,
+            text="🧩 Обери послугу:",
+            kb=_kb_pick_service(province, selected_service_id=u.get("service_id")),
+        )
+        return
+
+    service_id = services[service_idx].get("id")
+
     u["service_id"] = service_id
-    u["enabled"] = False  # 💬 включение только после подписки
-    u.pop("last_alert_min", None)  # 💬 сбрасываем cooldown при смене выбора
+    u["enabled"] = False
+    u.pop("last_alert_min", None)
 
     _save_json_atomic(DATA_PATH, store)
 
@@ -1614,7 +1684,7 @@ async def cb_pick_service(call: CallbackQuery):
         text=_main_text(u),
         kb=_kb_main(u),
     )
-    
+
 @router.callback_query(F.data.startswith("pick:service_blocked:"))
 async def cb_pick_service_blocked(call: CallbackQuery):
     # pick:service_blocked:PROV:OFFICE:SVC
