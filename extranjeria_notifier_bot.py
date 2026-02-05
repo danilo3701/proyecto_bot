@@ -916,7 +916,7 @@ async def notifier_loop() -> None:
                     changed = True
 
                     # 💬 лёгкий джиттер 0–120 сек, чтобы рассылка выглядела "живой"
-                    jitter = random.randint(0, 120)
+                    jitter = random.randint(0, 30)
                     asyncio.create_task(_send_after_delay(int(user_id), alert_text, float(jitter)))
 
             if changed:
