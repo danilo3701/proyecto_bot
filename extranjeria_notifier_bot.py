@@ -50,36 +50,43 @@ PROVINCES: dict[str, dict[str, Any]] = {
     "Madrid": {
         "offices": [
             {"id": "any", "title": "Будь-який офіс"},
-            {"id": "m1", "title": "OFICINA MADRID = Calle Example 1"},
-            {"id": "m2", "title": "OFICINA VALLECAS = Plaza Example 2"},
+            {"id": "mad_poblados_51", "title": "Madrid: Av. de los Poblados 51"},
         ],
         "services": [
-            {"id": "ua_temp", "title": "🇺🇦 Тимчасовий захист (Ucrania)"},
-            {"id": "huellas", "title": "🖐️ Toma de huellas (renovación)"},
+            {"id": "ua_card", "title": "🇺🇦 Tarjeta conflicto Ucrania"},
+            {"id": "huellas_tie", "title": "🖐️ Toma de huellas (expedición TIE)"},
+            {"id": "recogida_tie", "title": "🪪 Recogida / entrega TIE"},
         ],
     },
+
     "Barcelona": {
         "offices": [
             {"id": "any", "title": "Будь-який офіс"},
-            {"id": "b1", "title": "EXTRANJERIA BCN = Rambla Example 10"},
-            {"id": "b2", "title": "CNP BCN = Calle Example 11"},
+            {"id": "bcn_mallorca_213", "title": "Barcelona: C/ Mallorca 213 (Enric Granados)"},
+            {"id": "bcn_guipuzcoa_74", "title": "Barcelona: Rambla Guipuzcoa 74"},
+            {"id": "manresa_soler_5", "title": "Manresa: C/ Soler i March 5"},
+            {"id": "hospitalet_rep_8", "title": "L'Hospitalet: Pl. Repartidor 8"},
+            {"id": "terrassa_baldrich_9", "title": "Terrassa: C/ Baldrich 9-13"},
         ],
         "services": [
-            {"id": "ua_temp", "title": "🇺🇦 Тимчасовий захист (Ucrania)"},
-            {"id": "huellas", "title": "🖐️ Toma de huellas (renovación)"},
+            {"id": "ua_card", "title": "🇺🇦 Tarjeta conflicto Ucrania"},
+            {"id": "huellas_tie", "title": "🖐️ Toma de huellas (expedición TIE)"},
+            {"id": "recogida_tie", "title": "🪪 Recogida / entrega TIE"},
         ],
     },
     "Valencia": {
         "offices": [
             {"id": "any", "title": "Будь-який офіс"},
-            {"id": "v1", "title": "PATERNA = Example 21"},
-            {"id": "v2", "title": "VALENCIA ZAPADORES = Example 22"},
+            {"id": "val_gremis_6", "title": "València: C/ Dels Gremis 6 (Patraix)"},
+            {"id": "val_zapadores_52", "title": "València: C/ Zapadores 52 (Ruzafa)"},
         ],
         "services": [
-            {"id": "ua_temp", "title": "🇺🇦 Тимчасовий захист (Ucrania)"},
-            {"id": "huellas", "title": "🖐️ Toma de huellas (renovación)"},
+            {"id": "ua_card", "title": "🇺🇦 Tarjeta conflicto Ucrania"},
+            {"id": "huellas_tie", "title": "🖐️ Toma de huellas (expedición TIE)"},
+            {"id": "recogida_tie", "title": "🪪 Recogida / entrega TIE"},
         ],
     },
+
     "Alicante": {
         "offices": [
             {"id": "any", "title": "Будь-який офіс"},
