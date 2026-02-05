@@ -819,40 +819,33 @@ def _kb_pick_province() -> InlineKeyboardMarkup:
 
 
 def _kb_pick_office(province: str) -> InlineKeyboardMarkup:
-    offices = PROVINCES.get(province, {}).get("offices", [])
-    btns = [
-        InlineKeyboardButton(text=o["title"], callback_data=f"pick:office:{province}:{o['id']}")
-        for o in offices
-    ]
-    rows = _grid_buttons(btns, cols=1)
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ui:main")])
+    offices = PROVINCES.get(province, {}).get("offices", []) or []
+    rows = []
+
+    for i, o in enumerate(offices):
+        title = o.get("title", "Office")
+        # 💬 callback короткий: только индекс (влезает всегда)
+        rows.append([InlineKeyboardButton(text=title, callback_data=f"pick:office:{i}")])
+
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pick:province")])
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="ui:main")])
+
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _kb_pick_service(province: str, office_id: str) -> InlineKeyboardMarkup:
-    services = PROVINCES.get(province, {}).get("services", [])
 
-    rows: list[list[InlineKeyboardButton]] = []
+def _kb_pick_service(province: str) -> InlineKeyboardMarkup:
+    services = PROVINCES.get(province, {}).get("services", []) or []
+    rows = []
 
-    for s in services:
-        sid = s["id"]  # 💬 важно: без этого у тебя падало/ломалось
-        title = s["title"]
+    for i, s in enumerate(services):
+        title = s.get("title", "Service")
+        # 💬 callback короткий: только индекс
+        rows.append([InlineKeyboardButton(text=title, callback_data=f"pick:service:{i}")])
 
-        # 💬 ЖЕСТКИЙ РЕЖИМ (как ты сказал):
-        # 💬 1) ua_card и huellas_tie = ✅ всегда
-        # 💬 2) recogida_tie = 🚫 всегда
-        allowed = (sid != "recogida_tie")
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="pick:office_back")])
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="ui:main")])
 
-        prefix = "✅ " if allowed else "🚫 "
-        cb = (
-            f"pick:service:{province}:{office_id}:{sid}"
-            if allowed
-            else f"pick:service_blocked:{province}:{office_id}:{sid}"
-        )
-
-        rows.append([InlineKeyboardButton(text=prefix + title, callback_data=cb)])
-
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="ui:main")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1522,47 +1515,32 @@ async def cb_pick_prov_value(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("pick:office:"))
 async def cb_pick_office(call: CallbackQuery):
-    # 💬 1) всегда гасим "крутилку"
-    await call.answer()
-
-    # 💬 2) безопасный парсинг callback
     try:
-        _, _, province, office_id = call.data.split(":", 3)  # pick:office:PROV:OFFICE
+        await call.answer()
     except Exception:
-        # 💬 если прилетел битый callback (старый/обрезанный)
-        await call.answer("⚠️ Помилка кнопки. Спробуй обрати провінцію ще раз.", show_alert=True)
-        store = _load_json(DATA_PATH)
-        user_id = str(call.message.chat.id)
-        _ensure_user(store, user_id)
-        await _edit_or_send_ui(
-            chat_id=call.message.chat.id,
-            store=store,
-            user_id=user_id,
-            text="🗺️ Обери місто/провінцію:",
-            kb=_kb_pick_province(),
-        )
-        return
+        pass
+
+    parts = (call.data or "").split(":")
+    if len(parts) < 3:
+        return await _go_pick_province(call)
+
+    # 💬 получаем индекс офиса
+    try:
+        office_idx = int(parts[2])
+    except Exception:
+        return await _go_pick_province(call)
 
     store = _load_json(DATA_PATH)
     user_id = str(call.message.chat.id)
     u = _ensure_user(store, user_id)
 
-    # 💬 3) валидация провинции
-    if province not in PROVINCES:
-        await call.answer("⚠️ Провінція не знайдена. Онови вибір.", show_alert=True)
-        await _edit_or_send_ui(
-            chat_id=call.message.chat.id,
-            store=store,
-            user_id=user_id,
-            text="🗺️ Обери місто/провінцію:",
-            kb=_kb_pick_province(),
-        )
-        return
+    province = u.get("province")
+    if not province or province not in PROVINCES:
+        return await _go_pick_province(call)
 
-    # 💬 4) валидация офиса (это и ловит "ONTINYENT не открывается" после правок)
-    valid_office_ids = {o.get("id") for o in PROVINCES[province].get("offices", [])}
-    if office_id not in valid_office_ids:
-        await call.answer("⚠️ Офіс не знайдено (можливо список оновився). Обери ще раз.", show_alert=True)
+    offices = PROVINCES[province].get("offices", []) or []
+    if office_idx < 0 or office_idx >= len(offices):
+        # 💬 если список обновился — показываем заново офисы
         await _edit_or_send_ui(
             chat_id=call.message.chat.id,
             store=store,
@@ -1572,22 +1550,35 @@ async def cb_pick_office(call: CallbackQuery):
         )
         return
 
-    # 💬 5) сохраняем и идём дальше как раньше
-    u["province"] = province
+    office_id = offices[office_idx].get("id")
+
+    # 💬 сохраняем как раньше
     u["office_id"] = office_id
     u["service_id"] = None
     u["enabled"] = False
-    u.pop("last_alert_min", None)  # 💬 сбрасываем cooldown при смене выбора
+    u.pop("last_alert_min", None)
 
     _save_json_atomic(DATA_PATH, store)
 
-    text = "🧩 Обери послугу:"
     await _edit_or_send_ui(
         chat_id=call.message.chat.id,
         store=store,
         user_id=user_id,
-        text=text,
-        kb=_kb_pick_service(province, office_id),
+        text="🧩 Обери послугу:",
+        kb=_kb_pick_service(province),
+    )
+
+
+async def _go_pick_province(call: CallbackQuery) -> None:
+    store = _load_json(DATA_PATH)
+    user_id = str(call.message.chat.id)
+    _ensure_user(store, user_id)
+    await _edit_or_send_ui(
+        chat_id=call.message.chat.id,
+        store=store,
+        user_id=user_id,
+        text="🗺️ Обери місто/провінцію:",
+        kb=_kb_pick_province(),
     )
 
 
