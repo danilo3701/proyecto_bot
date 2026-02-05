@@ -933,6 +933,10 @@ async def notifier_loop() -> None:
                 # 💬 фиксируем, что это событие уже отработали (важно при рестартах)
                 fired.add(stamp)
                 day_plan.setdefault("fired", []).append(stamp)
+                # 💬 ВАЖНО: фиксируем fired СРАЗУ, до рассылки
+                # 💬 Если будет redeploy/краш в середине отправки — событие не повторится
+                _save_json_atomic(DATA_PATH, store)
+                
                 changed = True
 
                 # 💬 формируем текст уведомления один раз на событие
@@ -1229,6 +1233,8 @@ async def cb_pick_prov_value(call: CallbackQuery):
     u["office_id"] = None
     u["service_id"] = None
     u["enabled"] = False  # 💬 смена сервиса = лучше выключить, чтобы не путать
+    u.pop("last_alert_min", None)  # 💬 сбрасываем cooldown при смене выбора
+
 
     _save_json_atomic(DATA_PATH, store)
 
@@ -1259,6 +1265,7 @@ async def cb_pick_office(call: CallbackQuery):
     u["office_id"] = office_id
     u["service_id"] = None
     u["enabled"] = False
+    u.pop("last_alert_min", None)  # 💬 сбрасываем cooldown при смене выбора
 
     _save_json_atomic(DATA_PATH, store)
 
@@ -1293,6 +1300,7 @@ async def cb_pick_service(call: CallbackQuery):
     u["office_id"] = office_id
     u["service_id"] = service_id
     u["enabled"] = False  # 💬 включение только после подписки
+    u.pop("last_alert_min", None)  # 💬 сбрасываем cooldown при смене выбора
 
     _save_json_atomic(DATA_PATH, store)
 
