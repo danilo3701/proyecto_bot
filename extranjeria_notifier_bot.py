@@ -396,10 +396,14 @@ def _kb_main(u: dict) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📌 Важливо", callback_data="info:important:0"),
         ],
         [
+            InlineKeyboardButton(text="🧾 Як подавати", callback_data="info:apply:0"),
             InlineKeyboardButton(text="ℹ️ Як це працює", callback_data="info:how:0"),
+        ],
+        [
             InlineKeyboardButton(text="🌐 Сайт сіти", url=BOOKING_URL),  # 💬 прямий доступ
         ],
     ])
+
 
 
 
@@ -568,6 +572,85 @@ HOW_PAGES = [
     "<b>Не покладайся на нього на 100%</b>",
 ]
 
+APPLY_PAGES = [
+    "<b>🧾 Як подавати (1/7)</b>\n\n"
+    "<b>Тимчасовий захист</b>\n"
+    "Це документ формату A4.\n"
+    "Зазвичай містить\n"
+    "• особисті дані\n"
+    "• фото\n"
+    "• відбитки пальців\n\n"
+    "На документі буде <b>NIE</b> (присвоюється під час оформлення).",
+
+    "<b>🧾 Як подавати (2/7)</b>\n\n"
+    "<b>BOE</b>\n"
+    "Офіційний документ тут\n"
+    "👉 <a href=\"https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-4157\">Відкрити BOE</a>\n\n"
+    "<b>Резолюція</b>\n"
+    "Скачати резолюцію можна тут\n"
+    "👉 <a href=\"https://servicio.mir.es/nfrontal/asi_desc_res.html\">Скачати резолюцію</a>",
+
+    "<b>🧾 Як подавати (3/7)</b>\n\n"
+    "<b>Сіта для тимчасового захисту</b>\n"
+    "<i>POLICÍA - UCRANIA</i>\n"
+    "<i>SOLICITUD PROTECCIÓN TEMPORAL DESPLAZADOS</i>\n\n"
+    "У багатьох містах сіту беруть\n"
+    "• телефоном\n"
+    "• або через email\n\n"
+    "Через сайт Extranjería це буває рідше.\n"
+    "Сигнал від бота не є гарантія, але час економить.",
+
+    "<b>🧾 Як подавати (4/7)</b>\n\n"
+    "<b>Порядок</b>\n"
+    "1) Отримуєш тимчасовий захист (NIE присвоюється автоматично)\n"
+    "2) Потім оформляєш <b>TIE</b> (резиденція) по тимчасовому захисту\n\n"
+    "<b>Відео</b>\n"
+    "👉 <a href=\"https://youtu.be/7mVeBc6SRy0\">Як брати сіту на тимчасовий захист</a>\n"
+    "👉 <a href=\"https://youtu.be/I2noggh5AKo\">Як брати сіту на TIE і заповнювати документи</a>",
+
+    "<b>🧾 Як подавати (5/7)</b>\n\n"
+    "<b>Телефони для запису</b>\n"
+    "• Мадрид (9:00–17:00) <code>+34 666 800 194</code>\n"
+    "• Малага (8:00–18:00) <code>+34 628 216 478</code>\n"
+    "• Барселона <code>+34 932 382 199</code>\n\n"
+    "<b>ЄС продовжив захист до 2027</b>\n"
+    "Почитати\n"
+    "👉 <a href=\"https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32025D1460\">Рішення ЄС</a>\n\n"
+    "Для Іспанії орієнтуємось на публікацію в BOE.",
+
+    "<b>🧾 Як подавати (6/7)</b>\n\n"
+    "<b>Email для запису</b>\n"
+    "<code>algeciras.ucrif3@policia.es</code>\n"
+    "<code>cadiz.acilo@policia.es</code>\n"
+    "<code>huelva.acilos@policia.es</code>\n"
+    "<code>almeria.bdep@policia.es</code>\n"
+    "<code>huesca.ucrania@policia.es</code>\n"
+    "<code>teruel.bped@policia.es</code>\n"
+    "<code>zaragoza.udeve@policia.es</code>\n"
+    "<code>arrecife.dokumentacion@policia.es</code>\n"
+    "<code>laspalmas.protecciontemporal@policia.es</code>\n"
+    "<code>prosario.extdoc@policia.es</code>\n"
+    "<code>sctenerife.citaudex@policia.es</code>\n"
+    "<code>santander.protecciontemporal@policia.es</code>\n"
+    "<code>albacete.asilo@policia.es</code>\n"
+    "<code>albacete.goe@policia.es</code>\n"
+    "<code>ciudadreal.extranjeria@policia.es</code>\n"
+    "<code>paterna.ge@policia.es</code>\n"
+    "<code>sagunto.bpef@policia.es</code>\n"
+    "<code>valencia.proteccioninternacional1@policia.es</code>\n\n"
+    "<i>Примітка</i>\n"
+    "Про <code>sagunto.bpef@policia.es</code> писали, що зараз можуть не робити, але це може змінитися.",
+
+    "<b>🧾 Як подавати (7/7)</b>\n\n"
+    "<b>Що писати в листі</b>\n"
+    "• <i>Nombre y apellido</i> Ім’я і прізвище як у закордонному паспорті\n"
+    "• <i>Domicilio</i> Адреса проживання (часто має збігатися з провінцією)\n"
+    "• <i>Copia del pasaporte</i> Копія першої сторінки паспорта\n\n"
+    "<b>Тема листа</b>\n"
+    "Дехто писав, що інколи відповідають швидше, якщо вказати\n"
+    "<code>Asilo Ucrania urgente</code>\n"
+    "але це не правило.",
+]
 
 
 def _kb_pager(prefix: str, page: int, total: int) -> InlineKeyboardMarkup:
@@ -1335,11 +1418,19 @@ async def cb_info(call: CallbackQuery):
         page = max(0, min(page, len(pages) - 1))
         text = pages[page]
         kb = _kb_pager("important", page, len(pages))
+
+    elif kind == "apply":
+        pages = APPLY_PAGES
+        page = max(0, min(page, len(pages) - 1))
+        text = pages[page]
+        kb = _kb_pager("apply", page, len(pages))
+
     else:
         pages = HOW_PAGES
         page = max(0, min(page, len(pages) - 1))
         text = pages[page]
         kb = _kb_pager("how", page, len(pages))
+
 
     await _edit_or_send_ui(
         chat_id=call.message.chat.id,
