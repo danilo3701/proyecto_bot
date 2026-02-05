@@ -1522,17 +1522,57 @@ async def cb_pick_prov_value(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("pick:office:"))
 async def cb_pick_office(call: CallbackQuery):
+    # 💬 1) всегда гасим "крутилку"
     await call.answer()
-    _, _, province, office_id = call.data.split(":", 3)  # pick:office:PROV:OFFICE
+
+    # 💬 2) безопасный парсинг callback
+    try:
+        _, _, province, office_id = call.data.split(":", 3)  # pick:office:PROV:OFFICE
+    except Exception:
+        # 💬 если прилетел битый callback (старый/обрезанный)
+        await call.answer("⚠️ Помилка кнопки. Спробуй обрати провінцію ще раз.", show_alert=True)
+        store = _load_json(DATA_PATH)
+        user_id = str(call.message.chat.id)
+        _ensure_user(store, user_id)
+        await _edit_or_send_ui(
+            chat_id=call.message.chat.id,
+            store=store,
+            user_id=user_id,
+            text="🗺️ Обери місто/провінцію:",
+            kb=_kb_pick_province(),
+        )
+        return
 
     store = _load_json(DATA_PATH)
     user_id = str(call.message.chat.id)
     u = _ensure_user(store, user_id)
 
+    # 💬 3) валидация провинции
     if province not in PROVINCES:
-        await call.answer("Невідоме місто.", show_alert=True)
+        await call.answer("⚠️ Провінція не знайдена. Онови вибір.", show_alert=True)
+        await _edit_or_send_ui(
+            chat_id=call.message.chat.id,
+            store=store,
+            user_id=user_id,
+            text="🗺️ Обери місто/провінцію:",
+            kb=_kb_pick_province(),
+        )
         return
 
+    # 💬 4) валидация офиса (это и ловит "ONTINYENT не открывается" после правок)
+    valid_office_ids = {o.get("id") for o in PROVINCES[province].get("offices", [])}
+    if office_id not in valid_office_ids:
+        await call.answer("⚠️ Офіс не знайдено (можливо список оновився). Обери ще раз.", show_alert=True)
+        await _edit_or_send_ui(
+            chat_id=call.message.chat.id,
+            store=store,
+            user_id=user_id,
+            text=f"🏢 Обери офіс в {province}:",
+            kb=_kb_pick_office(province),
+        )
+        return
+
+    # 💬 5) сохраняем и идём дальше как раньше
     u["province"] = province
     u["office_id"] = office_id
     u["service_id"] = None
