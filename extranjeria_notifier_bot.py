@@ -31,7 +31,8 @@ BOOKING_URL = os.getenv("BOOKING_URL", "https://sede.administracionespublicas.go
 # 💬 Вікно сповіщень (не показуємо користувачу)
 MADRID_TZ = ZoneInfo("Europe/Madrid")
 WINDOW_START = os.getenv("WINDOW_START", "14:00")  # HH:MM
-WINDOW_END = os.getenv("WINDOW_END", "16:00")      # HH:MM
+WINDOW_END = os.getenv("WINDOW_END", "17:00")      # HH:MM  # 💬 14:00–17:00 = 3 години
+
 
 # 💬 Скільки рандом-сповіщень на день (для кожного увімкненого користувача)
 PINGS_PER_DAY = int(os.getenv("PINGS_PER_DAY", "6"))
@@ -51,7 +52,6 @@ FLASH_SEC = 3
 PROVINCES: dict[str, dict[str, Any]] = {
     "Valencia": {
         "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
             # 💬 ТОП місця, куди реально їздять “на conflicto”
             {"id": "val_patraix_gremis_6", "title": "CNP COMISARIA PATRAIX EXTRANJERIA — GREMIS 6 (VALENCIA)"},
             {"id": "val_gandia_laval_5", "title": "CNP GANDIA EXPEDICION TIE — Ciudad de Laval 5 (GANDIA)"},
@@ -68,10 +68,9 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Madrid": {
         "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
             {"id": "mad_poblados_51", "title": "MADRID — Av. de los Poblados 51"},
-            {"id": "mad_padre_piquer_18", "title": "MADRID — Av. del Padre Piquer 18"},
-            {"id": "mad_general_pardinas_90", "title": "MADRID — General Pardiñas 90"},
+            {"id": "mad_leganes_8", "title": "LEGANÉS — Av. de la Universidad 8"},
+            {"id": "mad_alcala_16", "title": "ALCALÁ DE HENARES — C/ Brihuega 16"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -82,11 +81,8 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Barcelona": {
         "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            {"id": "bcn_mallorca_213", "title": "BARCELONA — C/ Mallorca 213 (Enric Granados)"},
-            {"id": "bcn_rambla_guipuzcoa_74", "title": "BARCELONA — Rambla Guipúzcoa 74"},
-            {"id": "hospitalet_rep_8", "title": "L'HOSPITALET — Plaça del Repartidor 8"},
-            {"id": "terrassa_baldrich_9", "title": "TERRASSA — C/ Baldrich 9-13"},
+            {"id": "bcn_rambla_guipuscoa_74", "title": "BARCELONA — Rambla de Guipúscoa 74"},
+            {"id": "bcn_sant_adrià_eduard_maristany_128", "title": "SANT ADRIÀ — Eduard Maristany 128"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -97,46 +93,8 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Alicante": {
         "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            {"id": "ali_alicante_centro", "title": "ALICANTE — Comisaría (Centro)"},
-            {"id": "ali_elche", "title": "ELCHE — Comisaría"},
-            {"id": "ali_torrevieja", "title": "TORREVIEJA — Comisaría"},
-        ],
-        "services": [
-            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
-            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
-            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
-        ],
-    },
-    "Malaga": {
-        "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            # 💬 Málaga (провінція): офіси, які реально фігурують у списках по cita previa
-            {"id": "mal_creade_sorolla_145", "title": "CNP CREADE-MÁLAGA — Av. Pintor Joaquín Sorolla 145 (MÁLAGA)"},
-            {"id": "mal_prov_manuel_azana_3", "title": "CNP MÁLAGA Provincial — Plaza de Manuel Azaña 3 (MÁLAGA)"},
-            {"id": "mal_fuengirola_condes_98", "title": "CNP Fuengirola — Av. Condes de San Isidro 98 (FUENGIROLA)"},
-            {"id": "mal_marbella_duque_lerma_l3", "title": "CNP Marbella — Av. Duque de Lerma L3 (MARBELLA)"},
-            {"id": "mal_torremolinos_skal_12", "title": "CNP Torremolinos — C/ Skal 12 (TORREMOLINOS)"},
-            {"id": "mal_estepona_valle_inclan_1", "title": "CNP Estepona — C/ Valle Inclán 1 (ESTEPONA)"},
-            {"id": "mal_velez_puerta_mar_4", "title": "CNP Vélez-Málaga — C/ Puerta del Mar 4 (TORRE DEL MAR)"},
-            {"id": "mal_antequera_oaxaca_sn", "title": "CNP Antequera — C/ Ciudad de Oaxaca S/N (ANTEQUERA)"},
-            {"id": "mal_ronda_rio_tinto_2", "title": "CNP Ronda — C/ Río Tinto 2 (RONDA)"},
-            {"id": "mal_benalmadena_flores_6", "title": "CNP Benalmádena — C/ Las Flores 6 (BENALMÁDENA)"},
-        ],
-        "services": [
-            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
-            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
-            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
-        ],
-    },
-
-    "Sevilla": {
-        "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            # 💬 Sevilla (провінція): ключові точки (BPEF / Torre Norte)
-            {"id": "sev_bpef_grupo_1_dr_rafael_sn", "title": "BPEF GRUPO 1 — C/ Doctor Rafael Martínez Domínguez S/N (SEVILLA)"},
-            {"id": "sev_doc_extran_plaza_espana_torre_norte_sn", "title": "Documentación de Extranjeros — Plaza de España (Torre Norte) S/N (SEVILLA)"},
-            {"id": "sev_policia_bpef_plaza_espana_torre_norte_sn", "title": "POLICÍA BPEF — Plaza de España (Torre Norte) S/N (SEVILLA)"},
+            {"id": "ali_alacant_isabel_la_catolica_1", "title": "ALICANTE — Av. Isabel La Católica 1"},
+            {"id": "ali_elche_diagonal_21", "title": "ELCHE — C/ Diagonal 21"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -147,55 +105,8 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Murcia": {
         "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            # 💬 Murcia (провінція): офіси, що є в переліку по cita previa
-            {"id": "mur_cartagena_menendez_pelayo_6", "title": "CNP Cartagena — Menéndez y Pelayo 6 (CARTAGENA)"},
-            {"id": "mur_lorca_pza_policia_1", "title": "CNP Lorca — Pza. Policía Nacional 1 (LORCA)"},
-            {"id": "mur_molina_canonigo_moreno_11", "title": "CNP Molina de Segura — C/ Canónigo Moreno 11 (MOLINA DE SEGURA)"},
-            {"id": "mur_sangonera_mercamurcia_15", "title": "CNP Murcia Sangonera — Avda. Mercamurcia 15 (SANGONERA LA VERDE)"},
-            {"id": "mur_yecla_rambla_34", "title": "CNP Yecla — Rambla 34 (YECLA)"},
-            {"id": "mur_oficina_extranjeros_n301_km388", "title": "Oficina de Extranjeros — Ctra Nacional 301 Km 388 (MURCIA)"},
-        ],
-        "services": [
-            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
-            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
-            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
-        ],
-    },
-    "Sevilla": {
-        "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            {"id": "sev_blas_infante_2", "title": "Sevilla: Avenida Blas Infante 2"},
-            {"id": "sev_veintiocho_febrero_59", "title": "Sevilla: C/ Veintiocho de Febrero 59"},
-            {"id": "sev_castillo_alcala_17a", "title": "Sevilla: C/ Castillo Alcalá de Guadaira 17A"},
-        ],
-        "services": [
-            # 💬 единый набор сервисов по всем провинциям (2 доступны, 3-й всегда заблокирован логикой UI)
-            {"id": "ua_card", "title": "Tarjeta conflicto Ucrania"},
-            {"id": "huellas_tie", "title": "Toma de huellas (expedición TIE)"},
-            {"id": "recogida_tie", "title": "Recogida / entrega TIE"},
-        ],
-    },
-
-    "Malaga": {
-        "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            {"id": "mal_pl_manuel_azania_3", "title": "Málaga: Pl. Manuel Azaña 3"},
-            {"id": "marbella_juan_xxiii_2", "title": "Marbella: C/ Juan XXIII 2"},
-            {"id": "fuengirola_boliches_60", "title": "Fuengirola: Av. de los Boliches 60"},
-        ],
-        "services": [
-            {"id": "ua_card", "title": "Tarjeta conflicto Ucrania"},
-            {"id": "huellas_tie", "title": "Toma de huellas (expedición TIE)"},
-            {"id": "recogida_tie", "title": "Recogida / entrega TIE"},
-        ],
-    },
-
-    "Granada": {
-        "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            # 💬 Granada (provincia): сейчас в списках по “conflicto” фигурирует Baza
-            {"id": "gra_baza_alhondiga_18", "title": "BAZA — Comisaría de Baza, Alhóndiga 18"},
+            {"id": "mur_murcia_avenida_ronda_sur", "title": "MURCIA — Ronda Sur"},
+            {"id": "mur_cartagena_alfonso_xiii", "title": "CARTAGENA — Alfonso XIII"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -206,8 +117,8 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Zaragoza": {
         "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            {"id": "zar_udex_obispo_covarrubias_sn", "title": "ZARAGOZA — Unidad Doc. Extranjeros, C/ Obispo Covarrubias s/n"},
+            {"id": "zar_zaragoza_ramiro_i", "title": "ZARAGOZA — Ramiro I"},
+            {"id": "zar_calatayud", "title": "CALATAYUD — Comisaría"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -216,10 +127,10 @@ PROVINCES: dict[str, dict[str, Any]] = {
         ],
     },
 
-    "Bizkaia": {
+    "Bilbao": {
         "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            {"id": "biz_bilbao_gordoniz_8", "title": "BILBAO — CNP Bilbao (JSP País Vasco), Gordóniz 8"},
+            {"id": "bil_bilbao", "title": "BILBAO — Comisaría"},
+            {"id": "bil_barakaldo", "title": "BARAKALDO — Comisaría"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -227,13 +138,95 @@ PROVINCES: dict[str, dict[str, Any]] = {
             {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
         ],
     },
+
+    "Valladolid": {
+        "offices": [
+            {"id": "vad_valladolid", "title": "VALLADOLID — Comisaría"},
+            {"id": "vad_medina_del_campo", "title": "MEDINA DEL CAMPO — Comisaría"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Malaga": {
+        "offices": [
+            {"id": "mal_malaga", "title": "MÁLAGA — Comisaría"},
+            {"id": "mal_marbella", "title": "MARBELLA — Comisaría"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Sevilla": {
+        "offices": [
+            {"id": "sev_sevilla", "title": "SEVILLA — Comisaría"},
+            {"id": "sev_dos_hermanas", "title": "DOS HERMANAS — Comisaría"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Granada": {
+        "offices": [
+            {"id": "gra_granada", "title": "GRANADA — Comisaría"},
+            {"id": "gra_motril", "title": "MOTRIL — Comisaría"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "A Coruña": {
+        "offices": [
+            {"id": "cor_coruna", "title": "A CORUÑA — Comisaría"},
+            {"id": "cor_santiago", "title": "SANTIAGO — Comisaría"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Asturias": {
+        "offices": [
+            {"id": "ast_oviedo", "title": "OVIEDO — Comisaría"},
+            {"id": "ast_gijon", "title": "GIJÓN — Comisaría"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
+    "Cantabria": {
+        "offices": [
+            {"id": "can_santander", "title": "SANTANDER — Comisaría"},
+            {"id": "can_torrelavega", "title": "TORRELAVEGA — Comisaría"},
+        ],
+        "services": [
+            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
+            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
+            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
+        ],
+    },
+
     "Illes Balears": {
         "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            # 💬 Oficinas disponibles (Tarjeta conflicto Ucrania)
-            {"id": "bal_ciutadella_republica_arg_4", "title": "CIUTADELLA (Menorca) — República Argentina 4"},
-            {"id": "bal_mahon_san_sebastian_2", "title": "MAHÓN (Menorca) — C/ San Sebastian 2"},
-            {"id": "bal_palma_felicia_fuster_7", "title": "PALMA (Mallorca) — Felicià Fuster 7"},
+            {"id": "bal_palma", "title": "PALMA — Comisaría"},
+            {"id": "bal_ibiza", "title": "EIVISSA/IBIZA — Comisaría"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -244,14 +237,8 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Las Palmas": {
         "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            # 💬 Oficinas disponibles (Tarjeta conflicto Ucrania)
-            {"id": "lp_maspalomas_moya_4", "title": "MASPALOMAS — Avenida de Moya 4"},
-            {"id": "lp_puerto_rosario_herbania_28", "title": "PUERTO ROSARIO — Herbania 28"},
-            {"id": "lp_santa_lucia_negrin_10", "title": "VECINDARIO — Doctor Negrín 10 (Santa Lucía de Tirajana)"},
-            {"id": "lp_tuineje_paco_hierro_sn", "title": "TUINEJE — Paco Hierro s/n"},
-            {"id": "lp_arrecife_mastelero_sn", "title": "ARRECIFE — Mastelero s/n"},
-            {"id": "lp_las_palmas_concordia_5", "title": "LAS PALMAS G.C. — Plaza de la Concordia 5"},
+            {"id": "lpa_las_palmas", "title": "LAS PALMAS — Comisaría"},
+            {"id": "lpa_arrecife", "title": "ARRECIFE — Comisaría"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -262,13 +249,8 @@ PROVINCES: dict[str, dict[str, Any]] = {
 
     "Santa Cruz de Tenerife": {
         "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            # 💬 Oficinas disponibles (Tarjeta conflicto Ucrania)
-            {"id": "tfe_oue_marina_20", "title": "SANTA CRUZ — OUE, C/ La Marina 20"},
-            {"id": "tfe_adeje_pueblos_2", "title": "ADEJE — Playa de las Américas, Av. de los Pueblos 2"},
-            {"id": "tfe_puerto_cruz_campo_llarena_3", "title": "PUERTO DE LA CRUZ — Av. José del Campo y Llarena 3"},
-            {"id": "tfe_laguna_nava_grimon_66", "title": "LA LAGUNA — C/ Nava y Grimón 66"},
-            {"id": "tfe_sc_robayna_23", "title": "SANTA CRUZ — Robayna 23"},
+            {"id": "tfe_santa_cruz", "title": "SANTA CRUZ — Comisaría"},
+            {"id": "tfe_la_laguna", "title": "LA LAGUNA — Comisaría"},
         ],
         "services": [
             {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
@@ -276,61 +258,7 @@ PROVINCES: dict[str, dict[str, Any]] = {
             {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
         ],
     },
-    "Illes Balears": {
-        "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            # 💬 Oficinas disponibles (Tarjeta conflicto Ucrania)
-            {"id": "bal_ciutadella_republica_arg_4", "title": "CIUTADELLA (Menorca) — República Argentina 4"},
-            {"id": "bal_mahon_san_sebastian_2", "title": "MAHÓN (Menorca) — C/ San Sebastian 2"},
-            {"id": "bal_palma_felicia_fuster_7", "title": "PALMA (Mallorca) — Felicià Fuster 7"},
-        ],
-        "services": [
-            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
-            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
-            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
-        ],
-    },
-
-    "Las Palmas": {
-        "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            # 💬 Oficinas disponibles (Tarjeta conflicto Ucrania)
-            {"id": "lp_maspalomas_moya_4", "title": "MASPALOMAS — Avenida de Moya 4"},
-            {"id": "lp_puerto_rosario_herbania_28", "title": "PUERTO ROSARIO — Herbania 28"},
-            {"id": "lp_santa_lucia_negrin_10", "title": "VECINDARIO — Doctor Negrín 10 (Santa Lucía de Tirajana)"},
-            {"id": "lp_tuineje_paco_hierro_sn", "title": "TUINEJE — Paco Hierro s/n"},
-            {"id": "lp_arrecife_mastelero_sn", "title": "ARRECIFE — Mastelero s/n"},
-            {"id": "lp_las_palmas_concordia_5", "title": "LAS PALMAS G.C. — Plaza de la Concordia 5"},
-        ],
-        "services": [
-            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
-            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
-            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
-        ],
-    },
-
-    "Santa Cruz de Tenerife": {
-        "offices": [
-            {"id": "any", "title": "Будь-який офіс"},
-            # 💬 Oficinas disponibles (Tarjeta conflicto Ucrania)
-            {"id": "tfe_oue_marina_20", "title": "SANTA CRUZ — OUE, C/ La Marina 20"},
-            {"id": "tfe_adeje_pueblos_2", "title": "ADEJE — Playa de las Américas, Av. de los Pueblos 2"},
-            {"id": "tfe_puerto_cruz_campo_llarena_3", "title": "PUERTO DE LA CRUZ — Av. José del Campo y Llarena 3"},
-            {"id": "tfe_laguna_nava_grimon_66", "title": "LA LAGUNA — C/ Nava y Grimón 66"},
-            {"id": "tfe_sc_robayna_23", "title": "SANTA CRUZ — Robayna 23"},
-        ],
-        "services": [
-            {"id": "ua_card", "title": "POLICÍA TARJETA CONFLICTO UCRANIA"},
-            {"id": "huellas_tie", "title": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA) INICIAL, RENOVACIÓN, DUPLICADO Y LEY 14/2013"},
-            {"id": "recogida_tie", "title": "POLICIA - RECOGIDA DE TARJETA DE IDENTIDAD DE EXTRANJERO (TIE)"},
-        ],
-    },
-
-    
-
 }
-
-
 
 
 
@@ -380,9 +308,6 @@ def _ensure_user(store: dict, user_id: str) -> dict:
     if u.get("service_id") in legacy_map:
         u["service_id"] = legacy_map[u["service_id"]]
 
-    u.setdefault("notify_minutes", [])      # 💬 хвилини доби, коли пінгати
-    u.setdefault("daily_key", None)         # 💬 YYYY-MM-DD
-    u.setdefault("last_notified", None)     # 💬 YYYY-MM-DD:MIN
     u.setdefault("ui_seq", 0)              # 💬 щоб “мигалка” не перетирала інший екран
     return u
 
@@ -432,7 +357,7 @@ def _main_text(u: dict) -> str:
     status_h = _h(str(status))
 
     text = (
-        "<b>🏛 Extranjería Citas</b>\n\n"
+        "<b>🏛 Extranjería Cita | Asilo | TARJETA CONFLICTO UCRANIA</b>\n\n"
         f"<i>🔔 Сповіщення:</i> <b>{status_h}</b>\n\n"
         "🎯 <i>Обрано:</i>\n"
         f"<i>• Місто/провінція:</i> <b>{prov_h}</b>\n"
@@ -832,32 +757,30 @@ async def notifier_loop() -> None:
 
         users = store.get("users", {}) or {}
 
-        # 💬 Собираем все "активные группы" по текущим выборкам пользователей
+        # 💬 Собираем все "активные группы" (тільки конкретний офіс)
         groups: set[tuple[str, str, str]] = set()
         for uid, u0 in users.items():
             u = _ensure_user(store, str(uid))
             if not u.get("enabled"):
                 continue
+
             prov = u.get("province")
             svc = u.get("service_id")
-            office = u.get("office_id") or "any"
-            if not prov or not svc:
+            office = u.get("office_id")
+
+            # 💬 без конкретного офісу = не включаємо в групи
+            if (not prov) or (not svc) or (not office) or (office == "any"):
                 continue
+
             groups.add((str(prov), str(office), str(svc)))
+
 
         pool = _window_pool_minutes()
 
-        # 💬 “реалистичность”: иногда вообще тишина
-        #    25% = 0 событий, 50% = 1, 20% = 2, 5% = 3
-        r = random.random()
-        if r < 0.25:
-            n_events = 0
-        elif r < 0.75:
-            n_events = 1
-        elif r < 0.95:
-            n_events = 2
-        else:
-            n_events = 3
+        # 💬 Реалістичність: або тиша, або 1 “сигнал” за день
+        #    55% = 0, 45% = 1
+        n_events = 1 if random.random() < 0.45 else 0
+
 
         # 💬 Если нет групп/нет пользователей = тишина
         if not groups or n_events == 0:
@@ -899,6 +822,10 @@ async def notifier_loop() -> None:
 
             # 💬 Получаем/создаём события дня
             day_plan = _pick_daily_events(store, key)
+            # 💬 ВАЖНО: фиксируем дневной план сразу.
+            # 💬 Иначе при рестарте он перегенерится, и “паттерн” поплывёт.
+            _save_json_atomic(DATA_PATH, store)
+
             events = day_plan.get("events", []) or []
             fired = set(day_plan.get("fired", []) or [])
 
@@ -964,13 +891,12 @@ async def notifier_loop() -> None:
                     if str(u.get("service_id") or "") != svc_id:
                         continue
 
-                    u_office = str(u.get("office_id") or "any")
+                    u_office = str(u.get("office_id") or "")
 
-                    # 💬 office-логика:
-                    # - если пользователь выбрал "any" = подходит любой office_id в этом prov
-                    # - если пользователь выбрал конкретный office = подходит только он
-                    if u_office != "any" and u_office != office_id:
+                    # 💬 Тільки конкретний офіс: має співпасти 1-в-1
+                    if (not u_office) or (u_office == "any") or (u_office != office_id):
                         continue
+
 
                     # 💬 анти-палево: иногда пропускаем часть людей (чтобы не всем “одинаково”)
                     if random.random() < 0.15:
@@ -1112,7 +1038,9 @@ async def cb_toggle_on(call: CallbackQuery):
     u = _ensure_user(store, user_id)
 
     # 💬 нельзя включить, если не выбран сервис
-    if not u.get("province") or not u.get("office_id") or not u.get("service_id"):
+    if (not u.get("province")) or (not u.get("office_id")) or (u.get("office_id") == "any") or (not u.get("service_id")):
+        # 💬 office_id="any" більше не дозволяємо: треба обрати конкретний офіс
+
         # 💬 ВАЖНО: отвечаем ОДИН раз, сразу show_alert=True (иначе второй answer может не показаться)
         try:
             await call.answer("Спочатку обери сервіс в меню.", show_alert=True)
