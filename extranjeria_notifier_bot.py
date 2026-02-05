@@ -55,6 +55,18 @@ PINGS_PER_DAY = int(os.getenv("PINGS_PER_DAY", "6"))
 # 💬 Авто-видалення сповіщення, щоб чат був чистий
 ALERT_DELETE_AFTER_SEC = int(os.getenv("ALERT_DELETE_AFTER_SEC", "180"))
 
+# 💬 Адміни (через Railway env): "123,456"
+ADMIN_IDS_RAW = os.getenv("ADMIN_IDS", "").strip()
+ADMIN_IDS: set[int] = set()
+for _x in ADMIN_IDS_RAW.split(","):
+    _x = _x.strip()
+    if _x.isdigit():
+        ADMIN_IDS.add(int(_x))
+
+
+def _is_admin_chat(chat_id: int) -> bool:
+    # 💬 Якщо ADMIN_IDS не задано — ніхто не адмін (щоб випадково не відкрити статистику всім)
+    return bool(ADMIN_IDS) and (int(chat_id) in ADMIN_IDS)
 
 
 # 💬 “Мигалка” для повідомлення "не бачу підписку"
@@ -325,6 +337,10 @@ def _ensure_user(store: dict, user_id: str) -> dict:
 
     u.setdefault("ui_seq", 0)              # 💬 щоб “мигалка” не перетирала інший екран
     return u
+    
+    # 💬 Статистика: не храним локально, всё в JSON
+    u.setdefault("first_seen_date", None)   # "YYYY-MM-DD" (Madrid)
+    u.setdefault("last_seen_date", None)    # "YYYY-MM-DD" (Madrid)
 
 
 # =========================
@@ -1109,6 +1125,32 @@ async def on_start(message: Message):
     user_id = str(message.chat.id)
     u = _ensure_user(store, user_id)
 
+    # =========================
+    # STATS (today)
+    # =========================
+    now = dt.datetime.now(MADRID_TZ)
+    day_key = _today_key(now)
+
+    stats = store.setdefault("stats", {})
+    day = stats.setdefault(day_key, {})
+    day.setdefault("starts", 0)
+    day.setdefault("new_users", 0)
+    day.setdefault("active_users", 0)
+
+    # 💬 starts = кожен /start
+    day["starts"] += 1
+
+    # 💬 new user = перший раз у житті
+    if not u.get("first_seen_date"):
+        u["first_seen_date"] = day_key
+        day["new_users"] += 1
+
+    # 💬 active today = унікальні за день (по last_seen_date)
+    if u.get("last_seen_date") != day_key:
+        u["last_seen_date"] = day_key
+        day["active_users"] += 1
+
+
     # 💬 /start не включает уведомления, просто показывает меню
     await _edit_or_send_ui(
         chat_id=message.chat.id,
@@ -1173,6 +1215,85 @@ async def admin_test_notify(message: Message):
     except Exception:
         pass
 
+@router.message(F.text.startswith("/stats"))
+async def admin_stats(message: Message):
+    # 💬 админ-статистика (без ключей, но доступ только ADMIN_IDS)
+    if not _is_admin_chat(message.chat.id):
+        try:
+            await message.answer("Нема доступу.")
+        except Exception:
+            pass
+        return
+
+    store = _load_json(DATA_PATH)
+    users = store.get("users", {}) or {}
+
+    now = dt.datetime.now(MADRID_TZ)
+    day_key = _today_key(now)
+
+    day = (store.get("stats", {}) or {}).get(day_key, {}) or {}
+    starts = int(day.get("starts", 0) or 0)
+    new_users = int(day.get("new_users", 0) or 0)
+    active_users = int(day.get("active_users", 0) or 0)
+
+    total_users = len(users)
+
+    enabled_total = 0
+    enabled_by_service: dict[str, int] = {"ua_card": 0, "huellas_tie": 0, "recogida_tie": 0}
+    enabled_by_province: dict[str, int] = {}
+
+    # 💬 “живой пересчёт” на момент вызова /stats
+    for uid, u0 in users.items():
+        u = _ensure_user(store, str(uid))
+        if not u.get("enabled"):
+            continue
+        enabled_total += 1
+
+        prov = str(u.get("province") or "—")
+        svc = str(u.get("service_id") or "—")
+
+        enabled_by_province[prov] = enabled_by_province.get(prov, 0) + 1
+        if svc in enabled_by_service:
+            enabled_by_service[svc] += 1
+
+    # 💬 красивее названия сервисов
+    svc_names = {
+        "ua_card": "POLICÍA TARJETA CONFLICTO UCRANIA",
+        "huellas_tie": "POLICÍA-TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA)...",
+        "recogida_tie": "POLICIA - RECOGIDA DE TARJETA (TIE)",
+    }
+
+    prov_lines = ""
+    for prov, cnt in sorted(enabled_by_province.items(), key=lambda x: (-x[1], x[0])):
+        prov_lines += f"<i>• { _h(prov) }:</i> <b>{cnt}</b>\n"
+
+    svc_lines = ""
+    for sid in ["ua_card", "huellas_tie", "recogida_tie"]:
+        svc_lines += f"<i>• { _h(svc_names.get(sid, sid)) }:</i> <b>{enabled_by_service.get(sid, 0)}</b>\n"
+
+    text = (
+        "<b>📊 Stats</b>\n\n"
+        f"<i>Дата (Madrid):</i> <b>{_h(day_key)}</b>\n\n"
+        "<b>За сьогодні</b>\n"
+        f"<i>• /start натиснули:</i> <b>{starts}</b>\n"
+        f"<i>• Нові користувачі:</i> <b>{new_users}</b>\n"
+        f"<i>• Активні (унікальні):</i> <b>{active_users}</b>\n\n"
+        "<b>Зараз у базі</b>\n"
+        f"<i>• Всього користувачів:</i> <b>{total_users}</b>\n"
+        f"<i>• Увімкнули сповіщення:</i> <b>{enabled_total}</b>\n\n"
+        "<b>Увімкнені по провінціях</b>\n"
+        f"{prov_lines if prov_lines else '<i>• —</i>'}\n"
+        "<b>Увімкнені по послугах</b>\n"
+        f"{svc_lines}"
+    )
+
+    await message.answer(text, parse_mode="HTML")
+
+    # 💬 чистим чат: удалим команду /stats
+    try:
+        await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data == "ui:noop")
