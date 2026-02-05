@@ -39,8 +39,6 @@ PINGS_PER_DAY = int(os.getenv("PINGS_PER_DAY", "6"))
 # 💬 Авто-видалення сповіщення, щоб чат був чистий
 ALERT_DELETE_AFTER_SEC = int(os.getenv("ALERT_DELETE_AFTER_SEC", "180"))
 
-# 💬 Секрет для ручного теста уведомлений (админ-команда)
-ADMIN_TEST_KEY = os.getenv("ADMIN_TEST_KEY", "").strip()
 
 
 # 💬 “Мигалка” для повідомлення "не бачу підписку"
@@ -898,19 +896,8 @@ async def admin_test_notify(message: Message):
     💬 Ручной тест уведомления:
     /testnotify <ключ>
     """
-    try:
-        parts = (message.text or "").strip().split(maxsplit=1)
-        key = parts[1].strip() if len(parts) > 1 else ""
-    except Exception:
-        key = ""
 
-    if not ADMIN_TEST_KEY or key != ADMIN_TEST_KEY:
-        # 💬 не светим причину, просто отказываем
-        try:
-            await message.answer("🚫 Немає доступу.")
-        except Exception:
-            pass
-        return
+
 
     store = _load_json(DATA_PATH)
     user_id = str(message.chat.id)
