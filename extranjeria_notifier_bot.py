@@ -524,8 +524,12 @@ def _kb_pick_service(province: str, office_id: str) -> InlineKeyboardMarkup:
         sid = s["id"]
         title = s["title"]
 
-        # 💬 По умолчанию = доступно (чтобы старые данные работали)
-        allowed = flags.get(sid, True)
+        # 💬 Дефолты по доступности:
+        # 💬 - recogida_tie: по умолчанию ЗАБЛОКИРОВАНА (пока явно не разрешишь для офиса)
+        # 💬 - остальное: по умолчанию доступно (чтобы старые данные работали)
+        default_allowed = False if sid == "recogida_tie" else True
+        allowed = flags.get(sid, default_allowed)
+
 
         prefix = "✅ " if allowed else "🚫 "
         cb = (
