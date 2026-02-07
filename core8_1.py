@@ -13058,6 +13058,8 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
         
                     # 💬 сбрасываем stage, чтобы не “лип” offer_continue
                     await state.update_data(current_stage=None)
+                    lex_mode_active = bool(data.get("lex_mode_active"))  # 💬 фикс: берём флаг из state, иначе NameError
+
         
                     if lex_mode_active and lex_total:
                         poll_done = int(data.get("lex_round", 0) or 0)
