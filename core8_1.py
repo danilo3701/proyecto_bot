@@ -34,6 +34,7 @@ import datetime
 import sys
 import traceback
 import re  # 💬 нужен для конвертации [[...]] → ||...||
+from urllib.parse import quote  # 💬 кодируем text/url для t.me/share/url
 
 # ——— Aiogram core ————————————————————————————————————————————————
 from aiogram import Bot, Dispatcher, F                   # Bot/DP и фильтр F  
@@ -228,7 +229,15 @@ def sync_topics_volume_to_local() -> None:
     return None  # 💬 GitHub/Local sync отключён, чтобы не было NameError
 
 
-from battle_feature import router as battle_router, set_topics_ref, start_battle_from_lex_menu, set_battle_links, cancel_battle_if_running  # 💬 модуль "Битва"
+from battle_feature import (
+    router as battle_router,
+    set_topics_ref,
+    start_battle_from_lex_menu,
+    set_battle_links,
+    cancel_battle_if_running,
+    load_battle_data,  # 💬 для экрана статистики
+)  # 💬 модуль "Битва"
+
 from bonuses_feature import (
     router as bonuses_router,
     init_bonus_feature,
@@ -2304,6 +2313,197 @@ def render_leaderboard(title, top, emoji):
         res.append(f"{m} {u['name']} {emoji} {u['words_learned']}")
     return "\n".join(res)
 
+# ================================================================================
+# 📊 Статистика пользователя (XP / звёзды / темы 100% / Battle) + шаринг другу
+# ================================================================================
+BOT_USERNAME_CACHE: str | None = None  # 💬 кэш, чтобы не дергать getMe постоянно
+
+def _extract_referrer_id(payload: str | None) -> str | None:
+    # 💬 поддерживаем payload вида ref_<id> и stats_ref_<id>
+    if not payload:
+        return None
+    try:
+        m = re.search(r"(?:^|_)ref_(\d+)(?:$|_)", str(payload))
+    except Exception:
+        return None
+    return m.group(1) if m else None
+
+def _track_friendship_in_xp(ref_payload: str | None, new_user_id: str) -> None:
+    # 💬 храним «друзей» в xp_data.json, чтобы потом показать список и слать им статистику
+    inviter_id = _extract_referrer_id(ref_payload)
+    if not inviter_id or inviter_id == str(new_user_id):
+        return
+
+    xp = load_xp_data()
+
+    inv = xp.setdefault(str(inviter_id), {})
+    friends = inv.setdefault("friends", [])
+    if not isinstance(friends, list):
+        friends = []
+        inv["friends"] = friends
+
+    if str(new_user_id) not in friends:
+        friends.append(str(new_user_id))
+
+    usr = xp.setdefault(str(new_user_id), {})
+    usr.setdefault("invited_by", str(inviter_id))
+
+    save_xp_data(xp)
+
+async def _get_bot_username() -> str:
+    global BOT_USERNAME_CACHE
+    if BOT_USERNAME_CACHE:
+        return BOT_USERNAME_CACHE
+    try:
+        me = await bot.get_me()
+        BOT_USERNAME_CACHE = (me.username or "").strip()
+    except Exception:
+        BOT_USERNAME_CACHE = ""
+    return BOT_USERNAME_CACHE or ""
+
+async def _make_stats_deeplink(inviter_id: str) -> str:
+    # 💬 deep-link на /start с автопоказом статистики + сохранением реферала
+    username = await _get_bot_username()
+    if not username:
+        return ""
+    return f"https://t.me/{username}?start=stats_ref_{inviter_id}"
+
+def _stats_collect(uid: int) -> dict:
+    # 💬 собираем метрики из xp_data.json + battle_data.json
+    uid_s = str(uid)
+
+    xp = load_xp_data()
+    u = xp.get(uid_s, {}) if isinstance(xp, dict) else {}
+    if not isinstance(u, dict):
+        u = {}
+
+    total_xp = int(u.get("total_xp", 0) or 0)
+    xp_lex = int(u.get("xp_total_lex", 0) or 0)
+
+    stats_block = u.get("stats", {}) if isinstance(u.get("stats", {}), dict) else {}
+    words_learned = int(stats_block.get("words_learned", 0) or 0)
+
+    topic_summary = u.get("topic_summary", {}) if isinstance(u.get("topic_summary", {}), dict) else {}
+    stars_total = 0
+    topics_completed = 0
+    for _, row_raw in topic_summary.items():
+        row = row_raw if isinstance(row_raw, dict) else {}
+        stars_total += int(row.get("blocks_done", 0) or 0)
+        if bool(row.get("completed", False)):
+            topics_completed += 1
+
+    # 💬 Battle
+    bd = load_battle_data()
+    b = bd.get(uid_s, {}) if isinstance(bd, dict) else {}
+    if not isinstance(b, dict):
+        b = {}
+
+    battle_points = int(b.get("total_points", 0) or 0)
+    wins = int(b.get("wins", 0) or 0)
+    losses = int(b.get("losses", 0) or 0)
+    draws = int(b.get("draws", 0) or 0)
+
+    fav_topic = "—"
+    by_topic = b.get("by_topic", {}) if isinstance(b.get("by_topic", {}), dict) else {}
+    if isinstance(by_topic, dict) and by_topic:
+        try:
+            best_key = max(
+                by_topic.keys(),
+                key=lambda k: int((by_topic.get(k, {}) or {}).get("points", 0) or 0)
+            )
+        except Exception:
+            best_key = None
+
+        if best_key:
+            info = (topics or {}).get(best_key, {}) if isinstance(topics, dict) else {}
+            fav_topic = str(info.get("visible_title") or info.get("title") or best_key)
+
+    return {
+        "total_xp": total_xp,
+        "xp_lex": xp_lex,
+        "words_learned": words_learned,
+        "stars_total": stars_total,
+        "topics_completed": topics_completed,
+        "battle_points": battle_points,
+        "battle_wins": wins,
+        "battle_losses": losses,
+        "battle_draws": draws,
+        "battle_fav_topic": fav_topic,
+    }
+
+def _render_stats_text(uid: int) -> str:
+    d = _stats_collect(uid)
+
+    fav_topic_safe = html.escape(str(d["battle_fav_topic"]))
+    return (
+        "<b>📊 Статистика</b>\n\n"
+        f"🧠 XP всего: <b>{d['total_xp']}</b>\n"
+        f"📚 XP Lex: <b>{d['xp_lex']}</b>\n"
+        f"🍪 слов выучено: <b>{d['words_learned']}</b>\n\n"
+        f"⭐ звёздочек всего: <b>{d['stars_total']}</b>\n"
+        f"✅ тем закрыто 100%: <b>{d['topics_completed']}</b>\n\n"
+        f"⚔️ battle: <b>{d['battle_points']}</b> | W <b>{d['battle_wins']}</b> / L <b>{d['battle_losses']}</b> / D <b>{d['battle_draws']}</b>\n"
+        f"🎯 любимая тема: <b>{fav_topic_safe}</b>"
+    )
+
+def _stats_main_kb() -> InlineKeyboardMarkup:
+    # 💬 на экране статистики: слева «Назад в меню», справа «Отправить другу»
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="stats:menu"),
+            InlineKeyboardButton(text="📤 Отправить другу", callback_data="stats:share:0"),
+        ]
+    ])
+
+def _stats_share_kb(uid: int, share_url: str, page: int = 0) -> InlineKeyboardMarkup:
+    uid_s = str(uid)
+    xp = load_xp_data()
+    me = xp.get(uid_s, {}) if isinstance(xp, dict) else {}
+    friends = me.get("friends", []) if isinstance(me, dict) else []
+    if not isinstance(friends, list):
+        friends = []
+
+    # 💬 нормализуем и убираем дубли
+    uniq: list[str] = []
+    for x in friends:
+        sid = str(x)
+        if sid and sid.isdigit() and sid != uid_s and sid not in uniq:
+            uniq.append(sid)
+
+    per_page = 8
+    page = max(0, int(page or 0))
+    start = page * per_page
+    chunk = uniq[start:start + per_page]
+
+    rows = []
+    if chunk:
+        for fid in chunk:
+            fu = xp.get(fid, {}) if isinstance(xp, dict) else {}
+            name = ""
+            if isinstance(fu, dict):
+                name = (fu.get("tg_username") or fu.get("name") or "").strip()
+            label = name if name else f"ID {fid}"
+            rows.append([InlineKeyboardButton(text=f"👤 {label}", callback_data=f"stats:send:{fid}")])
+
+        nav = []
+        if start > 0:
+            nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"stats:share:{page-1}"))
+        if start + per_page < len(uniq):
+            nav.append(InlineKeyboardButton(text="➡️", callback_data=f"stats:share:{page+1}"))
+        if nav:
+            rows.append(nav)
+    else:
+        rows.append([InlineKeyboardButton(text="Пока нет друзей в боте 🙃", callback_data="stats:noop")])
+
+    # 💬 fallback: «Отправить любому» через share sheet (открывает выбор чатов)
+    if share_url:
+        rows.append([InlineKeyboardButton(text="🔗 Отправить любому", url=share_url)])
+
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="stats:main")])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 # 💬 Отправка текстового сообщения с авто-удалением через N секунд
 async def send_and_auto_delete_text(bot, chat_id, text, delay=AUTO_DELETE_TEXT_DELAY_S, **kwargs):  # 💬 единый дефолт
 
@@ -2388,13 +2588,23 @@ async def start_handler(message: Message, state: FSMContext):
     if message.from_user.username:
         u.setdefault("tg_username", "@" + message.from_user.username)
 
-    # 💬 фиксируем рефералку из /start ref_<id>
-    payload = None
+    # 💬 читаем payload из /start <payload>
+    raw_payload = None
     if message.text:
         parts = message.text.split(maxsplit=1)
         if len(parts) > 1:
-            payload = parts[1].strip()
-    bonus_register_referral_from_start(user_id, payload)  # 💬 сохраняем, кто пригласил пользователя
+            raw_payload = parts[1].strip()
+
+    # 💬 поддержка deep-link вида stats_ref_<id>
+    open_stats_on_start = False
+    payload_for_ref = raw_payload
+    if raw_payload and raw_payload.startswith("stats_"):
+        open_stats_on_start = True
+        payload_for_ref = raw_payload[len("stats_"):] or None  # 💬 сюда попадёт ref_<id>
+
+    # 💬 регистрируем реферальный payload (как раньше)
+    bonus_register_referral_from_start(user_id, payload_for_ref)
+
 
 
     # 💬 ГАРАНТИРУЕМ поля для тем и подписок
@@ -2424,6 +2634,9 @@ async def start_handler(message: Message, state: FSMContext):
 
     # 💬 Обновляем XP-профиль: имя / username / базовые поля в xp_data.json
     await register_or_update_user(message)
+
+    # 💬 сохраняем «друга» в xp_data.json (для списка друзей в статистике)
+    _track_friendship_in_xp(payload_for_ref, str(user_id))
 
 
         # — далее остальная логика: приветствие, загрузка тем и установка состояния —
@@ -2479,27 +2692,30 @@ async def start_handler(message: Message, state: FSMContext):
     await state.update_data(phase_entry_count=0, pending_phase=False)
 
 
-        # 💬 Главное меню теперь ИНЛАЙН — без ReplyKeyboard (ничего не «висит» внизу)
+    # 💬 Главное меню теперь ИНЛАЙН — без ReplyKeyboard (ничего не «висит» внизу)
     inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
-    
+
         [
             InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
             InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
         ],
-        
+
         [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
-    
+
         [
             InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
             InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
         ],
-    
+
         [
             InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
-            InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
+            InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats"),
         ],
-    ])
+
+        [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")],
+    ])  # 💬 выровненное главное меню (1,2,1,2,2,1)
+
 
 
 
@@ -2515,6 +2731,26 @@ async def start_handler(message: Message, state: FSMContext):
     )  # 💬 показываем меню и получаем message для сохранения id
 
     await state.update_data(last_menu_msg_id=menu_msg.message_id)  # 💬 запоминаем id для последующего удаления
+    if open_stats_on_start:
+        # 💬 убираем главное меню и сразу показываем статистику
+        try:
+            await menu_msg.delete()
+        except Exception:
+            pass
+
+        await state.update_data(last_menu_msg_id=None, menu_hidden=True)
+
+        stats_msg = await bot.send_message(
+            chat_id=message.chat.id,
+            text=_render_stats_text(user_id),
+            reply_markup=_stats_main_kb(),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        await state.update_data(stats_msg_id=stats_msg.message_id)
+        await state.set_state(LessonStates.choosing_category)
+        return
+
     await state.update_data(menu_hidden=False)  # 💬 меню на экране
     await state.set_state(LessonStates.choosing_category)  # 💬 ждём выбор кнопок меню
 
@@ -2790,6 +3026,28 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
         return await show_leaderboard(callback.message, state)
 
 
+    if action == "stats":
+        # 💬 закрываем главное меню и открываем статистику (чат остаётся чистым)
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+        await state.update_data(last_menu_msg_id=None, menu_hidden=True)
+
+        ui = await bot.send_message(
+            chat_id=callback.message.chat.id,
+            text=_render_stats_text(callback.from_user.id),
+            reply_markup=_stats_main_kb(),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        await state.update_data(stats_msg_id=ui.message_id)
+        await state.set_state(LessonStates.choosing_category)
+        return
+
+
+
     if action == "settings":
         await callback.answer()
         return await settings_menu(callback.message, state)
@@ -2885,6 +3143,121 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
     # 💬 Теперь после выбора Лексика или Грамматика мы спрашиваем уровень (A1, A2 и т.д.).
 
 
+# ================================================================================
+# 📊 Статистика: экран + шаринг другу
+# ================================================================================
+@dp.callback_query(F.data == "stats:menu")
+@track_handler
+async def stats_back_to_menu_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    # 💬 возвращаемся в главное меню, редактируя текущее сообщение (чтобы чат был чистым)
+    await mywords_show_main_menu(callback.message, state)
+    await state.update_data(last_menu_msg_id=callback.message.message_id, menu_hidden=False)
+    # 💬 чистим возможный хвост статистики
+    await state.update_data(stats_msg_id=None)
+
+@dp.callback_query(F.data == "stats:main")
+@track_handler
+async def stats_back_to_main_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    uid = callback.from_user.id
+    try:
+        await callback.message.edit_text(
+            _render_stats_text(uid),
+            reply_markup=_stats_main_kb(),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        # 💬 fallback: если edit не сработал
+        await bot.send_message(
+            chat_id=callback.message.chat.id,
+            text=_render_stats_text(uid),
+            reply_markup=_stats_main_kb(),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+    await state.update_data(menu_hidden=True, stats_msg_id=callback.message.message_id)
+
+@dp.callback_query(F.data.startswith("stats:share:"))
+@track_handler
+async def stats_share_open_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    uid = callback.from_user.id
+    try:
+        page = int(callback.data.split(":")[-1])
+    except Exception:
+        page = 0
+
+    # 💬 share-url: отправка любому (через выбор чатов)
+    deeplink = await _make_stats_deeplink(str(uid))
+    if not deeplink:
+        username = await _get_bot_username()
+        deeplink = f"https://t.me/{username}" if username else ""
+
+    if deeplink:
+        share_url = f"https://t.me/share/url?url={quote(deeplink)}&text={quote('Зайди в бот и посмотри свою статистику')}"
+    else:
+        share_url = "https://t.me/share/url?text=" + quote("Зайди в бот и посмотри свою статистику")
+
+    text = "<b>📤 Отправить статистику другу</b>\n\nВыбери друга из списка ниже"
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=_stats_share_kb(uid, share_url=share_url, page=page),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        await bot.send_message(
+            chat_id=callback.message.chat.id,
+            text=text,
+            reply_markup=_stats_share_kb(uid, share_url=share_url, page=page),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+
+@dp.callback_query(F.data.startswith("stats:send:"))
+@track_handler
+async def stats_send_to_friend_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    sender_id = callback.from_user.id
+    friend_id = callback.data.split(":")[-1]
+
+    if not friend_id.isdigit():
+        await callback.answer("Не понял, кому отправлять 🙃", show_alert=True)
+        return
+
+    friend_chat_id = int(friend_id)
+
+    # 💬 формируем сообщение другу: статистика + завуалированная ссылка на бот
+    deeplink = await _make_stats_deeplink(str(sender_id))
+    link_line = ""
+    if deeplink:
+        link_line = f"\n\n<b><a href=\"{deeplink}\">ПОСМОТРЕТЬ СВОЮ СТАТИСТИКУ</a></b>"
+
+    sender_name = html.escape(callback.from_user.full_name or "Друг")
+    friend_text = (
+        f"<b>{sender_name}</b> прислал(а) свою статистику 👇\n\n"
+        + _render_stats_text(sender_id)
+        + link_line
+    )
+
+    try:
+        await bot.send_message(
+            chat_id=friend_chat_id,
+            text=friend_text,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        await callback.answer("Отправлено ✅")
+    except Exception:
+        await callback.answer("Не смог отправить (возможно, друг не запускал бота)", show_alert=True)
+
+@dp.callback_query(F.data == "stats:noop")
+@track_handler
+async def stats_noop_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
 
 
 
@@ -3506,7 +3879,7 @@ async def settings_back_cb(callback: CallbackQuery, state: FSMContext):
             InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
         ],
 
-        [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],  # 💬 возвращаем кнопку подкастов
+        [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
 
         [
             InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
@@ -3515,9 +3888,12 @@ async def settings_back_cb(callback: CallbackQuery, state: FSMContext):
 
         [
             InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
-            InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
+            InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats"),
         ],
-    ])  # 💬 главное меню в актуальной раскладке
+
+        [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")],
+    ])  # 💬 выровненное главное меню (1,2,1,2,2,1)
+
 
     menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Выбирай"  # 💬 рандомная фраза главного меню
 
@@ -5220,25 +5596,27 @@ async def mywords_show_main_menu(message: Message, state: FSMContext):
     # 💬 возвращаемся в главное инлайн-меню без /start
     inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
-    
+
         [
             InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
             InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
         ],
 
-        [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],  # 💬 единое главное меню с подкастами
+        [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
 
-    
         [
             InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
             InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
         ],
-    
+
         [
             InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
-            InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings"),
+            InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats"),
         ],
-    ])  # 💬 выровненное главное меню
+
+        [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")],
+    ])  # 💬 выровненное главное меню (1,2,1,2,2,1)
+
 
 
     menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Выбирай"  # 💬 рандомная фраза главного меню
