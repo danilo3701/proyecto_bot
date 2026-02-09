@@ -370,13 +370,25 @@ def _kb_ref_home() -> InlineKeyboardMarkup:
 
 
 def _kb_ref_pager(prefix: str, page: int, total_pages: int, back_cb: str) -> InlineKeyboardMarkup:
-    left = max(0, page - 1)
-    right = min(total_pages - 1, page + 1)
+    # 💬 На границах не листаем дальше:
+    # - если первая страница и жмём ← = показываем toast
+    # - если последняя страница и жмём → = показываем toast
+    last_page = max(0, int(total_pages) - 1)
+
+    if page <= 0:
+        left_cb = "ref:edge:first"
+    else:
+        left_cb = f"{prefix}:{page - 1}"
+
+    if page >= last_page:
+        right_cb = "ref:edge:last"
+    else:
+        right_cb = f"{prefix}:{page + 1}"
 
     row1 = [
-        InlineKeyboardButton(text="⬅️", callback_data=f"{prefix}:{left}"),
+        InlineKeyboardButton(text="⬅️", callback_data=left_cb),
         InlineKeyboardButton(text=f"{page+1} из {total_pages}", callback_data="ref:noop"),
-        InlineKeyboardButton(text="➡️", callback_data=f"{prefix}:{right}"),
+        InlineKeyboardButton(text="➡️", callback_data=right_cb),
     ]
     row2 = [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)]
     return InlineKeyboardMarkup(inline_keyboard=[row1, row2])
@@ -631,3 +643,13 @@ async def ref_my_cb(callback: CallbackQuery):
 async def ref_noop_cb(callback: CallbackQuery):
     # 💬 кнопка-индикатор страниц
     await callback.answer()
+
+@router.callback_query(F.data == "ref:edge:first")
+async def ref_edge_first_cb(callback: CallbackQuery):
+    # 💬 Первая страница, дальше влево нельзя
+    await callback.answer("Это первая страница", show_alert=False)
+
+@router.callback_query(F.data == "ref:edge:last")
+async def ref_edge_last_cb(callback: CallbackQuery):
+    # 💬 Последняя страница, дальше вправо нельзя
+    await callback.answer("Это последняя страница", show_alert=False)
