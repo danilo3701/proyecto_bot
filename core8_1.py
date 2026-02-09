@@ -787,6 +787,10 @@ async def _lex_prepare_round_session(state: FSMContext, round_idx: int):
 
     quiz_count = sum(1 for b in session if b.get("type") == "quiz")
 
+    # 💬 FIX: готовим индексы квизов/текстквизов для cb_scenario_vocab (он читает rounds.get(...))
+    round_quiz_indices = [i for i, b in enumerate(session) if b.get("type") == "quiz"]
+    round_textquiz_idx = (text_positions[0] if text_positions else None)
+
     await state.update_data(
         lex_mode_active=True,
         lex_round=round_idx,
@@ -796,22 +800,19 @@ async def _lex_prepare_round_session(state: FSMContext, round_idx: int):
         lex_round_block_size=(quiz_count if quiz_count else max(1, len(session))),  # 💬 в text-раунде тоже нужен стабильный BLOCK
         vocab_timeout_streak=0,  # 💬 сбрасываем таймаут-стрик при старте каждого раунда (иначе 1-й таймаут может стать "2-м")
 
-        # сброс сетовой механики под новый раунд
-        vocab_index=0,
-        redo_stack=[],
-        redo_active=False,
-        refusal_count=0,
-        pending_textquiz=(text_positions if int(round_idx) >= poll_rounds else []),  # 💬 в 5-м раунде = весь сет textquiz
-        textquiz_session_active=(int(round_idx) >= poll_rounds),  # 💬 включаем режим прохождения textquiz-сета
-        redo_stack_text=[],  # 💬 отдельный redo для textquiz, чтобы повторы работали внутри сета
-        lex_textquiz_done_round=False,
-        last_main_quiz_index=-1,
-        vocab_set_anchor=0,
-        current_poll_id=None,
-        current_poll_correct=None,
-        failed_vocab=[],
-        failed_textquiz=[]
+        # 💬 FIX: сохраняем то, что cb_scenario_vocab ожидает через rounds.get(...)
+        lex_round_quiz_indices=round_quiz_indices,
+        lex_round_textquiz_idx=round_textquiz_idx,
+        lex_is_textquiz_round=is_text_round,
     )
+
+    # 💬 FIX: возвращаем dict, чтобы rounds.get(...) работал
+    return {
+        "round_quiz_indices": round_quiz_indices,
+        "round_textquiz_idx": round_textquiz_idx,
+        "is_textquiz_round": is_text_round,
+    }
+
 
 import os
 
@@ -13072,7 +13073,7 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
                 # 💬 если это НЕ текстквиз-раунд, готовим следующий раунд сразу при выходе в меню
                 if (not is_textquiz_round) and (poll_done < poll_total):
                     next_round = poll_done + 1
-                    rounds = _lex_prepare_round_session(vocab_list, round_idx=next_round)
+                    rounds = await _lex_prepare_round_session(state, round_idx=next_round)
 
                     await state.update_data(
                         lex_round=next_round,
