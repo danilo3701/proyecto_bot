@@ -202,10 +202,6 @@ async def referrals_try_bind_on_start(
     async with _REF_LOCK:
         d = _load_ref_data_sync()
 
-        # 💬 referrer должен быть включен (иначе игнорируем)
-        if not _is_referrer_enabled(d, referrer_id):
-            return
-
         # 💬 не дублируем приведённого
         user_to_ref = d.setdefault("user_to_referrer", {})
         if str(new_user_id) in user_to_ref:
@@ -455,13 +451,9 @@ async def referrals_open_cb(callback: CallbackQuery):
         f"💰 Начислено всего = <b>{_format_money(earned)}</b> €\n"
         f"💸 Выплачено = <b>{_format_money(paid_out)}</b> €\n"
         f"🧾 К выплате = <b>{_format_money(due)}</b> €\n\n"
+        "Выбери раздел:"
     )
 
-    if not enabled:
-        txt += (
-            "ℹ️ Этот раздел активируется админом.\n"
-            "Если ты партнёр = напиши админу, чтобы включить ссылку.\n\n"
-        )
 
     txt += "Выбери раздел:"
 
@@ -509,24 +501,6 @@ async def ref_link_cb(callback: CallbackQuery):
         d = _load_ref_data_sync()
         r = _get_or_create_referrer(d, referrer_id)
         _save_ref_data_sync(d)
-
-    enabled = bool(r.get("enabled"))
-    if not enabled:
-        txt = (
-            "🔗 <b>Моя ссылка</b>\n\n"
-            "Пока ссылка не активирована.\n"
-            "Напиши админу, чтобы включить партнёрскую программу.\n\n"
-            "📜 Правила можно прочитать в разделе «Правила»."
-        )
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📜 Правила", callback_data="ref:rules:0")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="ref:home")],
-        ])
-        try:
-            await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
-        except TelegramBadRequest:
-            await callback.message.answer(txt, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
-        return
 
     deeplink = await _make_ref_deeplink(callback.bot, referrer_id)
 
