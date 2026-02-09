@@ -9446,7 +9446,17 @@ async def _upsert_vocab_quiz_progress(chat_id: int, state: FSMContext):
         await state.update_data(poll_total_phase=total)
 
 
-    correct = data.get("quiz_correct_phase", 0)
+    # 💬 прогресс считаем по "сколько квизов уже отвечено", а не по "сколько правильных"
+    done_ids = data.get("poll_done_ids") or []
+    if isinstance(done_ids, (list, tuple, set)):
+        done = len(set(done_ids))
+    else:
+        done = 0
+
+    # 💬 fallback: если done ещё не ведётся в этом сценарии, оставляем старую метрику
+    if done <= 0:
+        done = int(data.get("quiz_correct_phase", 0) or 0)
+
     # 💬 выбираем фразу без повтора подряд
     last_phrase = data.get("vocab_quiz_progress_last_phrase")
     phrase = ""
@@ -9454,7 +9464,7 @@ async def _upsert_vocab_quiz_progress(chat_id: int, state: FSMContext):
         pool = [p for p in vocab_quiz_progress_phrases if p != last_phrase] or vocab_quiz_progress_phrases
         phrase = random.choice(pool)
 
-    text = _render_vocab_quiz_progress(correct, total, phrase=phrase)
+    text = _render_vocab_quiz_progress(done, total, phrase=phrase)
     await state.update_data(vocab_quiz_progress_last_phrase=phrase)  # 💬 запоминаем, чтобы не повторять подряд
 
     msg_id = data.get("vocab_quiz_progress_msg_id")
