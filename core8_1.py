@@ -1183,14 +1183,6 @@ async def _stripe_process_event(event: dict) -> None:
             stripe_customer_id=cust_id,
             stripe_subscription_id=sub_id,
         )
-        try:
-            await referrals_apply_subscription_status(
-                tg_user_id=int(user_id),
-                status="canceled",
-                active_until=int(time.time()) - 5,
-            )
-        except Exception:
-            pass
 
         return
 
@@ -1223,12 +1215,13 @@ async def _stripe_process_event(event: dict) -> None:
         )
         try:
             await referrals_apply_invoice_paid(
-                tg_user_id=int(user_id),
+                tg_user_id=int(uid),
                 invoice_obj=obj,
                 active_until=active_until,
             )
         except Exception:
             pass  # 💬 не ломаем оплату из-за рефералки
+
 
         return
 
@@ -1256,12 +1249,13 @@ async def _stripe_process_event(event: dict) -> None:
         )
         try:
             await referrals_apply_subscription_status(
-                tg_user_id=int(user_id),
+                tg_user_id=int(uid),
                 status="canceled",
                 active_until=int(time.time()) - 5,
             )
         except Exception:
             pass
+
 
         return
 
@@ -1281,7 +1275,7 @@ async def _stripe_process_event(event: dict) -> None:
         if not uid:
             return
 
-        if status in ("canceled", "unpaid", "incomplete_expired"):
+        if status in ("canceled", "unpaid", "past_due", "incomplete", "incomplete_expired"):
             _set_premium_user(
                 user_id=int(uid),
                 active_until=int(time.time()) - 5,
@@ -1289,6 +1283,17 @@ async def _stripe_process_event(event: dict) -> None:
                 stripe_customer_id=cust_id,
                 stripe_subscription_id=sub_id,
             )
+
+            # 💬 Реферал считается неактивным при отмене или задержке оплаты
+            try:
+                await referrals_apply_subscription_status(
+                    tg_user_id=int(uid),
+                    status=("canceled" if status == "canceled" else "unpaid"),
+                    active_until=int(time.time()) - 5,
+                )
+            except Exception:
+                pass  # 💬 не ломаем подписку из-за рефералки
+
             return
 
         active_until = int(obj.get("current_period_end") or 0) or _stripe_get_subscription_period_end(sub_id)
@@ -2614,6 +2619,10 @@ async def start_handler(message: Message, state: FSMContext):
     user_data = load_user_data()
     # 💬 Получаем или создаём запись для этого user_id
     u         = user_data.setdefault(user_id, {})
+
+    # 💬 Для рефералки: привязка возможна только при самом первом /start
+    is_first_start = ("first_join" not in u)
+
 
     if message.from_user.id == ADMIN_CHAT_ID:
         u["lex_admin_unlock"] = False  # 💬 при /start сбрасываем админ-разблокировку (чтобы не оставалась навсегда)
