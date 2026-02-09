@@ -13051,41 +13051,43 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
             return await send_one_vocab(cb.message, state)
 
         if next_stage == "home":
-                    # 💬 "Домой" = уходим в меню темы, но прогресс сессии двигаем вперёд,
-                    # 💬 чтобы при повторном входе НЕ показывать последний квиз снова
-                    cur_idx = int(data.get("vocab_index", 0) or 0)
-                    next_idx = cur_idx + 1
-        
-                    # 💬 сбрасываем stage, чтобы не “лип” offer_continue
-                    await state.update_data(current_stage=None)
-                    lex_mode_active = bool(data.get("lex_mode_active"))  # 💬 фикс: берём флаг из state, иначе NameError
+            # 💬 "Домой" = уходим в меню темы, но прогресс сессии двигаем вперёд,
+            # 💬 чтобы при повторном входе НЕ показывать последний квиз снова
+            cur_idx = int(data.get("vocab_index", 0) or 0)
+            next_idx = cur_idx + 1
 
-        
-                    if lex_mode_active and lex_total:
-                        poll_done = int(data.get("lex_round", 0) or 0)
-                        is_textquiz_round = bool(data.get("lex_is_textquiz_round", False))
-        
-                        # 💬 если это НЕ текстквиз-раунд, готовим следующий раунд сразу при выходе в меню
-                        if (not is_textquiz_round) and (poll_done < poll_total):
-                            next_round = poll_done + 1
-                            rounds = _lex_prepare_round_session(vocab_list, round_idx=next_round)
-        
-                            await state.update_data(
-                                lex_round=next_round,
-                                lex_round_quiz_indices=rounds.get("round_quiz_indices", []),
-                                lex_round_textquiz_idx=rounds.get("round_textquiz_idx"),
-                                vocab_index=(rounds.get("round_quiz_indices") or [0])[0],
-                                lex_textquiz_done_round=False,
-                                lex_is_textquiz_round=False,
-                            )
-                        else:
-                            # 💬 иначе просто двигаем vocab_index на следующий элемент
-                            await state.update_data(vocab_index=min(next_idx, len(vocab_list)))
-                    else:
-                        # 💬 обычный режим = просто двигаем индекс
-                        await state.update_data(vocab_index=min(next_idx, len(vocab_list)))
-        
-                    return await lesson_menu_handler(cb.message, state)
+            # 💬 сбрасываем stage, чтобы не “лип” offer_continue
+            await state.update_data(current_stage=None)
+
+            # 💬 FIX: vocab_list нужен для _lex_prepare_round_session даже при выходе "Домой"
+            vocab_list = get_vocab_list(data)
+
+            # 💬 FIX: lex_mode_active должен читаться из FSM data, а не как локальная переменная
+            lex_mode_active = bool(data.get("lex_mode_active", False))
+
+            if lex_mode_active and lex_total:
+                poll_done = int(data.get("lex_round", 0) or 0)
+                is_textquiz_round = bool(data.get("lex_is_textquiz_round", False))
+
+                # 💬 если это НЕ текстквиз-раунд, готовим следующий раунд сразу при выходе в меню
+                if (not is_textquiz_round) and (poll_done < poll_total):
+                    next_round = poll_done + 1
+                    rounds = _lex_prepare_round_session(vocab_list, round_idx=next_round)
+
+                    await state.update_data(
+                        lex_round=next_round,
+                        lex_round_quiz_indices=rounds.get("round_quiz_indices", []),
+                        lex_round_textquiz_idx=rounds.get("round_textquiz_idx"),
+                        vocab_index=(rounds.get("round_quiz_indices") or [0])[0],
+                        lex_textquiz_done_round=False,
+                        lex_is_textquiz_round=False,
+                    )
+                else:
+                    # 💬 иначе просто двигаем vocab_index на следующий элемент
+                    await state.update_data(vocab_index=min(next_idx, len(vocab_list) - 1))
+
+            return await lesson_menu_handler(cb.message, state)
+
         
 
 
