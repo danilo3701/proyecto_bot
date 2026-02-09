@@ -245,6 +245,14 @@ from bonuses_feature import (
     bonus_register_referral_from_start,
     bonus_try_qualify_referral,
 )  # 💬 модуль «🎁 Бонусы»
+
+from referral_feature import (
+    router as referral_router,
+    referrals_try_bind_on_start,
+    referrals_apply_invoice_paid,
+    referrals_apply_subscription_status,
+)
+
 from podcasts_feature import router as podcasts_router, init_podcasts_feature, podcasts_open  # 💬 модуль "Подкасты"
 from grammar_feature import router as grammar_router, init_grammar_feature, set_topics_ref as set_grammar_topics_ref, open_grammar_topic  # 💬 модуль "Грамматика"
 
@@ -341,6 +349,7 @@ if not getattr(bot, "_bcid_fix_installed", False):
 # ——— Подключаем админские роутеры ————————————————————————————————
 dp.include_router(battle_router)  # 💬 подключаем хендлеры "Битвы"
 dp.include_router(bonuses_router)  # 💬 подключаем хендлеры «Бонусы»
+dp.include_router(referral_router)
 dp.include_router(podcasts_router)  # 💬 подключаем модуль "Подкасты"
 dp.include_router(create_topic_router)
 dp.include_router(grammar_router)  # 💬 подключаем грамматику
@@ -1174,6 +1183,15 @@ async def _stripe_process_event(event: dict) -> None:
             stripe_customer_id=cust_id,
             stripe_subscription_id=sub_id,
         )
+        try:
+            await referrals_apply_subscription_status(
+                tg_user_id=int(user_id),
+                status="canceled",
+                active_until=int(time.time()) - 5,
+            )
+        except Exception:
+            pass
+
         return
 
     if etype in ("invoice.paid", "invoice.payment_succeeded"):
@@ -1203,6 +1221,15 @@ async def _stripe_process_event(event: dict) -> None:
             stripe_customer_id=cust_id,
             stripe_subscription_id=sub_id,
         )
+        try:
+            await referrals_apply_invoice_paid(
+                tg_user_id=int(user_id),
+                invoice_obj=obj,
+                active_until=active_until,
+            )
+        except Exception:
+            pass  # 💬 не ломаем оплату из-за рефералки
+
         return
 
     if etype == "customer.subscription.deleted":
@@ -1227,6 +1254,15 @@ async def _stripe_process_event(event: dict) -> None:
             stripe_customer_id=cust_id,
             stripe_subscription_id=sub_id,
         )
+        try:
+            await referrals_apply_subscription_status(
+                tg_user_id=int(user_id),
+                status="canceled",
+                active_until=int(time.time()) - 5,
+            )
+        except Exception:
+            pass
+
         return
 
     if etype == "customer.subscription.updated":
@@ -1549,6 +1585,7 @@ def ensure_my_words_user(data: dict, user_id: str) -> dict:
     # 💬 создаём структуру пользователя, если её ещё нет
     users = data.setdefault("users", {})
     u = users.setdefault(user_id, {})
+    is_first_start = ("first_join" not in u)  # 💬 важно для рефералки: учитываем только первый /start
     u.setdefault("settings", {"session_words": 5})
     u.setdefault("categories", {})
     return u
@@ -2604,6 +2641,18 @@ async def start_handler(message: Message, state: FSMContext):
 
     # 💬 регистрируем реферальный payload (как раньше)
     bonus_register_referral_from_start(user_id, payload_for_ref)
+
+    try:
+        await referrals_try_bind_on_start(
+            new_user_id=int(user_id),
+            raw_payload=raw_payload,
+            is_first_start=is_first_start,
+            tg_username=("@"+message.from_user.username) if message.from_user.username else "",
+            full_name=message.from_user.full_name or "",
+        )
+    except Exception:
+        pass  # 💬 рефералка не должна валить старт
+
 
 
 
@@ -3837,6 +3886,10 @@ async def settings_menu(message: Message, state: FSMContext):
             InlineKeyboardButton(text="⏰ Время уведомления", callback_data="settings:notify"),
         ],
         [
+            InlineKeyboardButton(text="🤝 Рефералы", callback_data="settings:referrals"),
+        ],
+
+        [
             toggle_btn,
         ],
         [
@@ -3857,6 +3910,11 @@ async def settings_menu(message: Message, state: FSMContext):
         await message.edit_text(txt, reply_markup=kb)  # 💬 не плодим новые сообщения
     except Exception:
         await message.answer(txt, reply_markup=kb)  # 💬 fallback если edit_text нельзя
+
+@dp.callback_query(F.data == "settings:open")
+async def settings_open_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await settings_menu(callback.message, state)  # 💬 возврат именно в меню настроек
 
 
 
