@@ -35,8 +35,14 @@ REFERRALS_BACKUP_PATH = os.getenv("REFERRALS_BACKUP_PATH", "/data/referrals_data
 # 💬 payload для deep-link: /start refpay_<referrer_id>
 REF_PAYLOAD_PREFIX = "refpay_"
 
-OWNER_USER_ID = _safe_int(os.getenv("OWNER_USER_ID", "0"))  # 💬 жесткая проверка владельца
+# 💬 жесткая проверка владельца (нельзя использовать _safe_int, он объявлен ниже)
+try:
+    OWNER_USER_ID = int(os.getenv("OWNER_USER_ID", "0"))
+except Exception:
+    OWNER_USER_ID = 0
+
 _PAYOUT_WAIT: dict[int, bool] = {}  # 💬 owner_id -> ждём ввод "user_id amount"
+
 
 
 # 💬 кэш username бота, чтобы не дергать getMe постоянно
