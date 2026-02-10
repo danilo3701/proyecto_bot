@@ -17,6 +17,10 @@ import re
 import time
 from typing import Any, Optional
 
+from aiogram.filters import Command
+from aiogram.types import Message
+
+
 from urllib.parse import quote
 
 from aiogram import Router, F
@@ -30,6 +34,10 @@ REFERRALS_BACKUP_PATH = os.getenv("REFERRALS_BACKUP_PATH", "/data/referrals_data
 
 # 💬 payload для deep-link: /start refpay_<referrer_id>
 REF_PAYLOAD_PREFIX = "refpay_"
+
+OWNER_USER_ID = _safe_int(os.getenv("OWNER_USER_ID", "0"))  # 💬 жесткая проверка владельца
+_PAYOUT_WAIT: dict[int, bool] = {}  # 💬 owner_id -> ждём ввод "user_id amount"
+
 
 # 💬 кэш username бота, чтобы не дергать getMe постоянно
 _BOT_USERNAME_CACHE: str | None = None
@@ -99,8 +107,10 @@ def _get_or_create_referrer(d: dict, referrer_id: str) -> dict:
     r = referrers.setdefault(referrer_id, {})
     r.setdefault("enabled", False)  # 💬 включается админом (ручной флаг)
     r.setdefault("created_at", _now())
-    r.setdefault("earned_cents", 0)   # 💬 начислено всего
-    r.setdefault("paid_out_cents", 0) # 💬 выплачено вручную
+    # 💬 Новая финансовая модель (backward-compatible)
+    r.setdefault("accrued_total_cents", _safe_int(r.get("earned_cents"), 0))
+    r.setdefault("paid_total_cents", _safe_int(r.get("paid_out_cents"), 0))
+
     r.setdefault("referred", {})      # user_id -> data
     r.setdefault("events", [])        # 💬 журнал начислений
     return r
@@ -282,8 +292,14 @@ async def referrals_apply_invoice_paid(
         pct = _tier_percent(active_cnt)
         commission_cents = int(round(gross_cents * pct))
 
+        # 💬 Новая модель: accrued_total растёт сразу после успешной оплаты
+        r["accrued_total_cents"] = _safe_int(r.get("accrued_total_cents"), _safe_int(r.get("earned_cents"), 0)) + commission_cents
+
+        # 💬 backward-compatible поля (не ломаем старые данные/экраны)
         r["earned_cents"] = _safe_int(r.get("earned_cents")) + commission_cents
+
         u["earned_cents"] = _safe_int(u.get("earned_cents")) + commission_cents
+
 
         ev = {
             "ts": now_ts,
@@ -360,6 +376,7 @@ def _kb_ref_home() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 Мои рефералы", callback_data="ref:my:0")],
         [InlineKeyboardButton(text="🔗 Моя ссылка", callback_data="ref:link")],
+        [InlineKeyboardButton(text="💸 Запросить выплату", callback_data="ref:payout_request")],
         [InlineKeyboardButton(text="📜 Правила", callback_data="ref:rules:0")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:open")],
     ])
@@ -438,24 +455,23 @@ async def referrals_open_cb(callback: CallbackQuery):
     active_cnt = _active_paying_count(r, now_ts)
     pct = _tier_percent(active_cnt)
 
-    earned = _safe_int(r.get("earned_cents"))
-    paid_out = _safe_int(r.get("paid_out_cents"))
-    due = earned - paid_out
-
-    enabled = bool(r.get("enabled"))
+    # 💬 Новая фин-модель (backward-compatible)
+    accrued_total = _safe_int(r.get("accrued_total_cents"), _safe_int(r.get("earned_cents"), 0))
+    paid_total = _safe_int(r.get("paid_total_cents"), _safe_int(r.get("paid_out_cents"), 0))
+    balance_due = max(0, accrued_total - paid_total)
 
     txt = (
         "🤝 <b>Рефералы</b>\n\n"
         f"📈 Текущий процент = <b>{int(pct*100)}%</b>\n"
         f"✅ Активных платящих = <b>{active_cnt}</b>\n\n"
-        f"💰 Начислено всего = <b>{_format_money(earned)}</b> €\n"
-        f"💸 Выплачено = <b>{_format_money(paid_out)}</b> €\n"
-        f"🧾 К выплате = <b>{_format_money(due)}</b> €\n\n"
+        f"💳 Баланс к выплате = <b>{_format_money(balance_due)}</b> €\n"
+        "📌 Выплата доступна от <b>30</b> €\n\n"
+        f"💰 Начислено всего = <b>{_format_money(accrued_total)}</b> €\n"
+        f"💸 Выплачено всего = <b>{_format_money(paid_total)}</b> €\n\n"
         "Выбери раздел:"
     )
 
 
-    txt += "Выбери раздел:"
 
     try:
         await callback.message.edit_text(txt, reply_markup=_kb_ref_home(), parse_mode="HTML", disable_web_page_preview=True)
@@ -467,6 +483,26 @@ async def referrals_open_cb(callback: CallbackQuery):
 async def ref_home_cb(callback: CallbackQuery):
     await callback.answer()
     return await referrals_open_cb(callback)
+
+
+@router.callback_query(F.data == "ref:payout_request")
+async def ref_payout_request_cb(callback: CallbackQuery):
+    # 💬 Только alert/toast, без сообщений
+    referrer_id = str(callback.from_user.id)
+
+    async with _REF_LOCK:
+        d = _load_ref_data_sync()
+        r = _get_or_create_referrer(d, referrer_id)
+
+        accrued_total = _safe_int(r.get("accrued_total_cents"), _safe_int(r.get("earned_cents"), 0))
+        paid_total = _safe_int(r.get("paid_total_cents"), _safe_int(r.get("paid_out_cents"), 0))
+        balance_due = max(0, accrued_total - paid_total)
+
+    if balance_due < 3000:
+        await callback.answer("Выплата доступна только от 30 €", show_alert=True)
+        return
+
+    await callback.answer("Запрос получен. Я свяжусь с тобой для выплаты.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("ref:rules:"))
@@ -627,3 +663,85 @@ async def ref_edge_first_cb(callback: CallbackQuery):
 async def ref_edge_last_cb(callback: CallbackQuery):
     # 💬 Последняя страница, дальше вправо нельзя
     await callback.answer("Это последняя страница", show_alert=False)
+
+@router.message(Command("payout"))
+async def cmd_payout(message: Message):
+    # 💬 Доступ только владельцу
+    if OWNER_USER_ID <= 0 or message.from_user.id != OWNER_USER_ID:
+        await message.answer("Команда недоступна.")
+        return
+
+    _PAYOUT_WAIT[message.from_user.id] = True
+    await message.answer("Ок. Отправь: user_id сумма\nНапример: 123456789 30")
+
+
+@router.message(F.text)
+async def cmd_payout_input(message: Message):
+    # 💬 Ловим только если владелец в режиме ожидания ввода
+    if OWNER_USER_ID <= 0 or message.from_user.id != OWNER_USER_ID:
+        return
+    if not _PAYOUT_WAIT.get(message.from_user.id):
+        return
+
+    raw = (message.text or "").strip()
+    parts = raw.split()
+    if len(parts) != 2:
+        await message.answer("Неверный формат. Нужно: user_id сумма\nНапример: 123456789 30")
+        return
+
+    ref_uid_raw, amount_raw = parts[0], parts[1].replace(",", ".")
+    if not ref_uid_raw.isdigit():
+        await message.answer("user_id должен быть числом.")
+        return
+
+    try:
+        amount_eur = float(amount_raw)
+    except Exception:
+        await message.answer("Сумма должна быть числом. Например: 30 или 30.50")
+        return
+
+    if amount_eur <= 0:
+        await message.answer("Сумма должна быть > 0")
+        return
+
+    amount_cents = int(round(amount_eur * 100))
+    referrer_id = str(int(ref_uid_raw))
+
+    async with _REF_LOCK:
+        d = _load_ref_data_sync()
+        r = _get_or_create_referrer(d, referrer_id)
+
+        accrued_total = _safe_int(r.get("accrued_total_cents"), _safe_int(r.get("earned_cents"), 0))
+        paid_total = _safe_int(r.get("paid_total_cents"), _safe_int(r.get("paid_out_cents"), 0))
+        balance_due = max(0, accrued_total - paid_total)
+
+        if amount_cents > balance_due:
+            await message.answer(f"Ошибка. Сумма больше баланса.\nБаланс = {_format_money(balance_due)} €")
+            return
+
+        # 💬 применяем выплату
+        r["paid_total_cents"] = paid_total + amount_cents
+        r["paid_out_cents"] = _safe_int(r.get("paid_out_cents")) + amount_cents  # backward-compatible
+
+        new_paid_total = _safe_int(r.get("paid_total_cents"))
+        new_balance_due = max(0, accrued_total - new_paid_total)
+
+        _save_ref_data_sync(d)
+
+    # 💬 выходим из режима ожидания
+    _PAYOUT_WAIT.pop(message.from_user.id, None)
+
+    # 💬 clean chat: удаляем сообщение ввода владельца (best effort)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    await message.answer(
+        "ОК. Выплачено +{amt}€.\nТеперь: paid_total={paid}€, balance_due={bal}€".format(
+            amt=_format_money(amount_cents),
+            paid=_format_money(new_paid_total),
+            bal=_format_money(new_balance_due),
+        )
+    )
+
