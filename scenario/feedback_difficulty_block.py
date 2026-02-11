@@ -1,4 +1,5 @@
-# feedback_difficulty_block.py
+# proyecto_bot/scenario/feedback_difficulty_block.py
+
 # 💬 Список вариантов реакции на уровень сложности — “feedback_difficulty”
 
 feedback_variants = [
@@ -30,3 +31,4 @@ feedback_difficulty = [
     }
     for text, btn1, btn2, reaction1, reaction2 in feedback_variants
 ]
+
