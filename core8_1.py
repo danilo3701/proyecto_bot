@@ -255,7 +255,8 @@ from referral_feature import (
 )
 
 from podcasts_feature import router as podcasts_router, init_podcasts_feature, podcasts_open  # 💬 модуль "Подкасты"
-from grammar_future import router as grammar_router, init_grammar_future
+from grammar_future import router as grammar_router, init_grammar_future, gram_menu_entry  # 💬 нужен прямой вход в новый модуль
+
 
 
 # ——— Сценарии для учеников ——————————————————————————————————————
@@ -3058,6 +3059,11 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
     if action == "read_legacy":
         action = "translate"
 
+    # 💬 menu:grammar может нажиматься, пока пользователь всё ещё в LessonStates.choosing_category
+    # 💬 этот хендлер перехватывает все menu:* и если не обработать = будет вечная загрузка
+    if action in ("grammar", "gram"):
+        return await gram_menu_entry(callback, state)
+
 
 
     # 🏆/⚙️ — сразу открываем соответствующие разделы
@@ -3850,14 +3856,10 @@ async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
         return
         
     elif action == "gram":
-        await state.update_data(chosen_category="gram")  # 💬 фиксируем категорию грамматики
-        if str(level).upper() == "A0":
-            level = "A1-A2"  # 💬 грамматика начинается с начального, A0 пропускаем
-            await state.update_data(chosen_level=level)  # 💬 чтобы темы/назад работали без рассинхрона
+        # 💬 старая грамматика внутри Learn-flow больше не используется
+        # 💬 редиректим в новый модуль GrammarFuture
+        return await gram_menu_entry(callback, state)
 
-        await show_topics_for_category_level(callback, state, category="gram", level=level)  # 💬 показываем темы грамматики
-        await callback.answer()  # 💬 закрываем loading
-        return
 
 
 
@@ -5146,6 +5148,7 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
         )
         await query.answer()
         return
+        
 
 
     # 💬 Сохраняем выбранную тему в FSM
@@ -5153,12 +5156,15 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
 
     if is_premium_active(query.from_user.id):
         # 💬 Premium = пропускаем рекламную подписку и подписки на каналы
+        # 💬 грамматика вынесена в отдельный модуль, поэтому в topics больше НЕ должно быть category="gram"
         if topics.get(topic_key, {}).get("category") == "gram":
-            await safe_open_grammar_topic(query.message, state)
-        else:
-            await lesson_menu_handler(query.message, state)
+            await query.answer("Грамматика теперь в отдельном разделе 🧠", show_alert=True)
+            return
+
+        await lesson_menu_handler(query.message, state)
         await query.answer()
         return
+
 
 
     user_id_str = str(query.from_user.id)
