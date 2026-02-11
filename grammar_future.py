@@ -33,6 +33,8 @@ from aiogram.types.reaction_type_emoji import ReactionTypeEmoji
 
 router = Router()
 
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔧 DEPENDENCY INJECTION (из core8_1.py)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -921,8 +923,13 @@ async def admin_entry(message: Message, state: FSMContext) -> None:
     """
     Вход в админку грамматики
     """
-    if _ADMIN_CHAT_ID and message.chat.id != _ADMIN_CHAT_ID:
-        return
+    # 💬 Секретная команда: доступ только по твоему user_id (остальные молча игнор)
+    if _ADMIN_CHAT_ID:
+        uid = message.from_user.id if message.from_user else None
+        if uid != _ADMIN_CHAT_ID:
+            return
+
+
     
     await state.clear()
     await message.answer("🔧 Админка грамматики", reply_markup=kb_admin_main())
