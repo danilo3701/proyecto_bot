@@ -924,10 +924,6 @@ async def admin_entry(message: Message, state: FSMContext) -> None:
     Вход в админку грамматики
     """
     # 💬 Секретная команда: доступ только по твоему user_id (остальные молча игнор)
-    if _ADMIN_CHAT_ID:
-        uid = message.from_user.id if message.from_user else None
-        if uid != _ADMIN_CHAT_ID:
-            return
 
 
     
