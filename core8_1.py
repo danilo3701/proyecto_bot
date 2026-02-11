@@ -254,7 +254,7 @@ from referral_feature import (
 )
 
 from podcasts_feature import router as podcasts_router, init_podcasts_feature, podcasts_open  # 💬 модуль "Подкасты"
-from grammar_feature import router as grammar_router, init_grammar_feature, set_topics_ref as set_grammar_topics_ref, open_grammar_topic  # 💬 модуль "Грамматика"
+from grammar_future import router as grammar_router, init_grammar_future
 
 
 # ——— Сценарии для учеников ——————————————————————————————————————
@@ -385,7 +385,7 @@ def load_topics_from_volume() -> dict:
 topics = topics = load_topics_from_volume()  # 💬 грузим темы только из Railway Volume (/data/topics)
 
 # 💬 что делает эта часть: topics уже взяли из Volume, локальные ./topics и GitHub не используем
-set_grammar_topics_ref(topics)  # 💬 передаём topics в модуль грамматики
+
 set_topics_ref(topics)          # 💬 передаём topics в модуль "Битва" без круговых импортов
 
 
@@ -1979,16 +1979,12 @@ init_podcasts_feature(
     bot=bot,
 )  # 💬 пробрасываем зависимости в модуль "Подкасты"
 
-init_grammar_feature(
+init_grammar_future(
     load_user_data=load_user_data,
     save_user_data=save_user_data,
-    show_topics_for_category_level=(lambda *args, **kwargs: globals()["show_topics_for_category_level"](*args, **kwargs)),  # 💬 прокси чтобы избежать NameError при импорте
-    start_handler=(lambda *args, **kwargs: globals()["start_handler"](*args, **kwargs)),  # 💬 прокси чтобы избежать NameError при импорте
     admin_chat_id=ADMIN_CHAT_ID,
     bot=bot,
-)  # 💬 пробрасываем зависимости в модуль грамматики
-
-
+)  # 💬 пробрасываем зависимости в новый модуль грамматики
 
 # ─── УТИЛИТЫ XP ───────────────────────────────────────
 
@@ -2705,7 +2701,6 @@ async def start_handler(message: Message, state: FSMContext):
     global topics
     topics = load_topics_from_railway()  # 💬 перезагружаем темы ТОЛЬКО из /data/topics
     set_topics_ref(topics)               # 💬 обновляем topics для "Битвы"
-    set_grammar_topics_ref(topics)       # 💬 обновляем topics для "Грамматики"
 
 
 
@@ -2752,28 +2747,29 @@ async def start_handler(message: Message, state: FSMContext):
 
     # 💬 Главное меню теперь ИНЛАЙН — без ReplyKeyboard (ничего не «висит» внизу)
     inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
-
-        [
-            InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
-            InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
-        ],
-
-        [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
-
-        [
-            InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
-            InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
-        ],
-
-        [
-            InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
-            InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats"),
-        ],
-
-        [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")],
-    ])  # 💬 выровненное главное меню (1,2,1,2,2,1)
-
+            [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
+    
+            [
+                InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
+                InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
+            ],
+    
+            [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
+    
+            [InlineKeyboardButton(text="🧠 Грамматика", callback_data="menu:grammar")],  # ← НОВАЯ СТРОКА
+    
+            [
+                InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
+                InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
+            ],
+    
+            [
+                InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
+                InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats"),
+            ],
+    
+            [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")],
+        ])  # 💬 выровненное главное меню (1,2,1,1,2,2,1)  ← ОБНОВИТЬ КОММЕНТАРИЙ
 
 
 
@@ -3939,28 +3935,29 @@ async def settings_back_cb(callback: CallbackQuery, state: FSMContext):
     )  # 💬 чистим режим ввода настроек
 
     inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
-
-        [
-            InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
-            InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
-        ],
-
-        [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
-
-        [
-            InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
-            InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
-        ],
-
-        [
-            InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
-            InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats"),
-        ],
-
-        [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")],
-    ])  # 💬 выровненное главное меню (1,2,1,2,2,1)
-
+            [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
+    
+            [
+                InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
+                InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
+            ],
+    
+            [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
+    
+            [InlineKeyboardButton(text="🧠 Грамматика", callback_data="menu:grammar")],  # ← НОВАЯ СТРОКА
+    
+            [
+                InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
+                InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
+            ],
+    
+            [
+                InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
+                InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats"),
+            ],
+    
+            [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")],
+        ])  # 💬 выровненное главное меню (1,2,1,1,2,2,1)  ← ОБНОВИТЬ КОММЕНТАРИЙ
 
     menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Выбирай"  # 💬 рандомная фраза главного меню
 
@@ -5008,32 +5005,6 @@ async def inline_back_to_menu(callback: CallbackQuery, state: FSMContext):
 
 
 
-async def safe_open_grammar_topic(message: Message, state: FSMContext):
-    # 💬 безопасно открываем меню грамматики даже если текущее сообщение нельзя редактировать
-    try:
-        # 💬 снимаем кнопки с текущего экрана, чтобы не спамили кликами
-        try:
-            await message.edit_reply_markup(reply_markup=None)
-        except TelegramBadRequest:
-            pass
-
-        return await open_grammar_topic(message, state)
-
-    except TelegramBadRequest:
-        # 💬 fallback: создаём текстовое "хост-сообщение", которое точно можно редактировать
-        host = None
-        try:
-            host = await message.answer("⏳", reply_markup=ReplyKeyboardRemove())
-        except Exception:
-            host = message
-
-        try:
-            return await open_grammar_topic(host, state)
-        except TelegramBadRequest:
-            # 💬 последний fallback: хотя бы не падаем и возвращаем стандартное меню урока
-            return await lesson_menu_handler(host, state)
-
-
 
 
 
@@ -5061,8 +5032,6 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
         await query.answer()
 
 
-    # 💬 В грамматике обычно редактируем это же сообщение (edit_text) = не удаляем его заранее
-    is_gram = topics.get(topic_key, {}).get("category") == "gram"
 
     # 💬 что делает эта часть: если тема уже 100% = предупреждаем и не удаляем список тем
     try:
@@ -5230,9 +5199,6 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
                 save_user_data(data)
             topic = topics.get(topic_key, {})  # 💬 достаём тему, чтобы понять category
             
-            if topics.get(topic_key, {}).get("category") == "gram":
-                return await safe_open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню без TelegramBadRequest
-
 
             return await lesson_menu_handler(query.message, state)  # 💬 query = текущий CallbackQuery
 
@@ -5276,10 +5242,6 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
         if topic_key not in unlocked:
             unlocked.append(topic_key)
             save_user_data(data)
-        if topics.get(topic_key, {}).get("category") == "gram":
-            return await safe_open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню без TelegramBadRequest
-
-
 
         return await lesson_menu_handler(query.message, state)
 
@@ -5308,9 +5270,6 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
         u.pop("ad_subscription", None)
 
         save_user_data(data)
-        if topics.get(topic_key, {}).get("category") == "gram":
-            return await safe_open_grammar_topic(query.message, state)  # 💬 грамматика: отдельное меню без TelegramBadRequest
-
 
         return await lesson_menu_handler(query.message, state)
 
@@ -5662,29 +5621,30 @@ def mywords_build_quiz_options(correct_es: str, all_es: list) -> tuple[list, int
 async def mywords_show_main_menu(message: Message, state: FSMContext):
     # 💬 возвращаемся в главное инлайн-меню без /start
     inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
-
-        [
-            InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
-            InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
-        ],
-
-        [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
-
-        [
-            InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
-            InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
-        ],
-
-        [
-            InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
-            InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats"),
-        ],
-
-        [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")],
-    ])  # 💬 выровненное главное меню (1,2,1,2,2,1)
-
-
+            [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
+    
+            [
+                InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
+                InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
+            ],
+    
+            [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
+    
+            [InlineKeyboardButton(text="🧠 Грамматика", callback_data="menu:grammar")],  # ← НОВАЯ СТРОКА
+    
+            [
+                InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
+                InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
+            ],
+    
+            [
+                InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
+                InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats"),
+            ],
+    
+            [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")],
+        ])  # 💬 выровненное главное меню (1,2,1,1,2,2,1)  ← ОБНОВИТЬ КОММЕНТАРИЙ
+    
 
     menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Выбирай"  # 💬 рандомная фраза главного меню
 
