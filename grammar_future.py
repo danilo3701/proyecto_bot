@@ -352,6 +352,8 @@ async def gram_menu_entry(cb: CallbackQuery, state: FSMContext) -> None:
     """
     Вход в модуль грамматики из главного меню
     """
+    await cb.answer()  # 💬 сразу закрываем loading, чтобы не зависало при долгом рендере/ошибке edit
+
     await state.clear()  # Очищаем состояние
     
     user_id = cb.from_user.id
@@ -368,7 +370,7 @@ async def gram_menu_entry(cb: CallbackQuery, state: FSMContext) -> None:
     
     # Рендерим экран
     await _render_topics_screen(cb.message, state, user_id, screen_idx=0, topics=topics, progress=progress)
-    await cb.answer()
+
 
 
 async def _render_topics_screen(
