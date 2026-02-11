@@ -717,17 +717,31 @@ async def _run_quiz_flow(
                 break
             
             quiz = quiz_queue.pop(0)
+
+            # 💬 Перемешиваем варианты на показе (в storage правильный всегда первым)
+            options = list(quiz.get("options", []) or [])
+            correct_idx = int(quiz.get("correct_index", 0))
+
+            if options and 0 <= correct_idx < len(options):
+                correct_answer = options[correct_idx]
+                random.shuffle(options)
+                correct_idx = options.index(correct_answer)
+            else:
+                # 💬 если квиз битый = безопасно не падаем
+                correct_idx = 0
+
             
             # Отправляем poll
             try:
                 poll_msg = await message.answer_poll(
                     question=quiz.get("question", ""),
-                    options=quiz.get("options", []),
+                    options=options,
                     type="quiz",
-                    correct_option_id=int(quiz.get("correct_index", 0)),
+                    correct_option_id=correct_idx,
                     is_anonymous=False,
                     open_period=POLL_TIMEOUT_SEC,
                 )
+
                 poll_msg_ids.append(poll_msg.message_id)
             except Exception as e:
                 logging.exception(f"Failed to send poll: {e}")
