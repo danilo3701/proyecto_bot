@@ -1,4 +1,5 @@
-# offer_continue_block.py
+# proyecto_bot/scenario/offer_continue_block.py
+
 # 💬 Минималистичный список вариантов для offer_continue
 
 offer_continue_variants = [
@@ -29,3 +30,4 @@ offer_continue = [
     }
     for text, btn1, btn2, reaction1, reaction2 in offer_continue_variants
 ]
+
