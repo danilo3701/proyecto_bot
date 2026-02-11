@@ -1,5 +1,7 @@
 # confirm_done_block.py
 # 💬 Здесь только структура и мини-комментарии для понимания!
+#  proyecto_bot/scenario/confirm_done_block.py
+
 
 # ───────────────
 # 1. Список всех вариантов для блока "confirm_done":
@@ -42,3 +44,4 @@ confirm_done = [
 ]
 
 # Всё! confirm_done — это массив блоков с твоим стилем и структурой.
+
