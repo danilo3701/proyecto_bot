@@ -987,9 +987,7 @@ def kb_admin_pages_menu(topic_key: str) -> InlineKeyboardMarkup:
 
 @router.message(Command("grammar_admin"))
 async def admin_entry(message: Message, state: FSMContext) -> None:
-    # 💬 если задан ADMIN_CHAT_ID = пускаем только его; если 0/None = пускаем всех
-    if _ADMIN_CHAT_ID and message.from_user and message.from_user.id != _ADMIN_CHAT_ID:
-        return
+
 
     await state.clear()
 
@@ -1017,6 +1015,8 @@ async def admin_exit(cb: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "gramadm:add_topic")
 async def admin_add_topic_start(cb: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(GrammarAdminStates.waiting_topic_key)
+    await state.update_data(gram_admin_active=True, gram_admin_step="topic_key")  # 💬 маркер, что мы в админ-флоу
+
     await cb.message.answer("Введи ключ темы (латиница, цифры, _).\nПример: gram_ser_estar")
     await cb.answer()
 
@@ -1026,7 +1026,6 @@ async def admin_add_topic_key(message: Message, state: FSMContext) -> None:
     try:
         key = (message.text or "").strip()
 
-        # 💬 анти-зависание: если прилетело не текстом / пусто = сразу говорим
         if not key:
             await message.answer("❌ Отправь ключ темы текстом (латиница, цифры, _).")
             return
@@ -1043,8 +1042,13 @@ async def admin_add_topic_key(message: Message, state: FSMContext) -> None:
             return
 
         await state.update_data(adm_topic_key=key)
+
+        # 💬 фиксируем, что шаг обработан и идём дальше
+        await state.update_data(gram_admin_active=True, gram_admin_step="topic_title")
         await state.set_state(GrammarAdminStates.waiting_topic_title)
+
         await message.answer("Теперь введи название темы (на русском)")
+
 
     except Exception:
         # 💬 если где-то упали (любой баг/путь/права/IO) = не молчим, сбрасываем шаг
@@ -1052,6 +1056,22 @@ async def admin_add_topic_key(message: Message, state: FSMContext) -> None:
         await state.clear()
         await message.answer("❌ Ошибка при вводе ключа. Попробуй снова: /grammar_admin")
 
+@router.message()
+async def gram_admin_fallback(message: Message, state: FSMContext) -> None:
+    """
+    💬 Страховка от “молчаливого зависания”:
+    если пользователь в грамматике-админке, но state почему-то не совпал,
+    мы хотя бы покажем понятное сообщение, а не тишину.
+    """
+    data = await state.get_data()
+    if not data.get("gram_admin_active"):
+        return  # 💬 не мешаем другим веткам бота
+
+    # 💬 если ждали ключ/название, но хендлер не поймал = даём явную подсказку
+    step = data.get("gram_admin_step")
+    if step in ("topic_key", "topic_title"):
+        await message.answer("⚠️ Потерялся шаг админ-флоу. Начни заново: /grammar_admin")
+        return
 
 
 @router.message(GrammarAdminStates.waiting_topic_title)
