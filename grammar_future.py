@@ -1022,25 +1022,35 @@ async def admin_add_topic_start(cb: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(GrammarAdminStates.waiting_topic_key)
 async def admin_add_topic_key(message: Message, state: FSMContext) -> None:
-    key = (message.text or "").strip()
-    
-    # Валидация ключа
-    if not key or not re.match(r"^[a-z0-9_]+$", key):
-        await safe_delete_message(message.bot, message.chat.id, message.message_id)
-        await message.answer("❌ Ключ должен содержать только латиницу, цифры и _")
-        return
-    
-    # Проверяем, не существует ли уже
-    # Проверяем, не существует ли уже
-    path = TOPICS_DIR / f"{key}.json"
-    if path.exists():
-        await safe_delete_message(message.bot, message.chat.id, message.message_id)
-        await message.answer("❌ Тема с таким ключом уже существует")
-        return
-        
-    await state.update_data(adm_topic_key=key)
-    await state.set_state(GrammarAdminStates.waiting_topic_title)
-    await message.answer("Теперь введи название темы (на русском)")
+    try:
+        key = (message.text or "").strip()
+
+        # 💬 анти-зависание: если прилетело не текстом / пусто = сразу говорим
+        if not key:
+            await message.answer("❌ Отправь ключ темы текстом (латиница, цифры, _).")
+            return
+
+        # 💬 Валидация ключа
+        if not re.match(r"^[a-z0-9_]+$", key):
+            await message.answer("❌ Ключ должен содержать только латиницу, цифры и _")
+            return
+
+        # 💬 Проверяем, не существует ли уже
+        path = TOPICS_DIR / f"{key}.json"
+        if path.exists():
+            await message.answer("❌ Тема с таким ключом уже существует")
+            return
+
+        await state.update_data(adm_topic_key=key)
+        await state.set_state(GrammarAdminStates.waiting_topic_title)
+        await message.answer("Теперь введи название темы (на русском)")
+
+    except Exception:
+        # 💬 если где-то упали (любой баг/путь/права/IO) = не молчим, сбрасываем шаг
+        logging.exception("admin_add_topic_key failed")
+        await state.clear()
+        await message.answer("❌ Ошибка при вводе ключа. Попробуй снова: /grammar_admin")
+
 
 
 @router.message(GrammarAdminStates.waiting_topic_title)
