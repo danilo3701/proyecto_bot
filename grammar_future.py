@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
 from aiogram import Router, F, Bot
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -888,7 +888,8 @@ async def _complete_topic(
     await _render_topics_screen(message, state, user_id, screen_idx, topics, progress)
 
 
-@router.message(F.text == "⏹ Стоп")
+
+@router.message(F.text == "⏹ Стоп", StateFilter("*"))  # ← добавить StateFilter("*")
 async def gram_quiz_stop(message: Message, state: FSMContext) -> None:
     """
     Остановка quiz-flow
