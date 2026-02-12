@@ -255,7 +255,7 @@ from referral_feature import (
 )
 
 from podcasts_feature import router as podcasts_router, init_podcasts_feature, podcasts_open  # 💬 модуль "Подкасты"
-from grammar_future import router as grammar_router, init_grammar_future, gram_menu_entry  # 💬 нужен прямой вход в новый модуль
+from grammar_future import router as grammar_router, init_grammar_future, gram_menu_entry, admin_entry as grammar_admin_entry  # 💬 прямой вход + команда
 
 
 
@@ -3201,8 +3201,13 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
         return
 
 
-    # 💬 Теперь после выбора Лексика или Грамматика мы спрашиваем уровень (A1, A2 и т.д.).
 
+
+@dp.callback_query(F.data == "menu:grammar")
+@track_handler
+async def cb_menu_grammar_global(callback: CallbackQuery, state: FSMContext):
+    # 💬 Глобальный вход в грамматику: работает из любого state, чтобы не было вечной загрузки
+    return await gram_menu_entry(callback, state)
 
 # ================================================================================
 # 📊 Статистика: экран + шаринг другу
@@ -4625,6 +4630,13 @@ async def show_leaderboard(message: Message, state: FSMContext):
 async def menu_handler(message: Message, state: FSMContext):
     # 💬 Возвращает пользователя к выбору категории
     await start_handler(message, state)
+
+@dp.message(Command("grammar_admin"))
+@track_handler
+async def cmd_grammar_admin(message: Message, state: FSMContext):
+    # 💬 Секретная команда: не показывается в UI, но работает всегда
+    return await grammar_admin_entry(message, state)
+
 
 @dp.message(Command("lex_unlock"))
 @track_handler
