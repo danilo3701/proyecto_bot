@@ -350,7 +350,6 @@ def kb_quiz_stop() -> ReplyKeyboardMarkup:
 # ═══════════════════════════════════════════════════════════════════════════
 # 🎯 USER FLOW: Вход в грамматику (menu:grammar)
 # ═══════════════════════════════════════════════════════════════════════════
-@router.callback_query(F.data == "menu:grammar")
 async def gram_menu_entry(cb: CallbackQuery, state: FSMContext) -> None:
     """
     Вход в модуль грамматики из главного меню
@@ -918,7 +917,7 @@ def kb_admin_pages_menu(topic_key: str) -> InlineKeyboardMarkup:
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔧 ADMIN: Entry Point
 # ═══════════════════════════════════════════════════════════════════════════
-@router.message(Command("grammar_admin"))
+
 async def admin_entry(message: Message, state: FSMContext) -> None:
     """
     Вход в админку грамматики
