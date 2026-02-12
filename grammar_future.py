@@ -27,6 +27,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardRemove,
+    PollAnswer,
 )
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types.reaction_type_emoji import ReactionTypeEmoji
@@ -350,6 +351,7 @@ def kb_quiz_stop() -> ReplyKeyboardMarkup:
 # ═══════════════════════════════════════════════════════════════════════════
 # 🎯 USER FLOW: Вход в грамматику (menu:grammar)
 # ═══════════════════════════════════════════════════════════════════════════
+@router.callback_query(F.data == "menu:grammar")
 async def gram_menu_entry(cb: CallbackQuery, state: FSMContext) -> None:
     """
     Вход в модуль грамматики из главного меню
@@ -662,6 +664,12 @@ async def gram_start_quiz(cb: CallbackQuery, state: FSMContext) -> None:
     Запуск quiz-flow
     """
     data = await state.get_data()
+    
+    # Guard: не запускаем quiz, если уже запущен
+    if data.get("gram_in_quiz"):
+        await cb.answer("⚠️ Квиз уже запущен", show_alert=True)
+        return
+    
     topic_key = data.get("gram_current_topic")
     
     if not topic_key:
@@ -685,8 +693,9 @@ async def gram_start_quiz(cb: CallbackQuery, state: FSMContext) -> None:
     
     await cb.answer()
     
-    # Запускаем quiz-flow (асинхронно, не блокируем callback)
-    asyncio.create_task(_run_quiz_flow(cb.message, state, topic, cb.from_user.id))
+    # Запускаем quiz-flow и сохраняем task reference
+    task = asyncio.create_task(_run_quiz_flow(cb.message, state, topic, cb.from_user.id))
+    await state.update_data(gram_quiz_task=id(task))  # Сохраняем ID для отладки
 
 
 async def _run_quiz_flow(
@@ -746,12 +755,32 @@ async def _run_quiz_flow(
 
                 poll_msg_ids.append(poll_msg.message_id)
             except Exception as e:
-                logging.exception(f"Failed to send poll: {e}")
+                logging.exception(f"Failed to send poll for user {user_id}, topic {topic.key}: {e}")
                 continue
             
-            # Ждём ответа (упрощённая версия - просто timeout)
-            # В реальной версии нужен PollAnswer handler
-            await asyncio.sleep(POLL_TIMEOUT_SEC)
+            # Ждём ответа пользователя или timeout
+            poll_id = poll_msg.poll_id
+            timeout = POLL_TIMEOUT_SEC
+            start_time = time.time()
+            is_correct = False
+            
+            while time.time() - start_time < timeout:
+                data = await state.get_data()
+                
+                # Проверка флага stop
+                if data.get("gram_quiz_stop"):
+                    break
+                
+                # Проверка ответа пользователя
+                if data.get("last_poll_id") == poll_id:
+                    option_ids = data.get("last_option_ids", [])
+                    is_correct = correct_idx in option_ids if option_ids else False
+                    
+                    # Очищаем результат из state
+                    await state.update_data(last_poll_id=None, last_option_ids=None)
+                    break
+                
+                await asyncio.sleep(0.3)  # Проверяем каждые 300ms
             
             # Останавливаем и удаляем poll
             try:
@@ -761,8 +790,17 @@ async def _run_quiz_flow(
             
             await safe_delete_message(bot, chat_id, poll_msg.message_id)
             
-            # В упрощённой версии считаем, что все ответы правильные
-            # В реальной версии тут нужна логика с PollAnswer handler
+            # Если неправильный ответ или timeout - в конец очереди
+            if not is_correct:
+                quiz_queue.append(quiz)
+                if data.get("gram_quiz_stop"):
+                    # Если stop - не показываем сообщение
+                    pass
+                else:
+                    # Показываем краткое сообщение об ошибке
+                    explanation = quiz.get("explanation_wrong", "")
+                    if explanation:
+                        await send_and_auto_delete(message, f"❌ {explanation}", delay_sec=2)
             
             await asyncio.sleep(1)  # Пауза между квизами
         
@@ -776,8 +814,9 @@ async def _run_quiz_flow(
         for msg_id in poll_msg_ids:
             await safe_delete_message(bot, chat_id, msg_id)
         
-        # Убираем reply keyboard
-        await message.answer("✅", reply_markup=ReplyKeyboardRemove())
+        # Убираем reply keyboard (без мусора в чате)
+        rm_msg = await message.answer("✅", reply_markup=ReplyKeyboardRemove())
+        await safe_delete_message(bot, chat_id, rm_msg.message_id)
         
         await state.update_data(gram_in_quiz=False)
 
@@ -862,6 +901,33 @@ async def gram_quiz_stop(message: Message, state: FSMContext) -> None:
     await safe_delete_message(message.bot, message.chat.id, message.message_id)
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🎯 POLL ANSWER HANDLER (для quiz)
+# ═══════════════════════════════════════════════════════════════════════════
+from aiogram.types import PollAnswer
+
+@router.poll_answer()
+async def handle_quiz_poll_answer(poll_answer: PollAnswer, state: FSMContext) -> None:
+    """
+    Обработка ответов на quiz polls
+    """
+    data = await state.get_data()
+    
+    # Игнорируем если не в quiz mode
+    if not data.get("gram_in_quiz"):
+        return
+    
+    # Сохраняем результат в state для _run_quiz_flow
+    user_id = poll_answer.user.id
+    poll_id = poll_answer.poll_id
+    option_ids = poll_answer.option_ids
+    
+    # Сохраняем результат (будет прочитан в _run_quiz_flow)
+    await state.update_data(
+        last_poll_id=poll_id,
+        last_option_ids=option_ids,
+    )
 # ═══════════════════════════════════════════════════════════════════════════
 # 🎯 NOOP (заглушка)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -918,23 +984,30 @@ def kb_admin_pages_menu(topic_key: str) -> InlineKeyboardMarkup:
 # 🔧 ADMIN: Entry Point
 # ═══════════════════════════════════════════════════════════════════════════
 
+@router.message(Command("grammar_admin"))
 async def admin_entry(message: Message, state: FSMContext) -> None:
-    """
-    Вход в админку грамматики
-    """
-    # 💬 Секретная команда: доступ только по твоему user_id (остальные молча игнор)
+    # 💬 если задан ADMIN_CHAT_ID = пускаем только его; если 0/None = пускаем всех
+    if _ADMIN_CHAT_ID and message.from_user and message.from_user.id != _ADMIN_CHAT_ID:
+        return
 
-
-    
     await state.clear()
-    await message.answer("🔧 Админка грамматики", reply_markup=kb_admin_main())
 
+    await message.answer(
+        "🔧 GRAMMAR ADMIN\n\nВыбери действие:",
+        reply_markup=kb_admin_main(),
+    )
 
 @router.callback_query(F.data == "gramadm:exit")
-async def admin_exit(cb: CallbackQuery, state: FSMContext) -> None:
+async def admin_exit(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
     await state.clear()
-    await cb.message.delete()
-    await cb.answer("Админка закрыта")
+
+    try:
+        await cb.message.delete()
+    except TelegramBadRequest:
+        # 💬 если сообщение уже удалено/нельзя удалить = не падаем
+        pass
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -953,15 +1026,18 @@ async def admin_add_topic_key(message: Message, state: FSMContext) -> None:
     
     # Валидация ключа
     if not key or not re.match(r"^[a-z0-9_]+$", key):
+        await safe_delete_message(message.bot, message.chat.id, message.message_id)
         await message.answer("❌ Ключ должен содержать только латиницу, цифры и _")
         return
     
     # Проверяем, не существует ли уже
+    # Проверяем, не существует ли уже
     path = TOPICS_DIR / f"{key}.json"
     if path.exists():
+        await safe_delete_message(message.bot, message.chat.id, message.message_id)
         await message.answer("❌ Тема с таким ключом уже существует")
         return
-    
+        
     await state.update_data(adm_topic_key=key)
     await state.set_state(GrammarAdminStates.waiting_topic_title)
     await message.answer("Теперь введи название темы (на русском)")
@@ -972,6 +1048,7 @@ async def admin_add_topic_title(message: Message, state: FSMContext) -> None:
     title = (message.text or "").strip()
     
     if not title:
+        await safe_delete_message(message.bot, message.chat.id, message.message_id)
         await message.answer("❌ Название не может быть пустым")
         return
     
@@ -979,6 +1056,7 @@ async def admin_add_topic_title(message: Message, state: FSMContext) -> None:
     key = data.get("adm_topic_key")
     
     if not key:
+        await safe_delete_message(message.bot, message.chat.id, message.message_id)
         await message.answer("Ошибка состояния. /grammar_admin")
         await state.clear()
         return
@@ -1106,6 +1184,7 @@ async def admin_pages_insert_index(message: Message, state: FSMContext) -> None:
         if index < 1:
             raise ValueError()
     except ValueError:
+        await safe_delete_message(message.bot, message.chat.id, message.message_id)
         await message.answer("❌ Введи число >= 1")
         return
     
@@ -1150,12 +1229,13 @@ async def admin_pages_bulk_insert(message: Message, state: FSMContext) -> None:
     raw_text = message.text or ""
     
     # Парсим страницы
+    # Парсим страницы
     pages_raw = [p.strip() for p in raw_text.split(PAGE_DELIM) if p.strip()]
     
     if not pages_raw:
+        await safe_delete_message(message.bot, message.chat.id, message.message_id)
         await message.answer("❌ Не нашёл страниц. Проверь формат.")
         return
-    
     # Конвертируем в HTML
     pages_html = [mdish_to_html(p) for p in pages_raw]
     
@@ -1172,10 +1252,12 @@ async def admin_pages_bulk_insert(message: Message, state: FSMContext) -> None:
             break
     
     if not topic:
+        await safe_delete_message(message.bot, message.chat.id, message.message_id)
         await message.answer("Тема не найдена. /grammar_admin")
         await state.clear()
         return
     
+    # Вставляем страницы
     # Вставляем страницы
     insert_pos = insert_index - 1  # 1-based -> 0-based
     if insert_pos < 0:
