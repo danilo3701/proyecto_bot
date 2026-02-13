@@ -312,10 +312,14 @@ VID_GIF_FOLDER      = "gif/dudoso_after_link"   # То же для видео (�
 ADS_VIDEO_FOLDER = "ads_videos" # ——— Папка с видеорекламой
 
 # ——— Инициализация бота и FSM ——————————————————————————————————————
-BOT_TOKEN = "7267599701:AAG4duS6_2R8PFpoUzroIY1M5ib1OWw8o6s"  
-bot        = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-dp         = Dispatcher(storage=MemoryStorage())  
+# ——— Инициализация бота и FSM ——————————————————————————————————————
+BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
+if not BOT_TOKEN:
+    # 💬 если токен не задан в Railway Variables = падаем явно, чтобы не было "молчания"
+    raise RuntimeError("BOT_TOKEN is empty. Set Railway Variables -> BOT_TOKEN for this service.")
 
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+dp  = Dispatcher(storage=MemoryStorage())
 
 # 💬 фиксим business_connection_id: aiogram ожидает str, иногда прилетает int (chat_id/user_id)
 def _coerce_bcid(kwargs: dict) -> None:
