@@ -474,7 +474,7 @@ async def start_adding_topic(message: Message, state: FSMContext):
     await state.clear()
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")],
+            [KeyboardButton(text="📚 Лексика"),
             [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
             [KeyboardButton(text="✏️ Редактировать темы")]  # 💬 переход в EditTopic
         ],
@@ -1638,7 +1638,7 @@ async def get_level_for_topic(message: Message, state: FSMContext):
     # «Назад» — возвращаемся к выбору категории
     if raw == "⬅️ Назад":
         kb = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")]],
+            keyboard=[[KeyboardButton(text="📚 Лексика")]],
             resize_keyboard=True
         )
         await message.answer("📂 Выбери КАТЕГОРИЮ темы:", reply_markup=kb)
