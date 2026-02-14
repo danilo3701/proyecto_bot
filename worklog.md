@@ -22,3 +22,16 @@
 Коммит: PENDING
 Результат: Грамматика больше не попадает в список тем/редактор legacy-конструктора; роутер грамматики подключён ровно 1 раз
 Следующий шаг: Протестировать 1) menu:grammar 2) /grammar_admin 3) /addtopic и “Редактировать темы” = там не должно быть грамматических тем
+
+### 2026-02-14 · grammar · branch_grammar · P
+Контекст: core8_1.py → подключение роутеров (dp.include_router) + /grammar_admin unhandled
+Симптом: /grammar_admin и/или grammar callbacks не обрабатываются; бот падает на импорте create_lesson_block из-за SyntaxError.
+Сделали:
+- Обернули импорт legacy_topics_router в try/except, чтобы SyntaxError в create_lesson_block не ронял весь бот.
+- Подключили grammar_router в dp.include_router, чтобы грамматика и /grammar_admin были достижимы.
+- Подключение legacy_topics_router сделали условным (только если импорт успешен).
+Файлы:
+- core8_1.py
+Коммит: (заполни сам)
+Результат: бот стартует даже при сломанном create_lesson_block; grammar_router активен → /grammar_admin не должен быть unhandled.
+Следующий шаг: 1) проверить /grammar_admin; 2) нажать “Грамматика” из меню; 3) убедиться что legacy create_lesson_block не влияет на грамматику.

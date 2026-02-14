@@ -197,8 +197,14 @@ from aiogram.fsm.state import State, StatesGroup        # FSM: описывае�
 from aiogram.fsm.context import FSMContext              # FSM: доступ к state.data
 from aiogram.fsm.storage.memory import MemoryStorage    # Хранение FSM в памяти
 
+
 # ——— Роутеры админки ————————————————————————————————————————————
-from create_lesson_block import router as legacy_topics_router  # 💬 legacy-админка тем (НЕ грамматика)
+# 💬 legacy-админка тем (НЕ грамматика). Может быть сломана/невалидна — не роняем весь бот на импорте.
+try:
+    from create_lesson_block import router as legacy_topics_router  # type: ignore
+except Exception as e:
+    legacy_topics_router = None
+    logging.exception("legacy_topics_router disabled (import failed): %s", e)
 
 
 # ——— Загрузка тем (ТОЛЬКО Railway Volume: /data/topics) ———————————
@@ -355,13 +361,16 @@ if not getattr(bot, "_bcid_fix_installed", False):
 
 
 # ——— Подключаем админские роутеры ————————————————————————————————
-dp.include_router(battle_router)  # 💬 подключаем хендлеры "Битвы"
-dp.include_router(bonuses_router)  # 💬 подключаем хендлеры «Бонусы»
+dp.include_router(battle_router)    # 💬 подключаем хендлеры "Битвы"
+dp.include_router(bonuses_router)   # 💬 подключаем хендлеры «Бонусы»
 dp.include_router(referral_router)
 dp.include_router(podcasts_router)  # 💬 подключаем модуль "Подкасты"
-dp.include_router(legacy_topics_router)
 
+dp.include_router(grammar_router)   # 💬 подключаем НОВУЮ грамматику (чтобы /grammar_admin и callbacks не были unhandled)
 
+# 💬 legacy-админка тем подключается только если импорт успешен (иначе бот не должен падать)
+if legacy_topics_router is not None:
+    dp.include_router(legacy_topics_router)
 
 # ——— Загружаем уроки (ТОЛЬКО /data/topics) ———————————————————————
 topics = load_topics_from_volume()  # 💬 стартовая загрузка тем из Railway Volume
