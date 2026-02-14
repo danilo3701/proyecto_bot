@@ -352,13 +352,15 @@ if not getattr(bot, "_bcid_fix_installed", False):
 
 
 
+
 # ——— Подключаем админские роутеры ————————————————————————————————
 dp.include_router(battle_router)  # 💬 подключаем хендлеры "Битвы"
 dp.include_router(bonuses_router)  # 💬 подключаем хендлеры «Бонусы»
 dp.include_router(referral_router)
 dp.include_router(podcasts_router)  # 💬 подключаем модуль "Подкасты"
-dp.include_router(create_topic_router)
 dp.include_router(grammar_router)  # 💬 подключаем грамматику
+dp.include_router(create_topic_router)
+
 
 # ——— Загружаем уроки (ТОЛЬКО /data/topics) ———————————————————————
 topics = load_topics_from_volume()  # 💬 стартовая загрузка тем из Railway Volume

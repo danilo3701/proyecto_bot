@@ -557,7 +557,7 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 
     await state.set_state(NewTopicStates.adding_category)
 
-@router.message(StateFilter("*"), F.text.in_(["📚 Лексика", "🧠 Грамматика", "⬅️ Назад"]))
+@router.message(StateFilter("*"), F.text.in_(["📚 Лексика", "⬅️ Назад"]))
 async def _admin_editmode_category_fallback(message: Message, state: FSMContext):
     st = await state.get_data()
     if not st.get(ADMIN_EDIT_MODE_KEY):
