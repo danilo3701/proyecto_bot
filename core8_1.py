@@ -364,12 +364,13 @@ if not getattr(bot, "_bcid_fix_installed", False):
 
 
 # ——— Подключаем админские роутеры ————————————————————————————————
+dp.include_router(grammar_router)   # 💬 подключаем НОВУЮ грамматику (чтобы /grammar_admin и callbacks не были unhandled)
+
 dp.include_router(battle_router)    # 💬 подключаем хендлеры "Битвы"
 dp.include_router(bonuses_router)   # 💬 подключаем хендлеры «Бонусы»
 dp.include_router(referral_router)
 dp.include_router(podcasts_router)  # 💬 подключаем модуль "Подкасты"
 
-dp.include_router(grammar_router)   # 💬 подключаем НОВУЮ грамматику (чтобы /grammar_admin и callbacks не были unhandled)
 
 # 💬 legacy-админка тем подключается только если импорт успешен (иначе бот не должен падать)
 if legacy_topics_router is not None:
