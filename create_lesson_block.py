@@ -5251,12 +5251,13 @@ async def receive_ad_source(message: Message, state: FSMContext):
 
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📚 Лексика"),
+            [KeyboardButton(text="📚 Лексика")],
             [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
             [KeyboardButton(text="✏️ Редактировать темы")]
         ],
         resize_keyboard=True
     )
+
 
     await message.answer("✅ Реклама сохранена (forward → показ в боте с шапкой + кнопка OK).", reply_markup=keyboard)
     await state.set_state(NewTopicStates.waiting_category)
@@ -5305,12 +5306,13 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
 
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📚 Лексика"),,
+            [KeyboardButton(text="📚 Лексика")],
             [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
             [KeyboardButton(text="✏️ Редактировать темы")]
         ],
         resize_keyboard=True
     )
+
 
     await message.answer(
         f"✅ Удалено: channel_id={deleted.get('channel_id')} msg_id={deleted.get('message_id')}",
