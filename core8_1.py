@@ -198,7 +198,8 @@ from aiogram.fsm.context import FSMContext              # FSM: доступ к s
 from aiogram.fsm.storage.memory import MemoryStorage    # Хранение FSM в памяти
 
 # ——— Роутеры админки ————————————————————————————————————————————
-from create_lesson_block import router as create_topic_router  # 💬 админский flow тем (всё редактирование тут)
+from create_lesson_block import router as legacy_topics_router  # 💬 legacy-админка тем (НЕ грамматика)
+
 
 # ——— Загрузка тем (ТОЛЬКО Railway Volume: /data/topics) ———————————
 from pathlib import Path  # 💬 путь к Volume
@@ -358,8 +359,8 @@ dp.include_router(battle_router)  # 💬 подключаем хендлеры "
 dp.include_router(bonuses_router)  # 💬 подключаем хендлеры «Бонусы»
 dp.include_router(referral_router)
 dp.include_router(podcasts_router)  # 💬 подключаем модуль "Подкасты"
-dp.include_router(grammar_router)  # 💬 подключаем грамматику
-dp.include_router(create_topic_router)
+dp.include_router(legacy_topics_router)
+
 
 
 # ——— Загружаем уроки (ТОЛЬКО /data/topics) ———————————————————————

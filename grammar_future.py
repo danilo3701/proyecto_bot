@@ -45,7 +45,11 @@ _ADMIN_CHAT_ID: Optional[int] = None
 _bot: Optional[Bot] = None
 
 DATA_DIR = Path("/data")
-TOPICS_DIR = DATA_DIR / "topics"
+
+# 💬 Важно: грамматика хранится отдельно от тем уроков (/data/topics),
+# 💬 чтобы legacy-конструктор тем не подхватывал грамматические JSON.
+GRAMMAR_TOPICS_DIR = DATA_DIR / "grammar_topics"
+
 XP_DATA_FILE = DATA_DIR / "xp_data.json"
 
 
@@ -70,7 +74,8 @@ def init_grammar_future(
 
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        TOPICS_DIR.mkdir(parents=True, exist_ok=True)
+        GRAMMAR_TOPICS_DIR.mkdir(parents=True, exist_ok=True)
+
     except Exception:
         pass
 
@@ -136,10 +141,10 @@ def load_grammar_topics() -> List[GrammarTopic]:
     Фильтр: category == "gram" ИЛИ key startswith "gram_"
     """
     topics = []
-    if not TOPICS_DIR.exists():
+    if not GRAMMAR_TOPICS_DIR.exists():
         return topics
 
-    for path in TOPICS_DIR.glob("*.json"):
+    for path in GRAMMAR_TOPICS_DIR.glob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             key = data.get("key", "")
@@ -168,7 +173,7 @@ def save_grammar_topic(topic: GrammarTopic) -> None:
     """
     Сохраняет тему грамматики в /data/topics/<key>.json
     """
-    path = TOPICS_DIR / f"{topic.key}.json"
+    path = GRAMMAR_TOPICS_DIR / f"{topic.key}.json"
     data = {
         "key": topic.key,
         "title": topic.title,
@@ -192,7 +197,7 @@ def delete_grammar_topic(key: str) -> None:
     """
     Удаляет тему грамматики
     """
-    path = TOPICS_DIR / f"{key}.json"
+    path = GRAMMAR_TOPICS_DIR / f"{key}.json"
     if path.exists():
         path.unlink()
 
@@ -1036,7 +1041,7 @@ async def admin_add_topic_key(message: Message, state: FSMContext) -> None:
             return
 
         # 💬 Проверяем, не существует ли уже
-        path = TOPICS_DIR / f"{key}.json"
+        path = GRAMMAR_TOPICS_DIR / f"{key}.json"
         if path.exists():
             await message.answer("❌ Тема с таким ключом уже существует")
             return
