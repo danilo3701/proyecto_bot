@@ -262,9 +262,12 @@ from referral_feature import (
 )
 
 from podcasts_feature import router as podcasts_router, init_podcasts_feature, podcasts_open  # 💬 модуль "Подкасты"
-from grammar_future import router as grammar_router, init_grammar_future, gram_menu_entry, admin_entry as grammar_admin_entry  # 💬 прямой вход + команда
-
-
+from grammar_future1 import (
+    router as grammar_router,
+    init_grammar_future,
+    gram_menu_entry,
+    admin_entry as grammar_admin_entry
+)
 
 # ——— Сценарии для учеников ——————————————————————————————————————
 from scenarios_estiloso8_1 import (                     # Вся диалоговая логика “сценариев”
