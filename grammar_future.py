@@ -1042,9 +1042,6 @@ async def admin_add_topic_key(message: Message, state: FSMContext) -> None:
             return
 
         await state.update_data(adm_topic_key=key)
-
-        # 💬 фиксируем, что шаг обработан и идём дальше
-        await state.update_data(gram_admin_active=True, gram_admin_step="topic_title")
         await state.set_state(GrammarAdminStates.waiting_topic_title)
 
         await message.answer("Теперь введи название темы (на русском)")
@@ -1056,23 +1053,6 @@ async def admin_add_topic_key(message: Message, state: FSMContext) -> None:
         await state.clear()
         await message.answer("❌ Ошибка при вводе ключа. Попробуй снова: /grammar_admin")
 
-
-@router.message()
-async def gram_admin_fallback(message: Message, state: FSMContext) -> None:
-    """
-    💬 Страховка от “молчаливого зависания”:
-    если пользователь в грамматике-админке, но state почему-то не совпал,
-    мы хотя бы покажем понятное сообщение, а не тишину.
-    """
-    data = await state.get_data()
-    if not data.get("gram_admin_active"):
-        return  # 💬 не мешаем другим веткам бота
-
-    # 💬 если ждали ключ/название, но хендлер не поймал = даём явную подсказку
-    step = data.get("gram_admin_step")
-    if step in ("topic_key", "topic_title"):
-        await message.answer("⚠️ Потерялся шаг админ-флоу. Начни заново: /grammar_admin")
-        return
 
 
 @router.message(GrammarAdminStates.waiting_topic_title)
