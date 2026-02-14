@@ -5195,12 +5195,13 @@ async def ad_action_menu(message: Message, state: FSMContext):
     if text == "⬅️ Назад":
         keyboard = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="📚 Лексика"),
+                [KeyboardButton(text="📚 Лексика")],
                 [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
-                [KeyboardButton(text="✏️ Редактировать темы")]
+                [KeyboardButton(text="✏️ Редактировать темы")],
             ],
             resize_keyboard=True
         )
+
         await message.answer("📂 Выберите раздел:", reply_markup=keyboard)
         return await state.set_state(NewTopicStates.waiting_category)
 
