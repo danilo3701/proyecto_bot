@@ -474,12 +474,13 @@ async def start_adding_topic(message: Message, state: FSMContext):
     await state.clear()
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📚 Лексика"),
+            [KeyboardButton(text="📚 Лексика")],
             [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
-            [KeyboardButton(text="✏️ Редактировать темы")]  # 💬 переход в EditTopic
+            [KeyboardButton(text="✏️ Редактировать темы")],  # 💬 переход в EditTopic
         ],
         resize_keyboard=True
     )
+
 
 
     await message.answer("📂 Выбери КАТЕГОРИЮ темы:", reply_markup=keyboard)
@@ -503,11 +504,12 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 
         kb = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="📚 Лексика"),,
-                [KeyboardButton(text="⬅️ Назад")]
+                [KeyboardButton(text="📚 Лексика")],
+                [KeyboardButton(text="⬅️ Назад")],
             ],
             resize_keyboard=True
         )
+
         await message.answer("✏️ Редактирование тем.\nВыбери категорию:", reply_markup=kb)  # 💬 шаг 1 фильтра
         await state.set_state(NewTopicStates.waiting_category)  # 💬 возвращаем state, иначе кнопки категории не ловятся
         return
@@ -533,11 +535,12 @@ async def get_category_or_ads(message: Message, state: FSMContext):
         )
         return await state.set_state(NewTopicStates.waiting_channel)
 
-    if text not in ["📚 Лексика", :
+    if text not in ["📚 Лексика"]:
         await message.answer("❗ Выбери одну из кнопок.")
         return
 
-    category = "lex" if text == "📚 Лексика" else "gram"
+    category = "lex"
+
     await state.update_data(topic={"category": category})
 
     st = await state.get_data()
