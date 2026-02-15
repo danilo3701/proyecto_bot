@@ -5038,6 +5038,22 @@ async def inline_back_to_menu(callback: CallbackQuery, state: FSMContext):
     return await start_handler(callback.message, state)  # 💬 возвращаем в выбор категории/тем без падений
 
 
+@dp.callback_query(F.data == "menu:back")
+async def menu_back_any_state(callback: CallbackQuery, state: FSMContext):
+    """
+    💬 Глобальный back для inline-меню.
+    Нужен, чтобы не было "вечной загрузки", даже если state уже очищен/другой.
+    """
+    await callback.answer()  # ✅ убираем "часики" всегда
+
+    # 💬 безопасно чистим FSM, чтобы не упираться в StateFilter-ветки
+    try:
+        await state.clear()
+    except Exception:
+        pass
+
+    # 💬 возвращаем в стартовое меню
+    return await start_handler(callback.message, state)
 
 
 
