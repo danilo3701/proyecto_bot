@@ -783,28 +783,37 @@ async def _run_quiz_flow(
                 continue
             
             # Ждём ответа пользователя или timeout
-            poll_id = poll_msg.poll_id
+            poll_id = poll_msg.poll.id if getattr(poll_msg, "poll", None) else None
+            if not poll_id:
+                # 💬 Без poll.id мы не сможем сопоставить ответ PollAnswer → не зависаем и не "флэш-удаляем"
+                logging.warning(
+                    f"[gram quiz] poll.id is None (user={user_id}, topic={topic.key}), skip poll message_id={poll_msg.message_id}"
+                )
+                await safe_delete_message(bot, chat_id, poll_msg.message_id)
+                continue
+
             timeout = POLL_TIMEOUT_SEC
             start_time = time.time()
             is_correct = False
-            
+
             while time.time() - start_time < timeout:
                 data = await state.get_data()
-                
+
                 # Проверка флага stop
                 if data.get("gram_quiz_stop"):
                     break
-                
-                # Проверка ответа пользователя
-                if data.get("last_poll_id") == poll_id:
+
+                # Проверка ответа пользователя (guard: poll_id не None)
+                if poll_id and data.get("last_poll_id") == poll_id:
                     option_ids = data.get("last_option_ids", [])
                     is_correct = correct_idx in option_ids if option_ids else False
-                    
+
                     # Очищаем результат из state
                     await state.update_data(last_poll_id=None, last_option_ids=None)
                     break
-                
+
                 await asyncio.sleep(0.3)  # Проверяем каждые 300ms
+
             
             # Останавливаем и удаляем poll
             try:
