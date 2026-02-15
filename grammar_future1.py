@@ -135,6 +135,24 @@ class UserGrammarProgress:
 # ═══════════════════════════════════════════════════════════════════════════
 # 💾 STORAGE (Topics + User Progress)
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _sanitize_telegram_html_page(s: str) -> str:
+    """
+    💬 Санитайзер страниц, чтобы Telegram не падал на unsupported HTML.
+    Сейчас критично: <br> (и варианты) → '\n'
+    """
+    t = str(s or "")
+    if not t:
+        return ""
+
+    # <br> variants (в т.ч. если старые JSON уже сохранены с <br>)
+    t = re.sub(r"<br\s*/?>", "\n", t, flags=re.IGNORECASE)
+
+    # нормализуем переносы
+    t = t.replace("\r\n", "\n").replace("\r", "\n")
+    return t
+
+
 def load_grammar_topics() -> List[GrammarTopic]:
     """
     Загружает все темы грамматики из /data/topics/
@@ -158,7 +176,7 @@ def load_grammar_topics() -> List[GrammarTopic]:
                 key=key,
                 title=data.get("title", "Без названия"),
                 category=category,
-                pages=data.get("pages", []),
+                pages=[_sanitize_telegram_html_page(p) for p in (data.get("pages", []) or [])],
                 quiz_pool=data.get("quiz_pool", []),
             ))
         except Exception:
@@ -563,7 +581,8 @@ async def _render_topic_page(
         page_idx = total_pages - 1
     
     # Текст страницы
-    page_text = topic.pages[page_idx] if topic.pages else "Страницы не добавлены"
+    page_text = _sanitize_telegram_html_page(topic.pages[page_idx]) if topic.pages else "Страницы не добавлены"
+
     
     text = (
         f"🧠 <b>{topic.title}</b>\n\n"
@@ -1224,22 +1243,22 @@ async def admin_pages_insert_index(message: Message, state: FSMContext) -> None:
 
 def mdish_to_html(s: str) -> str:
     """
-    Конвертер markdown-маркеров в HTML
+    Конвертер markdown-маркеров в HTML (Telegram HTML subset)
     """
     t = html.escape((s or "").strip())
-    
+
     # code
     t = re.sub(r"`([^`]+)`", r"<code>\1</code>", t)
     # bold
     t = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", t)
     # italic
     t = re.sub(r"_([^_]+)_", r"<i>\1</i>", t)
-    
-    # Заменяем переносы строк на <br>
-    t = t.replace("\n", "<br>")
-    
-    return t
 
+    # 💬 Telegram НЕ принимает <br> в parse_mode="HTML".
+    # 💬 Оставляем обычные переносы строк: '\n' — это валидно.
+    t = t.replace("\r\n", "\n").replace("\r", "\n")
+
+    return t
 
 @router.message(GrammarAdminStates.waiting_pages_bulk_text)
 async def admin_pages_bulk_insert(message: Message, state: FSMContext) -> None:
@@ -1254,7 +1273,8 @@ async def admin_pages_bulk_insert(message: Message, state: FSMContext) -> None:
         await message.answer("❌ Не нашёл страниц. Проверь формат.")
         return
     # Конвертируем в HTML
-    pages_html = [mdish_to_html(p) for p in pages_raw]
+    pages_html = [_sanitize_telegram_html_page(mdish_to_html(p)) for p in pages_raw]
+
     
     # Получаем тему
     data = await state.get_data()
