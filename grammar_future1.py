@@ -29,12 +29,14 @@ from aiogram.types import (
     ReplyKeyboardRemove,
     PollAnswer,
 )
-from grammar_quiz_reactions import (
+from scenario.grammar_quiz_reactions import (
     grammar_quiz_success_phrases,
     GRAMMAR_CORRECT_EMOJI,
     GRAMMAR_WRONG_EMOJI,
     _maybe_send_grammar_emoji,
 )
+
+
 
 
 from aiogram.exceptions import TelegramBadRequest
