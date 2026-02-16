@@ -29,9 +29,16 @@ from aiogram.types import (
     ReplyKeyboardRemove,
     PollAnswer,
 )
+from grammar_quiz_reactions import (
+    grammar_quiz_success_phrases,
+    GRAMMAR_CORRECT_EMOJI,
+    GRAMMAR_WRONG_EMOJI,
+    _maybe_send_grammar_emoji,
+)
+
+
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types.reaction_type_emoji import ReactionTypeEmoji
-
 router = Router()
 
 
@@ -89,6 +96,7 @@ STARS_TO_UNLOCK = 3  # нужно завершить 3 из 4 тем на экр
 XP_PER_TOPIC_COMPLETION = 150
 POLL_TIMEOUT_SEC = 12
 PAGE_DELIM = "===PAGE==="
+READ_DELAY_S = 1.0  # пауза, чтобы пользователь успел прочитать реакцию/объяснение
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -345,7 +353,9 @@ def kb_topics_list(
 
 def kb_topic_lesson(has_prev: bool, has_next: bool) -> InlineKeyboardMarkup:
     """
-    Клавиатура листалки урока (◀️ ПРОВЕРИТЬ СЕБЯ 🏠 ▶️)
+    Клавиатура листалки урока:
+    верх: ◀️  🏠  ▶️
+    низ:  ПРОВЕРИТЬ СЕБЯ
     """
     prev_cb = "gram:prev" if has_prev else "gram:noop"
     next_cb = "gram:next" if has_next else "gram:noop"
@@ -353,11 +363,14 @@ def kb_topic_lesson(has_prev: bool, has_next: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="◀️", callback_data=prev_cb),
-            InlineKeyboardButton(text="ПРОВЕРИТЬ СЕБЯ", callback_data="gram:quiz"),
             InlineKeyboardButton(text="🏠", callback_data="gram:home"),
             InlineKeyboardButton(text="▶️", callback_data=next_cb),
+        ],
+        [
+            InlineKeyboardButton(text="ПРОВЕРИТЬ СЕБЯ", callback_data="gram:quiz"),
         ]
     ])
+
 
 
 def kb_quiz_stop() -> ReplyKeyboardMarkup:
@@ -815,31 +828,87 @@ async def _run_quiz_flow(
                 await asyncio.sleep(0.3)  # Проверяем каждые 300ms
 
             
-            # Останавливаем и удаляем poll
+            # 💬 если нажали Stop — выходим без complete-логики (дальше обработаем после цикла)
+            data = await state.get_data()
+            if data.get("gram_quiz_stop"):
+                try:
+                    await bot.stop_poll(chat_id, poll_msg.message_id)
+                except Exception:
+                    pass
+                await safe_delete_message(bot, chat_id, poll_msg.message_id)
+                break
+
+            # ─────────────────────────────────────────────
+            # ✅ Реакции (изолированы для грамматики)
+            # ─────────────────────────────────────────────
+            if is_correct:
+                # фраза
+                if grammar_quiz_success_phrases:
+                    text = random.choice(grammar_quiz_success_phrases)
+                else:
+                    text = "✅"
+
+                await message.answer(text)
+
+                # иногда эмоджи
+                asyncio.create_task(
+                    _maybe_send_grammar_emoji(bot, chat_id, GRAMMAR_CORRECT_EMOJI)
+                )
+
+                await asyncio.sleep(READ_DELAY_S)
+
+            else:
+                # ❗ explanation остаётся как сейчас по смыслу, но НЕ удаляется
+                explanation = quiz.get("explanation_wrong", "")
+                if explanation:
+                    await message.answer(f"❌ {explanation}")
+
+                # иногда эмоджи
+                asyncio.create_task(
+                    _maybe_send_grammar_emoji(bot, chat_id, GRAMMAR_WRONG_EMOJI)
+                )
+
+                await asyncio.sleep(READ_DELAY_S)
+
+                # неверный/timeout → в конец очереди
+                quiz_queue.append(quiz)
+
+            # ─────────────────────────────────────────────
+            # stop_poll + delete poll (после паузы)
+            # ─────────────────────────────────────────────
             try:
                 await bot.stop_poll(chat_id, poll_msg.message_id)
             except Exception:
                 pass
-            
+
             await safe_delete_message(bot, chat_id, poll_msg.message_id)
-            
-            # Если неправильный ответ или timeout - в конец очереди
-            if not is_correct:
-                quiz_queue.append(quiz)
-                if data.get("gram_quiz_stop"):
-                    # Если stop - не показываем сообщение
-                    pass
-                else:
-                    # Показываем краткое сообщение об ошибке
-                    explanation = quiz.get("explanation_wrong", "")
-                    if explanation:
-                        await send_and_auto_delete(message, f"❌ {explanation}", delay_sec=2)
-            
-            await asyncio.sleep(1)  # Пауза между квизами
+
+            # Пауза между квизами (единая)
+            await asyncio.sleep(READ_DELAY_S)
+
         
+        # Если вышли по Stop — НЕ complete, просто вернуться в список тем на тот же экран
+        data = await state.get_data()
+        if data.get("gram_quiz_stop"):
+            screen_idx = data.get("gram_screen_idx", 0)
+            topics = load_grammar_topics()
+            progress = get_user_grammar_progress(user_id)
+            await _render_topics_screen(message, state, user_id, screen_idx, topics, progress)
+            return
+
+        # Все квизы пройдены - completion
+        data = await state.get_data()
+        if data.get("gram_quiz_stop"):
+            screen_idx = data.get("gram_screen_idx", 0)
+            topics = load_grammar_topics()
+            progress = get_user_grammar_progress(user_id)
+            await _render_topics_screen(message, state, user_id, screen_idx, topics, progress)
+            return
+
         # Все квизы пройдены - completion
         await _complete_topic(message, state, topic, user_id)
-        
+
+
     finally:
         # Очистка
         await safe_delete_message(bot, chat_id, stop_msg.message_id)
