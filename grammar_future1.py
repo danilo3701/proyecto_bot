@@ -870,6 +870,7 @@ async def _run_quiz_flow(
             except Exception:
                 pass
 
+
             # ✅ 4) удалить poll
             await safe_delete_message(bot, chat_id, poll_msg.message_id)
 
