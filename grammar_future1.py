@@ -847,7 +847,7 @@ async def _run_quiz_flow(
 
             # ✅ 1) Показали реакцию/объяснение
             if is_correct:
-                text = random.chosice(grammar_quiz_success_phrases) if grammar_quiz_success_phrases else "✅"
+                text = random.choice(grammar_quiz_success_phrases) if grammar_quiz_success_phrases else "✅"
                 reaction_msg = await message.answer(text)
                 reaction_msg_id = reaction_msg.message_id
 
@@ -882,18 +882,7 @@ async def _run_quiz_flow(
                 quiz_queue.append(quiz)
 
 
-            # ─────────────────────────────────────────────
-            # stop_poll + delete poll (после паузы)
-            # ─────────────────────────────────────────────
-            try:
-                await bot.stop_poll(chat_id, poll_msg.message_id)
-            except Exception:
-                pass
 
-            await safe_delete_message(bot, chat_id, poll_msg.message_id)
-
-            # Пауза между квизами (единая)
-            await asyncio.sleep(READ_DELAY_S)
 
         
         # Если вышли по Stop — НЕ complete, просто вернуться в список тем на тот же экран
@@ -905,14 +894,6 @@ async def _run_quiz_flow(
             await _render_topics_screen(message, state, user_id, screen_idx, topics, progress)
             return
 
-        # Все квизы пройдены - completion
-        data = await state.get_data()
-        if data.get("gram_quiz_stop"):
-            screen_idx = data.get("gram_screen_idx", 0)
-            topics = load_grammar_topics()
-            progress = get_user_grammar_progress(user_id)
-            await _render_topics_screen(message, state, user_id, screen_idx, topics, progress)
-            return
 
         # Все квизы пройдены - completion
         await _complete_topic(message, state, topic, user_id)
