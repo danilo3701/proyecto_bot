@@ -973,6 +973,122 @@ def _today_key(now: dt.datetime) -> str:
     return now.strftime("%Y-%m-%d")
 
 
+def _event_delivery_decision(
+    user: dict,
+    event_prov: str,
+    event_office_id: str,
+    event_service_id: str,
+    now_epoch_min: int,
+    *,
+    apply_random_skip: bool,
+) -> tuple[bool, str]:
+    """
+    Вернёт решение по конкретному событию уведомления:
+    (нужно отправлять, причина).
+
+    Причины отказа нужны для /auditnotify, чтобы видеть "почему не пришло".
+    """
+    if not user.get("enabled"):
+        return False, "disabled"
+
+    if str(user.get("province") or "") != event_prov:
+        return False, "province_mismatch"
+
+    if str(user.get("service_id") or "") != event_service_id:
+        return False, "service_mismatch"
+
+    user_office = str(user.get("office_id") or "")
+    if (not user_office) or (user_office == "any") or (user_office != event_office_id):
+        return False, "office_mismatch"
+
+    if apply_random_skip and random.random() < 0.15:
+        return False, "random_skip_15pct"
+
+    last_min = user.get("last_alert_min")
+    try:
+        last_min = int(last_min) if last_min is not None else None
+    except Exception:
+        last_min = None
+
+    if last_min is not None and (now_epoch_min - last_min) < 25:
+        return False, "cooldown_lt_25m"
+
+    return True, "send"
+
+
+def _build_audit_test_users(
+    event_prov: str,
+    event_office_id: str,
+    event_service_id: str,
+    now_epoch_min: int,
+    sample_size: int = 20,
+) -> list[dict[str, Any]]:
+    """
+    Синтетические тест-кейсы: 20 юзеров с разными комбинациями city/office/service/enabled.
+    Ничего не пишем в storage — это безопасная диагностика.
+    """
+    provinces = list(PROVINCES.keys())
+
+    def _pick_other_prov() -> str:
+        for p in provinces:
+            if p != event_prov:
+                return p
+        return event_prov
+
+    def _pick_other_office(province: str, current_office: str) -> str:
+        offices = PROVINCES.get(province, {}).get("offices", []) or []
+        for o in offices:
+            oid = str(o.get("id") or "")
+            if oid and oid != current_office:
+                return oid
+        return current_office
+
+    def _pick_other_service(province: str, current_service: str) -> str:
+        services = PROVINCES.get(province, {}).get("services", []) or []
+        for s in services:
+            sid = str(s.get("id") or "")
+            if sid and sid != current_service:
+                return sid
+        return current_service
+
+    other_prov = _pick_other_prov()
+    event_prov_other_office = _pick_other_office(event_prov, event_office_id)
+    event_prov_other_service = _pick_other_service(event_prov, event_service_id)
+    other_prov_office = _pick_other_office(other_prov, "")
+    other_prov_service = _pick_other_service(other_prov, "")
+
+    templates: list[tuple[str, dict[str, Any]]] = [
+        ("match_1", {"enabled": True, "province": event_prov, "office_id": event_office_id, "service_id": event_service_id}),
+        ("match_2", {"enabled": True, "province": event_prov, "office_id": event_office_id, "service_id": event_service_id}),
+        ("match_3", {"enabled": True, "province": event_prov, "office_id": event_office_id, "service_id": event_service_id}),
+        ("disabled", {"enabled": False, "province": event_prov, "office_id": event_office_id, "service_id": event_service_id}),
+        ("office_any", {"enabled": True, "province": event_prov, "office_id": "any", "service_id": event_service_id}),
+        ("office_none", {"enabled": True, "province": event_prov, "office_id": None, "service_id": event_service_id}),
+        ("office_other_1", {"enabled": True, "province": event_prov, "office_id": event_prov_other_office, "service_id": event_service_id}),
+        ("office_other_2", {"enabled": True, "province": event_prov, "office_id": event_prov_other_office, "service_id": event_service_id}),
+        ("service_other_1", {"enabled": True, "province": event_prov, "office_id": event_office_id, "service_id": event_prov_other_service}),
+        ("service_other_2", {"enabled": True, "province": event_prov, "office_id": event_office_id, "service_id": event_prov_other_service}),
+        ("service_none", {"enabled": True, "province": event_prov, "office_id": event_office_id, "service_id": None}),
+        ("province_other_1", {"enabled": True, "province": other_prov, "office_id": other_prov_office, "service_id": event_service_id}),
+        ("province_other_2", {"enabled": True, "province": other_prov, "office_id": other_prov_office, "service_id": other_prov_service}),
+        ("province_none", {"enabled": True, "province": None, "office_id": event_office_id, "service_id": event_service_id}),
+        ("cooldown_5m", {"enabled": True, "province": event_prov, "office_id": event_office_id, "service_id": event_service_id, "last_alert_min": now_epoch_min - 5}),
+        ("cooldown_24m", {"enabled": True, "province": event_prov, "office_id": event_office_id, "service_id": event_service_id, "last_alert_min": now_epoch_min - 24}),
+        ("cooldown_25m", {"enabled": True, "province": event_prov, "office_id": event_office_id, "service_id": event_service_id, "last_alert_min": now_epoch_min - 25}),
+        ("cooldown_120m", {"enabled": True, "province": event_prov, "office_id": event_office_id, "service_id": event_service_id, "last_alert_min": now_epoch_min - 120}),
+        ("garbage_last_min", {"enabled": True, "province": event_prov, "office_id": event_office_id, "service_id": event_service_id, "last_alert_min": "oops"}),
+        ("empty_everything", {"enabled": True, "province": "", "office_id": "", "service_id": ""}),
+    ]
+
+    result: list[dict[str, Any]] = []
+    for i in range(sample_size):
+        base_name, base_data = templates[i % len(templates)]
+        user = dict(base_data)
+        user["case"] = f"{base_name}_{i + 1}"
+        result.append(user)
+    return result
+
+
 async def _send_alert(user_chat_id: int, text: str) -> None:
     try:
         await bot.send_message(
@@ -1167,34 +1283,15 @@ async def notifier_loop() -> None:
                 for user_id, u0 in users.items():
                     u = _ensure_user(store, str(user_id))
 
-                    if not u.get("enabled"):
-                        continue
-
-                    # 💬 обязательные совпадения
-                    if str(u.get("province") or "") != prov:
-                        continue
-                    if str(u.get("service_id") or "") != svc_id:
-                        continue
-
-                    u_office = str(u.get("office_id") or "")
-
-                    # 💬 Тільки конкретний офіс: має співпасти 1-в-1
-                    if (not u_office) or (u_office == "any") or (u_office != office_id):
-                        continue
-
-
-                    # 💬 анти-палево: иногда пропускаем часть людей (чтобы не всем “одинаково”)
-                    if random.random() < 0.15:
-                        continue
-
-                    # 💬 cooldown на пользователя (чтобы не спамить 2 события подряд)
-                    last_min = u.get("last_alert_min")
-                    try:
-                        last_min = int(last_min) if last_min is not None else None
-                    except Exception:
-                        last_min = None
-
-                    if last_min is not None and (now_epoch_min - last_min) < 25:
+                    should_send, _reason = _event_delivery_decision(
+                        u,
+                        prov,
+                        office_id,
+                        svc_id,
+                        now_epoch_min,
+                        apply_random_skip=True,
+                    )
+                    if not should_send:
                         continue
 
                     u["last_alert_min"] = now_epoch_min
@@ -1387,6 +1484,113 @@ async def admin_stats(message: Message):
     await message.answer(text, parse_mode="HTML")
 
     # 💬 чистим чат: удалим команду /stats
+    try:
+        await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+    except Exception:
+        pass
+
+
+@router.message(F.text.startswith("/auditnotify"))
+async def admin_audit_notify(message: Message):
+    """
+    Диагностика логики доставки уведомлений на 20 синтетических пользователях.
+    Показывает, кто получит/не получит и почему.
+
+    Использование:
+    /auditnotify
+    """
+    if not _is_admin_chat(message.chat.id):
+        await message.answer("⛔️ Команда доступна только админу.")
+        return
+
+    store = _load_json(DATA_PATH)
+    admin_id = str(message.chat.id)
+    admin_user = _ensure_user(store, admin_id)
+
+    # 💬 Берём событие из текущего выбора админа, чтобы тест был максимально прикладным.
+    event_prov = str(admin_user.get("province") or "")
+    event_office_id = str(admin_user.get("office_id") or "")
+    event_service_id = str(admin_user.get("service_id") or "")
+
+    # 💬 Fallback на валидный набор, если у админа не заполнен выбор.
+    if (not event_prov) or (event_prov not in PROVINCES):
+        event_prov = next(iter(PROVINCES.keys()))
+
+    prov_offices = PROVINCES.get(event_prov, {}).get("offices", []) or []
+    prov_services = PROVINCES.get(event_prov, {}).get("services", []) or []
+
+    valid_office_ids = {str(x.get("id") or "") for x in prov_offices}
+    valid_service_ids = {str(x.get("id") or "") for x in prov_services}
+
+    if event_office_id not in valid_office_ids:
+        event_office_id = str((prov_offices[0].get("id") if prov_offices else "any") or "any")
+    if event_service_id not in valid_service_ids:
+        event_service_id = str((prov_services[0].get("id") if prov_services else "ua_card") or "ua_card")
+
+    now_epoch_min = int(dt.datetime.now(MADRID_TZ).timestamp() // 60)
+    test_users = _build_audit_test_users(
+        event_prov=event_prov,
+        event_office_id=event_office_id,
+        event_service_id=event_service_id,
+        now_epoch_min=now_epoch_min,
+        sample_size=20,
+    )
+
+    reason_labels = {
+        "send": "✅ send",
+        "disabled": "⛔ disabled",
+        "province_mismatch": "❌ province_mismatch",
+        "service_mismatch": "❌ service_mismatch",
+        "office_mismatch": "❌ office_mismatch",
+        "cooldown_lt_25m": "⏱ cooldown<25m",
+        "random_skip_15pct": "🎲 random_skip_15pct",
+    }
+
+    lines: list[str] = []
+    counts: dict[str, int] = {}
+    send_total = 0
+
+    for idx, test_user in enumerate(test_users, start=1):
+        should_send, reason = _event_delivery_decision(
+            test_user,
+            event_prov,
+            event_office_id,
+            event_service_id,
+            now_epoch_min,
+            apply_random_skip=False,  # 💬 аудит детерминированный
+        )
+        if should_send:
+            send_total += 1
+        counts[reason] = counts.get(reason, 0) + 1
+
+        line = (
+            f"{idx:02d}. <b>{_h(str(test_user.get('case')))}</b> → "
+            f"{_h(reason_labels.get(reason, reason))}; "
+            f"prov={_h(str(test_user.get('province')))} | "
+            f"office={_h(str(test_user.get('office_id')))} | "
+            f"svc={_h(str(test_user.get('service_id')))}"
+        )
+        lines.append(line)
+
+    summary_parts = [f"{_h(reason_labels.get(k, k))}: <b>{v}</b>" for k, v in sorted(counts.items())]
+
+    text = (
+        "<b>🧪 Audit notify (20 test users)</b>\n\n"
+        "<i>Подія для перевірки:</i>\n"
+        f"• prov=<b>{_h(event_prov)}</b>\n"
+        f"• office=<b>{_h(event_office_id)}</b>\n"
+        f"• service=<b>{_h(event_service_id)}</b>\n\n"
+        f"<b>Результат:</b> send=<b>{send_total}</b> / 20\n"
+        + "\n".join(summary_parts)
+        + "\n\n"
+        + "<b>Деталізація:</b>\n"
+        + "\n".join(lines)
+        + "\n\n"
+        + "<i>Примітка: це симуляція без запису в БД. У реальній розсилці ще є 15% випадковий skip.</i>"
+    )
+
+    await message.answer(text, parse_mode="HTML")
+
     try:
         await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
     except Exception:
