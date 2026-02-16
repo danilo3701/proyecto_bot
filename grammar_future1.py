@@ -843,37 +843,44 @@ async def _run_quiz_flow(
             # ─────────────────────────────────────────────
             # ✅ Реакции (изолированы для грамматики)
             # ─────────────────────────────────────────────
+            reaction_msg_id: int | None = None
+
+            # ✅ 1) Показали реакцию/объяснение
             if is_correct:
-                # фраза
-                if grammar_quiz_success_phrases:
-                    text = random.choice(grammar_quiz_success_phrases)
-                else:
-                    text = "✅"
+                text = random.chosice(grammar_quiz_success_phrases) if grammar_quiz_success_phrases else "✅"
+                reaction_msg = await message.answer(text)
+                reaction_msg_id = reaction_msg.message_id
 
-                await message.answer(text)
-
-                # иногда эмоджи
-                asyncio.create_task(
-                    _maybe_send_grammar_emoji(bot, chat_id, GRAMMAR_CORRECT_EMOJI)
-                )
-
-                await asyncio.sleep(READ_DELAY_S)
+                asyncio.create_task(_maybe_send_grammar_emoji(bot, chat_id, GRAMMAR_CORRECT_EMOJI))
 
             else:
-                # ❗ explanation остаётся как сейчас по смыслу, но НЕ удаляется
                 explanation = quiz.get("explanation_wrong", "")
                 if explanation:
-                    await message.answer(f"❌ {explanation}")
+                    reaction_msg = await message.answer(f"❌ {explanation}")
+                    reaction_msg_id = reaction_msg.message_id
 
-                # иногда эмоджи
-                asyncio.create_task(
-                    _maybe_send_grammar_emoji(bot, chat_id, GRAMMAR_WRONG_EMOJI)
-                )
+                asyncio.create_task(_maybe_send_grammar_emoji(bot, chat_id, GRAMMAR_WRONG_EMOJI))
 
-                await asyncio.sleep(READ_DELAY_S)
+            # ✅ 2) Пауза на прочтение
+            await asyncio.sleep(READ_DELAY_S)
 
-                # неверный/timeout → в конец очереди
+            # ✅ 3) stop_poll
+            try:
+                await bot.stop_poll(chat_id, poll_msg.message_id)
+            except Exception:
+                pass
+
+            # ✅ 4) удалить poll
+            await safe_delete_message(bot, chat_id, poll_msg.message_id)
+
+            # ✅ 5) удалить реакцию/объяснение (если было)
+            if reaction_msg_id is not None:
+                await safe_delete_message(bot, chat_id, reaction_msg_id)
+
+            # WRONG → в конец очереди (поведение очереди не меняем)
+            if not is_correct:
                 quiz_queue.append(quiz)
+
 
             # ─────────────────────────────────────────────
             # stop_poll + delete poll (после паузы)
