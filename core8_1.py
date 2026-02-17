@@ -4484,20 +4484,11 @@ async def show_leaderboard(message: Message, state: FSMContext):
         def _first_word(name: str) -> str:
             return ((name or "").strip().split() or ["Пользователь"])[0]
 
-        def _name_cell(raw: str, is_me: bool = False) -> str:
+        def _name_display(raw: str) -> str:
             base = _first_word(raw)
             if len(base) > name_col:
                 base = f"{base[:name_col - 1]}…"
-            if is_me:
-                base = f"**{base}**"
-            return f"{base:<{name_col + (4 if is_me else 0)}}"
-
-        def _line(pos: int, user: dict, is_me: bool = False) -> str:
-            medal = place_icons.get(pos, "")
-            cookies = int(user.get(period_key, 0) or 0)
-            stars = int(user.get("stars_total", 0) or 0)
-            name_cell = _name_cell(user.get("name", ""), is_me=is_me)
-            return f"{pos}){medal}{name_cell} 🍪 {cookies:>3} ⭐ {stars:>3}"
+            return base
 
         sorted_all = sorted(
             users,
@@ -4519,8 +4510,8 @@ async def show_leaderboard(message: Message, state: FSMContext):
                 "stars_total": 0,
             }
 
-        res = [f"<b>{title}</b>", "<pre>"]
         users_count = len(sorted_all)
+        res = [f"<b>{title}</b>", "<pre>"]
 
         if not sorted_all or all(
             int(u.get(period_key, 0) or 0) == 0 and int(u.get("stars_total", 0) or 0) == 0 for u in sorted_all
@@ -4537,11 +4528,25 @@ async def show_leaderboard(message: Message, state: FSMContext):
                 my_rank = idx
                 break
 
-        for idx, u in enumerate(top5, 1):
-            res.append(_line(idx, u, is_me=(str(u.get("uid", "")) == current_uid)))
+        rank_max = my_rank if my_rank and my_rank > 5 else len(top5)
+        rank_col = max(3, len(str(rank_max)) + 1)
+
+        def _line(pos: int, user: dict) -> str:
+            rank_cell = f"{pos})".ljust(rank_col)
+            medal_cell = place_icons.get(pos, " ")
+            name_cell = _name_display(user.get("name", "")).ljust(name_col)
+            cookies = int(user.get(period_key, 0) or 0)
+            stars = int(user.get("stars_total", 0) or 0)
+            return f"{rank_cell}{medal_cell}{name_cell} 🍪 {cookies:>3} ⭐ {stars:>3}"
+
+        for idx, user in enumerate(top5, 1):
+            line = _line(idx, user)
+            if str(user.get("uid", "")) == current_uid:
+                line = f"<b>{line}</b>"
+            res.append(line)
 
         if my_rank and my_rank > 5:
-            res.append(_line(my_rank, current_user, is_me=True))
+            res.append(f"<b>{_line(my_rank, current_user)}</b>")
 
         res.append(f"↳👥 {users_count}")
         res.append("</pre>")
