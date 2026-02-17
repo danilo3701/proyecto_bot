@@ -4531,13 +4531,23 @@ async def show_leaderboard(message: Message, state: FSMContext):
         rank_max = my_rank if my_rank and my_rank > 5 else len(top5)
         rank_col = max(3, len(str(rank_max)) + 1)
 
+        shown_rows = list(top5)
+        if my_rank and my_rank > 5:
+            shown_rows.append(current_user)
+
+        cookie_metric_col = max(
+            len(f"🍪{int(u.get(period_key, 0) or 0)}")
+            for u in shown_rows
+        )
+
         def _line(pos: int, user: dict) -> str:
             rank_cell = f"{pos})".ljust(rank_col)
             medal_cell = place_icons.get(pos, " ")
             name_cell = _name_display(user.get("name", "")).ljust(name_col)
             cookies = int(user.get(period_key, 0) or 0)
             stars = int(user.get("stars_total", 0) or 0)
-            return f"{rank_cell}{medal_cell}{name_cell} 🍪 {cookies:>3} ⭐ {stars:>3}"
+            cookie_cell = f"🍪{cookies}".ljust(cookie_metric_col)
+            return f"{rank_cell}{medal_cell}{name_cell} {cookie_cell} | ⭐{stars}"
 
         for idx, user in enumerate(top5, 1):
             line = _line(idx, user)
