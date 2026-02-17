@@ -474,12 +474,13 @@ async def start_adding_topic(message: Message, state: FSMContext):
     await state.clear()
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")],
+            [KeyboardButton(text="📚 Лексика")],
             [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
-            [KeyboardButton(text="✏️ Редактировать темы")]  # 💬 переход в EditTopic
+            [KeyboardButton(text="✏️ Редактировать темы")],  # 💬 переход в EditTopic
         ],
         resize_keyboard=True
     )
+
 
 
     await message.answer("📂 Выбери КАТЕГОРИЮ темы:", reply_markup=keyboard)
@@ -503,11 +504,12 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 
         kb = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")],
-                [KeyboardButton(text="⬅️ Назад")]
+                [KeyboardButton(text="📚 Лексика")],
+                [KeyboardButton(text="⬅️ Назад")],
             ],
             resize_keyboard=True
         )
+
         await message.answer("✏️ Редактирование тем.\nВыбери категорию:", reply_markup=kb)  # 💬 шаг 1 фильтра
         await state.set_state(NewTopicStates.waiting_category)  # 💬 возвращаем state, иначе кнопки категории не ловятся
         return
@@ -533,11 +535,12 @@ async def get_category_or_ads(message: Message, state: FSMContext):
         )
         return await state.set_state(NewTopicStates.waiting_channel)
 
-    if text not in ["📚 Лексика", "🧠 Грамматика"]:
+    if text not in ["📚 Лексика"]:
         await message.answer("❗ Выбери одну из кнопок.")
         return
 
-    category = "lex" if text == "📚 Лексика" else "gram"
+    category = "lex"
+
     await state.update_data(topic={"category": category})
 
     st = await state.get_data()
@@ -557,7 +560,7 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 
     await state.set_state(NewTopicStates.adding_category)
 
-@router.message(StateFilter("*"), F.text.in_(["📚 Лексика", "🧠 Грамматика", "⬅️ Назад"]))
+@router.message(StateFilter("*"), F.text.in_(["📚 Лексика", "⬅️ Назад"]))
 async def _admin_editmode_category_fallback(message: Message, state: FSMContext):
     st = await state.get_data()
     if not st.get(ADMIN_EDIT_MODE_KEY):
@@ -1638,7 +1641,7 @@ async def get_level_for_topic(message: Message, state: FSMContext):
     # «Назад» — возвращаемся к выбору категории
     if raw == "⬅️ Назад":
         kb = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")]],
+            keyboard=[[KeyboardButton(text="📚 Лексика")]],
             resize_keyboard=True
         )
         await message.answer("📂 Выбери КАТЕГОРИЮ темы:", reply_markup=kb)
@@ -2827,7 +2830,7 @@ async def save_channel_to_topic(message: Message, state: FSMContext):
     # 💬 Возвращаем Главное меню
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")],
+            [KeyboardButton(text="📚 Лексика")],
             [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
             [KeyboardButton(text="✏️ Редактировать темы")]  # 💬 та же кнопка EditTopic
         ],
@@ -5192,12 +5195,13 @@ async def ad_action_menu(message: Message, state: FSMContext):
     if text == "⬅️ Назад":
         keyboard = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")],
+                [KeyboardButton(text="📚 Лексика")],
                 [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
-                [KeyboardButton(text="✏️ Редактировать темы")]
+                [KeyboardButton(text="✏️ Редактировать темы")],
             ],
             resize_keyboard=True
         )
+
         await message.answer("📂 Выберите раздел:", reply_markup=keyboard)
         return await state.set_state(NewTopicStates.waiting_category)
 
@@ -5247,12 +5251,13 @@ async def receive_ad_source(message: Message, state: FSMContext):
 
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")],
+            [KeyboardButton(text="📚 Лексика")],
             [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
             [KeyboardButton(text="✏️ Редактировать темы")]
         ],
         resize_keyboard=True
     )
+
 
     await message.answer("✅ Реклама сохранена (forward → показ в боте с шапкой + кнопка OK).", reply_markup=keyboard)
     await state.set_state(NewTopicStates.waiting_category)
@@ -5301,12 +5306,13 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
 
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📚 Лексика"), KeyboardButton(text="🧠 Грамматика")],
+            [KeyboardButton(text="📚 Лексика")],
             [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
             [KeyboardButton(text="✏️ Редактировать темы")]
         ],
         resize_keyboard=True
     )
+
 
     await message.answer(
         f"✅ Удалено: channel_id={deleted.get('channel_id')} msg_id={deleted.get('message_id')}",

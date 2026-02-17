@@ -29,9 +29,18 @@ from aiogram.types import (
     ReplyKeyboardRemove,
     PollAnswer,
 )
+from scenario.grammar_quiz_reactions import (
+    grammar_quiz_success_phrases,
+    GRAMMAR_CORRECT_EMOJI,
+    GRAMMAR_WRONG_EMOJI,
+    _maybe_send_grammar_emoji,
+)
+
+
+
+
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types.reaction_type_emoji import ReactionTypeEmoji
-
 router = Router()
 
 
@@ -45,7 +54,11 @@ _ADMIN_CHAT_ID: Optional[int] = None
 _bot: Optional[Bot] = None
 
 DATA_DIR = Path("/data")
-TOPICS_DIR = DATA_DIR / "topics"
+
+# 💬 Важно: грамматика хранится отдельно от тем уроков (/data/topics),
+# 💬 чтобы legacy-конструктор тем не подхватывал грамматические JSON.
+GRAMMAR_TOPICS_DIR = DATA_DIR / "grammar_topics"
+
 XP_DATA_FILE = DATA_DIR / "xp_data.json"
 
 
@@ -70,7 +83,8 @@ def init_grammar_future(
 
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        TOPICS_DIR.mkdir(parents=True, exist_ok=True)
+        GRAMMAR_TOPICS_DIR.mkdir(parents=True, exist_ok=True)
+
     except Exception:
         pass
 
@@ -84,6 +98,7 @@ STARS_TO_UNLOCK = 3  # нужно завершить 3 из 4 тем на экр
 XP_PER_TOPIC_COMPLETION = 150
 POLL_TIMEOUT_SEC = 12
 PAGE_DELIM = "===PAGE==="
+READ_DELAY_S = 1.0  # пауза, чтобы пользователь успел прочитать реакцию/объяснение
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -130,16 +145,34 @@ class UserGrammarProgress:
 # ═══════════════════════════════════════════════════════════════════════════
 # 💾 STORAGE (Topics + User Progress)
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _sanitize_telegram_html_page(s: str) -> str:
+    """
+    💬 Санитайзер страниц, чтобы Telegram не падал на unsupported HTML.
+    Сейчас критично: <br> (и варианты) → '\n'
+    """
+    t = str(s or "")
+    if not t:
+        return ""
+
+    # <br> variants (в т.ч. если старые JSON уже сохранены с <br>)
+    t = re.sub(r"<br\s*/?>", "\n", t, flags=re.IGNORECASE)
+
+    # нормализуем переносы
+    t = t.replace("\r\n", "\n").replace("\r", "\n")
+    return t
+
+
 def load_grammar_topics() -> List[GrammarTopic]:
     """
     Загружает все темы грамматики из /data/topics/
     Фильтр: category == "gram" ИЛИ key startswith "gram_"
     """
     topics = []
-    if not TOPICS_DIR.exists():
+    if not GRAMMAR_TOPICS_DIR.exists():
         return topics
 
-    for path in TOPICS_DIR.glob("*.json"):
+    for path in GRAMMAR_TOPICS_DIR.glob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             key = data.get("key", "")
@@ -153,7 +186,7 @@ def load_grammar_topics() -> List[GrammarTopic]:
                 key=key,
                 title=data.get("title", "Без названия"),
                 category=category,
-                pages=data.get("pages", []),
+                pages=[_sanitize_telegram_html_page(p) for p in (data.get("pages", []) or [])],
                 quiz_pool=data.get("quiz_pool", []),
             ))
         except Exception:
@@ -168,7 +201,7 @@ def save_grammar_topic(topic: GrammarTopic) -> None:
     """
     Сохраняет тему грамматики в /data/topics/<key>.json
     """
-    path = TOPICS_DIR / f"{topic.key}.json"
+    path = GRAMMAR_TOPICS_DIR / f"{topic.key}.json"
     data = {
         "key": topic.key,
         "title": topic.title,
@@ -192,7 +225,7 @@ def delete_grammar_topic(key: str) -> None:
     """
     Удаляет тему грамматики
     """
-    path = TOPICS_DIR / f"{key}.json"
+    path = GRAMMAR_TOPICS_DIR / f"{key}.json"
     if path.exists():
         path.unlink()
 
@@ -322,7 +355,9 @@ def kb_topics_list(
 
 def kb_topic_lesson(has_prev: bool, has_next: bool) -> InlineKeyboardMarkup:
     """
-    Клавиатура листалки урока (◀️ ПРОВЕРИТЬ СЕБЯ 🏠 ▶️)
+    Клавиатура листалки урока:
+    верх: ◀️  🏠  ▶️
+    низ:  ПРОВЕРИТЬ СЕБЯ
     """
     prev_cb = "gram:prev" if has_prev else "gram:noop"
     next_cb = "gram:next" if has_next else "gram:noop"
@@ -330,11 +365,14 @@ def kb_topic_lesson(has_prev: bool, has_next: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="◀️", callback_data=prev_cb),
-            InlineKeyboardButton(text="ПРОВЕРИТЬ СЕБЯ", callback_data="gram:quiz"),
             InlineKeyboardButton(text="🏠", callback_data="gram:home"),
             InlineKeyboardButton(text="▶️", callback_data=next_cb),
+        ],
+        [
+            InlineKeyboardButton(text="ПРОВЕРИТЬ СЕБЯ", callback_data="gram:quiz"),
         ]
     ])
+
 
 
 def kb_quiz_stop() -> ReplyKeyboardMarkup:
@@ -558,7 +596,8 @@ async def _render_topic_page(
         page_idx = total_pages - 1
     
     # Текст страницы
-    page_text = topic.pages[page_idx] if topic.pages else "Страницы не добавлены"
+    page_text = _sanitize_telegram_html_page(topic.pages[page_idx]) if topic.pages else "Страницы не добавлены"
+
     
     text = (
         f"🧠 <b>{topic.title}</b>\n\n"
@@ -759,54 +798,108 @@ async def _run_quiz_flow(
                 continue
             
             # Ждём ответа пользователя или timeout
-            poll_id = poll_msg.poll_id
+            poll_id = poll_msg.poll.id if getattr(poll_msg, "poll", None) else None
+            if not poll_id:
+                # 💬 Без poll.id мы не сможем сопоставить ответ PollAnswer → не зависаем и не "флэш-удаляем"
+                logging.warning(
+                    f"[gram quiz] poll.id is None (user={user_id}, topic={topic.key}), skip poll message_id={poll_msg.message_id}"
+                )
+                await safe_delete_message(bot, chat_id, poll_msg.message_id)
+                continue
+
             timeout = POLL_TIMEOUT_SEC
             start_time = time.time()
             is_correct = False
-            
+
             while time.time() - start_time < timeout:
                 data = await state.get_data()
-                
+
                 # Проверка флага stop
                 if data.get("gram_quiz_stop"):
                     break
-                
-                # Проверка ответа пользователя
-                if data.get("last_poll_id") == poll_id:
+
+                # Проверка ответа пользователя (guard: poll_id не None)
+                if poll_id and data.get("last_poll_id") == poll_id:
                     option_ids = data.get("last_option_ids", [])
                     is_correct = correct_idx in option_ids if option_ids else False
-                    
+
                     # Очищаем результат из state
                     await state.update_data(last_poll_id=None, last_option_ids=None)
                     break
-                
+
                 await asyncio.sleep(0.3)  # Проверяем каждые 300ms
+
             
-            # Останавливаем и удаляем poll
+            # 💬 если нажали Stop — выходим без complete-логики (дальше обработаем после цикла)
+            data = await state.get_data()
+            if data.get("gram_quiz_stop"):
+                try:
+                    await bot.stop_poll(chat_id, poll_msg.message_id)
+                except Exception:
+                    pass
+                await safe_delete_message(bot, chat_id, poll_msg.message_id)
+                break
+
+            # ─────────────────────────────────────────────
+            # ✅ Реакции (изолированы для грамматики)
+            # ─────────────────────────────────────────────
+            reaction_msg_id: int | None = None
+
+            # ✅ 1) Показали реакцию/объяснение
+            if is_correct:
+                text = random.choice(grammar_quiz_success_phrases) if grammar_quiz_success_phrases else "✅"
+                reaction_msg = await message.answer(text)
+                reaction_msg_id = reaction_msg.message_id
+
+                asyncio.create_task(_maybe_send_grammar_emoji(bot, chat_id, GRAMMAR_CORRECT_EMOJI))
+
+            else:
+                explanation = quiz.get("explanation_wrong", "")
+                if explanation:
+                    reaction_msg = await message.answer(f"❌ {explanation}")
+                    reaction_msg_id = reaction_msg.message_id
+
+                asyncio.create_task(_maybe_send_grammar_emoji(bot, chat_id, GRAMMAR_WRONG_EMOJI))
+
+            # ✅ 2) Пауза на прочтение
+            await asyncio.sleep(READ_DELAY_S)
+
+            # ✅ 3) stop_poll
             try:
                 await bot.stop_poll(chat_id, poll_msg.message_id)
             except Exception:
                 pass
-            
+
+
+            # ✅ 4) удалить poll
             await safe_delete_message(bot, chat_id, poll_msg.message_id)
-            
-            # Если неправильный ответ или timeout - в конец очереди
+
+            # ✅ 5) удалить реакцию/объяснение (если было)
+            if reaction_msg_id is not None:
+                await safe_delete_message(bot, chat_id, reaction_msg_id)
+
+            # WRONG → в конец очереди (поведение очереди не меняем)
             if not is_correct:
                 quiz_queue.append(quiz)
-                if data.get("gram_quiz_stop"):
-                    # Если stop - не показываем сообщение
-                    pass
-                else:
-                    # Показываем краткое сообщение об ошибке
-                    explanation = quiz.get("explanation_wrong", "")
-                    if explanation:
-                        await send_and_auto_delete(message, f"❌ {explanation}", delay_sec=2)
-            
-            await asyncio.sleep(1)  # Пауза между квизами
+
+
+
+
         
+        # Если вышли по Stop — НЕ complete, просто вернуться в список тем на тот же экран
+        data = await state.get_data()
+        if data.get("gram_quiz_stop"):
+            screen_idx = data.get("gram_screen_idx", 0)
+            topics = load_grammar_topics()
+            progress = get_user_grammar_progress(user_id)
+            await _render_topics_screen(message, state, user_id, screen_idx, topics, progress)
+            return
+
+
         # Все квизы пройдены - completion
         await _complete_topic(message, state, topic, user_id)
-        
+
+
     finally:
         # Очистка
         await safe_delete_message(bot, chat_id, stop_msg.message_id)
@@ -1036,15 +1129,12 @@ async def admin_add_topic_key(message: Message, state: FSMContext) -> None:
             return
 
         # 💬 Проверяем, не существует ли уже
-        path = TOPICS_DIR / f"{key}.json"
+        path = GRAMMAR_TOPICS_DIR / f"{key}.json"
         if path.exists():
             await message.answer("❌ Тема с таким ключом уже существует")
             return
 
         await state.update_data(adm_topic_key=key)
-
-        # 💬 фиксируем, что шаг обработан и идём дальше
-        await state.update_data(gram_admin_active=True, gram_admin_step="topic_title")
         await state.set_state(GrammarAdminStates.waiting_topic_title)
 
         await message.answer("Теперь введи название темы (на русском)")
@@ -1055,7 +1145,6 @@ async def admin_add_topic_key(message: Message, state: FSMContext) -> None:
         logging.exception("admin_add_topic_key failed")
         await state.clear()
         await message.answer("❌ Ошибка при вводе ключа. Попробуй снова: /grammar_admin")
-
 
 
 
@@ -1223,22 +1312,22 @@ async def admin_pages_insert_index(message: Message, state: FSMContext) -> None:
 
 def mdish_to_html(s: str) -> str:
     """
-    Конвертер markdown-маркеров в HTML
+    Конвертер markdown-маркеров в HTML (Telegram HTML subset)
     """
     t = html.escape((s or "").strip())
-    
+
     # code
     t = re.sub(r"`([^`]+)`", r"<code>\1</code>", t)
     # bold
     t = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", t)
     # italic
     t = re.sub(r"_([^_]+)_", r"<i>\1</i>", t)
-    
-    # Заменяем переносы строк на <br>
-    t = t.replace("\n", "<br>")
-    
-    return t
 
+    # 💬 Telegram НЕ принимает <br> в parse_mode="HTML".
+    # 💬 Оставляем обычные переносы строк: '\n' — это валидно.
+    t = t.replace("\r\n", "\n").replace("\r", "\n")
+
+    return t
 
 @router.message(GrammarAdminStates.waiting_pages_bulk_text)
 async def admin_pages_bulk_insert(message: Message, state: FSMContext) -> None:
@@ -1253,7 +1342,8 @@ async def admin_pages_bulk_insert(message: Message, state: FSMContext) -> None:
         await message.answer("❌ Не нашёл страниц. Проверь формат.")
         return
     # Конвертируем в HTML
-    pages_html = [mdish_to_html(p) for p in pages_raw]
+    pages_html = [_sanitize_telegram_html_page(mdish_to_html(p)) for p in pages_raw]
+
     
     # Получаем тему
     data = await state.get_data()
