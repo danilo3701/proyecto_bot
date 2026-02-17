@@ -4472,147 +4472,111 @@ async def show_leaderboard(message: Message, state: FSMContext):
             "stars_total": stars_total
         })
 
+    FAKE_USERS_COUNT = 60
+    for i in range(1, FAKE_USERS_COUNT + 1):
+        week_val = (i * 3) % 21
+        month_val = week_val + ((i * 5) % 37)
+        stars_val = (i * 7) % 13
+        users.append({
+            "uid": f"fake_{i}",
+            "name": f"Learner{i}",
+            "words_learned_week": week_val,
+            "words_learned_month": month_val,
+            "stars_total": stars_val,
+        })
+
 
     current_uid = str(message.from_user.id)
     data = await state.get_data()  # 💬 берём FSM-data один раз, чтобы render_block мог читать actor_uid/actor_name и last_menu_msg_id
 
 
-    def render_block(title: str, key: str, emoji: str) -> str:
-        place_icons = {  # 💬 эмодзи мест как на скриншоте
-            1: "👑",
-            2: "🥈",
-            3: "🥉",
-            4: "🎓",
-            5: "🍀",
-        }
-        nbsp = " "               # 💬 обычный пробел = будет ровно работать внутри <pre> (моноширинный блок)
-        indent = ""              # 💬 убрали стартовые пробелы, чтобы на телефоне не переносило
+    def render_block(title: str, period_key: str) -> str:
+        place_icons = {1: "👑", 2: "🥈", 3: "🥉"}
+        name_col = 10
 
-        NAME_COL = 16            # 💬 минус 2 пробела между именем и 🍪, чтобы всё влезало
+        def _first_word(name: str) -> str:
+            return ((name or "").strip().split() or ["Пользователь"])[0]
 
-        RANK_COL = 2             # 💬 ширина колонки ранга (1) / 10) / 223)
+        def _name_display(raw: str) -> str:
+            base = _first_word(raw)
+            if len(base) > name_col:
+                base = f"{base[:name_col - 1]}…"
+            return base
 
-        def _name_cell(raw: str) -> str:
-            # 💬 делает ячейку имени фикс длины, убирая эмодзи (иначе в <pre> всё съезжает)
-            raw = (raw or "").strip()
-
-            cleaned = []
-            for ch in raw:
-                o = ord(ch)
-                if ch in ("\uFE0F", "\u200D"):
-                    continue  # 💬 вариации эмодзи и joiner ломают ширину
-                if (0x1F300 <= o <= 0x1FAFF) or (0x2600 <= o <= 0x27BF):
-                    continue  # 💬 убираем эмодзи из имени только для рейтинга
-                cleaned.append(ch)
-
-            raw = "".join(cleaned).strip()
-
-            if len(raw) > NAME_COL:
-                raw = raw[:max(0, NAME_COL - 3)] + "..."  # 💬 длинное имя = обрезаем
-            pad = nbsp * max(0, NAME_COL - len(raw))
-            return f"{raw}{pad}"  # 💬 добивка до фикс ширины
-
-
-        def _mark_cell(is_me: bool) -> str:
-            # 💬 маркер для строки пользователя без лишних пробелов (телефонная версия не ломается)
-            return "> " if is_me else ""
-
-
-        def _rank_cell(pos: int) -> str:
-            # 💬 фикс-ячейка ранга без лишнего пробела в конце
-            base = f"{pos})"
-            pad = nbsp * max(0, RANK_COL - len(base))
-            return f"{base}{pad}"
-
-
-        def _under_name(text: str) -> str:
-            # 💬 строка под колонкой имени с меньшими отступами
-            # формат строки теперь = "{rank} {icon} {name} {emoji} {val}"
-            name_pad = nbsp * (RANK_COL + 3)
-            return f"{name_pad}{text}"
-
-
-        def _line(pos: int, name: str, val: int, is_me: bool = False) -> str:
-            # 💬 компактная строка, чтобы не переносило на телефоне
-            icon = "🤓" if is_me else (place_icons.get(pos) or nbsp)
-            name_cell = _name_cell(name)
-            return f"{_mark_cell(is_me)}{_rank_cell(pos)} {icon} {name_cell} {emoji} {val}"
-
-
-    
         sorted_all = sorted(
             users,
-            key=lambda u: (int(u.get(key, 0) or 0), u.get("name", "")),
-            reverse=True
+            key=lambda u: (
+                -int(u.get(period_key, 0) or 0),
+                -int(u.get("stars_total", 0) or 0),
+                (u.get("name", "") or "").casefold(),
+                str(u.get("uid", "")),
+            ),
         )
-    
-        res = [f"<b>{title}</b>", "<pre>"]  # 💬 <pre> = моноширинный шрифт, колонки реально выравниваются
 
-        # 💬 “реальные + 30 фейковых” (без вывода строки “участников”)
-        FAKE_ADD = 30
-        real_count = len(sorted_all)
-        total_count = real_count + FAKE_ADD
-    
+        current_user = next((u for u in users if str(u.get("uid", "")) == current_uid), None)
+        if current_user is None:
+            current_user = {
+                "uid": current_uid,
+                "name": (message.from_user.full_name or message.from_user.first_name or "Пользователь"),
+                "words_learned_week": 0,
+                "words_learned_month": 0,
+                "stars_total": 0,
+            }
 
-        actor_uid = (data.get("leaderboard_actor_uid") or "").strip()
-        actor_name = (data.get("leaderboard_actor_name") or "").strip()
-    
-        current_uid = actor_uid or str(message.from_user.id)
-        my_name = actor_name or (message.from_user.first_name or "Пользователь")  # 💬 имя вместо слова Ты
+        users_count = len(sorted_all)
+        res = [f"<b>{title}</b>", "<pre>"]
 
-    
-    
-        if not sorted_all:
-            # 💬 даже если данных нет = не падаем и показываем формат с моноширинным выравниванием
-            res.append("Пока пусто")
-            res.append(_under_name(f"↳{total_count}"))  # 💬 общее число участников
-            me_line = _line(1, my_name, 0, is_me=True)  # 💬 строка пользователя отдельно (для выделения)
-
-            res.append(me_line)  # 💬 строка пользователя внутри списка (не вылезает из <pre>)
-            res.append("</pre>")  # 💬 закрываем моноширинный блок
+        if not sorted_all or all(
+            int(u.get(period_key, 0) or 0) == 0 and int(u.get("stars_total", 0) or 0) == 0 for u in sorted_all
+        ):
+            res.append("Пока нет результатов за этот период")
+            res.append(f"↳👥 {users_count}")
+            res.append("</pre>")
             return "\n".join(res)
 
-    
-        # 💬 ищем позицию “тебя”
-        my_rank = None
-        my_val = 0
-        for idx, u in enumerate(sorted_all, 1):
-            if str(u.get("uid", "")) == str(current_uid):
-                my_rank = idx
-                my_val = int(u.get(key, 0) or 0)
-                if not my_name or my_name == "Ты":
-                    my_name = u.get("name", my_name)
-                break
-    
-        if my_rank is None:
-            # 💬 если вдруг юзера нет в xp_data — ставим его “после реальных”
-            my_rank = min(real_count + 1, total_count)
-            my_val = 0
-    
-        # 💬 топ-5
         top5 = sorted_all[:5]
-        for idx, u in enumerate(top5, 1):
-            val = int(u.get(key, 0) or 0)
-            res.append(_line(idx, u.get("name", ""), val))  # 💬 выравнивание колонок как на скриншоте
-        
-        # 💬 сколько всего пользователей (пишем ровно под колонкой имени)
-        if total_count > len(top5):
-            res.append(_under_name(f"↳{total_count}"))  # 💬 общее число участников
+        my_rank = None
+        for idx, u in enumerate(sorted_all, 1):
+            if str(u.get("uid", "")) == current_uid:
+                my_rank = idx
+                break
 
-        
-        me_line = _line(my_rank, my_name, my_val, is_me=True) if my_rank > len(top5) else None  # 💬 строка пользователя отдельно (для выделения)
+        rank_max = my_rank if my_rank and my_rank > 5 else len(top5)
+        rank_col = max(3, len(str(rank_max)) + 1)
 
-        if me_line:
-            res.append(me_line)  # 💬 показываем пользователя внутри <pre> на новой строке после ↳
+        shown_rows = list(top5)
+        if my_rank and my_rank > 5:
+            shown_rows.append(current_user)
 
-        res.append("</pre>")  # 💬 закрываем моноширинный блок
+        cookie_metric_col = max(
+            len(f"🍪{int(u.get(period_key, 0) or 0)}")
+            for u in shown_rows
+        )
+
+        def _line(pos: int, user: dict) -> str:
+            rank_cell = f"{pos})".ljust(rank_col)
+            medal_cell = place_icons.get(pos, " ")
+            name_cell = _name_display(user.get("name", "")).ljust(name_col)
+            cookies = int(user.get(period_key, 0) or 0)
+            stars = int(user.get("stars_total", 0) or 0)
+            cookie_cell = f"🍪{cookies}".ljust(cookie_metric_col)
+            return f"{rank_cell}{medal_cell}{name_cell} {cookie_cell} | ⭐{stars}"
+
+        for idx, user in enumerate(top5, 1):
+            line = _line(idx, user)
+            if str(user.get("uid", "")) == current_uid:
+                line = f"<b>{line}</b>"
+            res.append(line)
+
+        if my_rank and my_rank > 5:
+            res.append(f"<b>{_line(my_rank, current_user)}</b>")
+
+        res.append(f"↳👥 {users_count}")
+        res.append("</pre>")
         return "\n".join(res)
 
-
-
-    week_text = render_block("🏆 Рейтинг недели", "words_learned_week", "🍪")
-    month_text = render_block("🏆 Рейтинг месяца", "words_learned_month", "🍪")
-    stars_text = render_block("⭐️ Блоков пройдено", "stars_total", "⭐️")  # 💬 рейтинг по звёздам
+    week_text = render_block("🏆 Рейтинг недели", "words_learned_week")
+    month_text = render_block("🏆 Рейтинг месяца", "words_learned_month")
 
 
 
@@ -4638,10 +4602,7 @@ async def show_leaderboard(message: Message, state: FSMContext):
         ]
     )
 
-    legend = "🍪 = слов выучено"  # 💬 легенда для рейтинга
-
-
-    await message.answer(f"{legend}\n\n{week_text}\n\n{month_text}", parse_mode="HTML", reply_markup=menu_kb)  # 💬 легенда перед блоками
+    await message.answer(f"{week_text}\n\n{month_text}", parse_mode="HTML", reply_markup=menu_kb)
 
 
 # 🟢 Новый хендлер: Главное меню (/menu)
@@ -13644,7 +13605,6 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
-
 
 
 
