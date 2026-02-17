@@ -4472,6 +4472,19 @@ async def show_leaderboard(message: Message, state: FSMContext):
             "stars_total": stars_total
         })
 
+    FAKE_USERS_COUNT = 60
+    for i in range(1, FAKE_USERS_COUNT + 1):
+        week_val = (i * 3) % 21
+        month_val = week_val + ((i * 5) % 37)
+        stars_val = (i * 7) % 13
+        users.append({
+            "uid": f"fake_{i}",
+            "name": f"Learner{i}",
+            "words_learned_week": week_val,
+            "words_learned_month": month_val,
+            "stars_total": stars_val,
+        })
+
 
     current_uid = str(message.from_user.id)
     data = await state.get_data()  # 💬 берём FSM-data один раз, чтобы render_block мог читать actor_uid/actor_name и last_menu_msg_id
