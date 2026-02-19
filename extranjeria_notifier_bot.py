@@ -973,6 +973,58 @@ def _today_key(now: dt.datetime) -> str:
     return now.strftime("%Y-%m-%d")
 
 
+def _pick_weekday_event_count_variant_b(
+    *,
+    random_quiet_roll: float | None = None,
+    random_count_roll: float | None = None,
+) -> int:
+    """
+    Variant B (только для будней):
+    - 30% -> 0 событий
+    - 70% -> выбираем 1/2/3 как 50% / 40% / 10%
+
+    Итог по будням:
+    - N=0: 30%
+    - N=1: 35%
+    - N=2: 28%
+    - N=3: 7%
+    """
+    quiet_roll = random.random() if random_quiet_roll is None else float(random_quiet_roll)
+    if quiet_roll < 0.30:
+        return 0
+
+    count_roll = random.random() if random_count_roll is None else float(random_count_roll)
+    if count_roll < 0.50:
+        return 1
+    if count_roll < 0.90:
+        return 2
+    return 3
+
+
+def _build_events_from_active_groups(
+    *,
+    pool_minutes: list[int],
+    active_groups: list[tuple[str, str, str]],
+    n_events: int,
+) -> list[dict[str, Any]]:
+    """
+    Собирает события дня из уникальных минут и активных групп.
+    """
+    if n_events <= 0 or not pool_minutes or not active_groups:
+        return []
+
+    n_events = min(int(n_events), len(pool_minutes))
+    chosen_minutes = sorted(random.sample(pool_minutes, k=n_events))
+
+    events: list[dict[str, Any]] = []
+    for m in chosen_minutes:
+        prov, office_id, service_id = random.choice(active_groups)
+        events.append(
+            {"min": int(m), "prov": prov, "office_id": office_id, "service_id": service_id}
+        )
+    return events
+
+
 def _event_delivery_decision(
     user: dict,
     event_prov: str,
@@ -1169,9 +1221,10 @@ async def notifier_loop() -> None:
 
         pool = _window_pool_minutes()
 
-        # 💬 Реалістичність: або тиша, або 1 “сигнал” за день
-        #    55% = 0, 45% = 1
-        n_events = 1 if random.random() < 0.45 else 0
+        # 💬 Variant B по будням:
+        #    30% = 0
+        #    70% = 1/2/3 по 50/40/10
+        n_events = _pick_weekday_event_count_variant_b()
 
 
         # 💬 Если нет групп/нет пользователей = тишина
@@ -1180,16 +1233,13 @@ async def notifier_loop() -> None:
             return daily_events[day_key]
 
         # 💬 Выбираем минуты и группы
-        n_events = min(n_events, len(pool))
-        chosen_minutes = sorted(random.sample(pool, k=n_events))
-
+        n_events = min(n_events, 3)
         groups_list = list(groups)
-        events: list[dict] = []
-        for m in chosen_minutes:
-            prov, office_id, service_id = random.choice(groups_list)
-            events.append(
-                {"min": int(m), "prov": prov, "office_id": office_id, "service_id": service_id}
-            )
+        events = _build_events_from_active_groups(
+            pool_minutes=pool,
+            active_groups=groups_list,
+            n_events=n_events,
+        )
 
         daily_events[day_key] = {"events": events, "fired": []}
         return daily_events[day_key]
