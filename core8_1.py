@@ -4457,20 +4457,31 @@ async def handle_unavailable_buttons(message: Message, state: FSMContext):
 @track_handler
 async def show_leaderboard(message: Message, state: FSMContext):
     xp_data = load_xp_data()
+    user_data = load_user_data()
 
-    # 💬 Фиксированный список фейков для "длинного" списка рейтинга
-    FAKE_LEADERBOARD_USERS = [
-        ("fake_001", "Danylo"), ("fake_002", "Iryna"), ("fake_003", "Sofi"), ("fake_004", "Maks"), ("fake_005", "Nazar"),
-        ("fake_006", "Alina"), ("fake_007", "Vlad"), ("fake_008", "Yana"), ("fake_009", "Oksi"), ("fake_010", "Tymur"),
-        ("fake_011", "Misha"), ("fake_012", "Nika"), ("fake_013", "Roma"), ("fake_014", "Sasha"), ("fake_015", "Katya"),
-        ("fake_016", "Artem"), ("fake_017", "Pasha"), ("fake_018", "Zhenya"), ("fake_019", "Vika"), ("fake_020", "Yulia"),
-        ("fake_021", "Marko"), ("fake_022", "Bogdan"), ("fake_023", "Oksi2"), ("fake_024", "Ira"), ("fake_025", "Taras"),
-        ("fake_026", "Sergii"), ("fake_027", "Alina3"), ("fake_028", "Nika7"), ("fake_029", "Maks9"), ("fake_030", "Alex"),
-    ]
+    # 💬 кого считаем «настраивал бота»: флаг в xp/user_data или allowlist из env (+ADMIN_CHAT_ID по умолчанию)
+    allowlist_raw = (os.getenv("LEADERBOARD_CONFIGURATOR_IDS") or "").strip()
+    configurator_allowlist = {str(ADMIN_CHAT_ID)}
+    if allowlist_raw:
+        for part in allowlist_raw.split(","):
+            uid = (part or "").strip()
+            if uid:
+                configurator_allowlist.add(uid)
+
+    def _is_configurator(uid: str, xp_user: dict) -> bool:
+        udata = user_data.get(str(uid), {}) or {}
+        return bool(
+            xp_user.get("is_configurator")
+            or udata.get("is_configurator")
+            or str(uid) in configurator_allowlist
+        )
 
     users = []
     for uid, u in xp_data.items():
         uid_str = str(uid)
+        if not _is_configurator(uid_str, u or {}):
+            continue
+
         name = (u.get("name", "") or "").strip()
         week = int(u.get("words_learned_week", 0) or 0)
         month = int(u.get("words_learned_month", 0) or 0)
@@ -4484,15 +4495,6 @@ async def show_leaderboard(message: Message, state: FSMContext):
             "stars_total": stars_total
         })
 
-    # 💬 Фейки оставляем в списке, но ВСЕ метрики = 0, чтобы не попадали в топы
-    for fake_uid, fake_name in FAKE_LEADERBOARD_USERS:
-        users.append({
-            "uid": fake_uid,
-            "name": fake_name,
-            "words_learned_week": 0,
-            "words_learned_month": 0,
-            "stars_total": 0,
-        })
 
     current_uid = str(message.from_user.id)
     data = await state.get_data()  # 💬 берём FSM-data один раз, чтобы render_block мог читать actor_uid/actor_name и last_menu_msg_id
