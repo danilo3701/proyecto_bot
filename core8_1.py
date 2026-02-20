@@ -4457,32 +4457,42 @@ async def handle_unavailable_buttons(message: Message, state: FSMContext):
 @track_handler
 async def show_leaderboard(message: Message, state: FSMContext):
     xp_data = load_xp_data()
+    user_data = load_user_data()
+
+    # 💬 кого считаем «настраивал бота»: флаг в xp/user_data или allowlist из env (+ADMIN_CHAT_ID по умолчанию)
+    allowlist_raw = (os.getenv("LEADERBOARD_CONFIGURATOR_IDS") or "").strip()
+    configurator_allowlist = {str(ADMIN_CHAT_ID)}
+    if allowlist_raw:
+        for part in allowlist_raw.split(","):
+            uid = (part or "").strip()
+            if uid:
+                configurator_allowlist.add(uid)
+
+    def _is_configurator(uid: str, xp_user: dict) -> bool:
+        udata = user_data.get(str(uid), {}) or {}
+        return bool(
+            xp_user.get("is_configurator")
+            or udata.get("is_configurator")
+            or str(uid) in configurator_allowlist
+        )
+
     users = []
     for uid, u in xp_data.items():
+        uid_str = str(uid)
+        if not _is_configurator(uid_str, u or {}):
+            continue
+
         name = (u.get("name", "") or "").strip()
         week = int(u.get("words_learned_week", 0) or 0)
         month = int(u.get("words_learned_month", 0) or 0)
         stars_total = int(u.get("stars_total", 0) or 0)  # 💬 ⭐️ за закрытые блоки
 
         users.append({
-            "uid": str(uid),
+            "uid": uid_str,
             "name": name or f"User {uid}",
             "words_learned_week": week,
             "words_learned_month": month,
             "stars_total": stars_total
-        })
-
-    FAKE_USERS_COUNT = 60
-    for i in range(1, FAKE_USERS_COUNT + 1):
-        week_val = (i * 3) % 21
-        month_val = week_val + ((i * 5) % 37)
-        stars_val = (i * 7) % 13
-        users.append({
-            "uid": f"fake_{i}",
-            "name": f"Learner{i}",
-            "words_learned_week": week_val,
-            "words_learned_month": month_val,
-            "stars_total": stars_val,
         })
 
 
@@ -12228,6 +12238,13 @@ async def handle_offer_continue_vocab(message: Message, state: FSMContext):
     reaction   = params.get("reaction")
     next_stage = params.get("next")
 
+    logging.info(
+        "offer_continue(message): next=%s lex_mode_active=%s lex_round=%s",
+        next_stage,
+        bool(data.get("lex_mode_active", False)),
+        data.get("lex_round"),
+    )
+
     if reaction:
         await smart_reply(message, reaction, parse_mode="HTML")
 
@@ -12285,8 +12302,8 @@ async def handle_offer_continue_vocab(message: Message, state: FSMContext):
         if data.get("lex_mode_active"):
             # 💬 что делает эта часть: вместо старого "следующий сет" = запускаем следующий раунд
             data2 = await state.get_data()
-            cur_round = data2.get("lex_round", 0)
-            total = data2.get("lex_round_total", 4)
+            cur_round = int(data2.get("lex_round", 0) or 0)
+            total = int(data2.get("lex_round_total", 4) or 4)
             next_round = cur_round + 1
 
             if next_round >= total:
@@ -12301,7 +12318,21 @@ async def handle_offer_continue_vocab(message: Message, state: FSMContext):
                 )  # 💬 что делает эта часть: завершили все раунды = чистим и выходим
                 return await lesson_menu_handler(message, state)
 
-            await _lex_prepare_round_session(state, round_idx=next_round)
+            rounds = await _lex_prepare_round_session(state, round_idx=next_round)
+
+            round_quiz_indices = rounds.get("round_quiz_indices", [])
+            round_textquiz_idx = rounds.get("round_textquiz_idx")
+            next_vocab_index = round_quiz_indices[0] if round_quiz_indices else (round_textquiz_idx or 0)
+
+            await state.update_data(
+                lex_round=next_round,
+                lex_round_quiz_indices=round_quiz_indices,
+                lex_round_textquiz_idx=round_textquiz_idx,
+                vocab_index=next_vocab_index,
+                lex_textquiz_done_round=False,
+                lex_is_textquiz_round=bool(rounds.get("is_textquiz_round", False)),
+                current_stage=None,
+            )
 
             asyncio.create_task(send_and_auto_delete_text(bot, message.chat.id, f"Раунд {next_round + 1} из {total}", delay=2))
             return await send_one_vocab(message, state)
@@ -13385,6 +13416,13 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
         params     = scene["replies"][choice]
         next_stage = params.get("next")
 
+        logging.info(
+            "offer_continue(callback): next=%s lex_mode_active=%s lex_round=%s",
+            next_stage,
+            bool(data.get("lex_mode_active", False)),
+            data.get("lex_round"),
+        )
+
         # 1) Показываем реакцию (если есть)
         if params.get("reaction"):
             try:
@@ -13469,6 +13507,48 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
 
         # Переход по результату
         if next_stage == "next_item":
+            if data.get("lex_mode_active"):
+                cur_round = int(data.get("lex_round", 0) or 0)
+                total = int(data.get("lex_round_total", 4) or 4)
+                next_round = cur_round + 1
+
+                if next_round >= total:
+                    await state.update_data(
+                        lex_mode_active=False,
+                        lex_session_vocab_list=None,
+                        lex_active_phrases=None,
+                        lex_round=0,
+                        lex_round_total=0,
+                        lex_textquiz_phrase_cursor=0,
+                        lex_textquiz_done_round=False,
+                        current_stage=None,
+                    )
+                    return await lesson_menu_handler(cb.message, state)
+
+                rounds = await _lex_prepare_round_session(state, round_idx=next_round)
+                round_quiz_indices = rounds.get("round_quiz_indices", [])
+                round_textquiz_idx = rounds.get("round_textquiz_idx")
+                next_vocab_index = round_quiz_indices[0] if round_quiz_indices else (round_textquiz_idx or 0)
+
+                await state.update_data(
+                    lex_round=next_round,
+                    lex_round_quiz_indices=round_quiz_indices,
+                    lex_round_textquiz_idx=round_textquiz_idx,
+                    vocab_index=next_vocab_index,
+                    lex_textquiz_done_round=False,
+                    lex_is_textquiz_round=bool(rounds.get("is_textquiz_round", False)),
+                    current_stage=None,
+                )
+                asyncio.create_task(
+                    send_and_auto_delete_text(
+                        bot,
+                        cb.message.chat.id,
+                        f"Раунд {next_round + 1} из {total}",
+                        delay=2,
+                    )
+                )
+                return await send_one_vocab(cb.message, state)
+
             curr = data.get("vocab_index", 0)
             vocab_list = get_vocab_list(data)
             candidate = curr + 1
@@ -13605,7 +13685,6 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
-
 
 
 
