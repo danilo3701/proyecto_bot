@@ -26,7 +26,7 @@ DATA_PATH = os.getenv("DATA_PATH", "/data/notifier_users.json").strip()
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@espanolingooo").strip()
 
 # 💬 Куди веде кнопка в сповіщенні (поки можна залишити так, потім заміниш)
-BOOKING_URL = os.getenv("BOOKING_URL", "https://sede.administracionespublicas.gob.es/pagina/index/directorio/icpplus").strip()
+BOOKING_URL = os.getenv("BOOKING_URL", "https://icp.administracionelectronica.gob.es/icpplus/acCitar").strip()
 
 # 💬 Вікно сповіщень (не показуємо користувачу)
 MADRID_TZ = ZoneInfo("Europe/Madrid")
