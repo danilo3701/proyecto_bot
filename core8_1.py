@@ -4522,6 +4522,7 @@ async def show_leaderboard(message: Message, state: FSMContext):
                 str(u.get("uid", "")),
             ),
         )
+        sorted_real = [u for u in sorted_all if not str(u.get("uid", "")).startswith("fake_")]
 
         current_user = next((u for u in users if str(u.get("uid", "")) == current_uid), None)
         if current_user is None:
@@ -4536,17 +4537,17 @@ async def show_leaderboard(message: Message, state: FSMContext):
         users_count = len(sorted_all)
         res = [f"<b>{title}</b>", "<pre>"]
 
-        if not sorted_all or all(
-            int(u.get(period_key, 0) or 0) == 0 and int(u.get("stars_total", 0) or 0) == 0 for u in sorted_all
+        if not sorted_real or all(
+            int(u.get(period_key, 0) or 0) == 0 and int(u.get("stars_total", 0) or 0) == 0 for u in sorted_real
         ):
             res.append("Пока нет результатов за этот период")
             res.append(f"↳👥 {users_count}")
             res.append("</pre>")
             return "\n".join(res)
 
-        top5 = sorted_all[:5]
+        top5 = sorted_real[:5]  # 💬 Top-5 строим только по реальным пользователям
         my_rank = None
-        for idx, u in enumerate(sorted_all, 1):
+        for idx, u in enumerate(sorted_real, 1):
             if str(u.get("uid", "")) == current_uid:
                 my_rank = idx
                 break
