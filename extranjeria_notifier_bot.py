@@ -1157,6 +1157,44 @@ async def _send_alert(user_chat_id: int, text: str) -> None:
         pass
 
 
+async def _flash_enabled_notice_ua(chat_id: int) -> None:
+    """
+    Короткое подтверждение включения уведомлений:
+    стикер + текст на 5 секунд, затем удаляем оба сообщения.
+    """
+    sticker_msg_id: int | None = None
+    text_msg_id: int | None = None
+
+    try:
+        st = await bot.send_sticker(chat_id=chat_id, sticker="5461151367559141950")
+        sticker_msg_id = int(st.message_id)
+    except Exception:
+        sticker_msg_id = None
+
+    try:
+        msg = await bot.send_message(
+            chat_id=chat_id,
+            text="✅ Сповіщення увімкнено. Зачекайте, будь ласка.",
+        )
+        text_msg_id = int(msg.message_id)
+    except Exception:
+        text_msg_id = None
+
+    await asyncio.sleep(5)
+
+    if sticker_msg_id is not None:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=sticker_msg_id)
+        except Exception:
+            pass
+
+    if text_msg_id is not None:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=text_msg_id)
+        except Exception:
+            pass
+
+
 
 async def notifier_loop() -> None:
     """
@@ -1666,6 +1704,8 @@ async def cb_main(call: CallbackQuery):
         text=_main_text(u),
         kb=_kb_main(u),
     )
+
+    asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
 
 
 @router.callback_query(F.data == "ui:toggle_on")
