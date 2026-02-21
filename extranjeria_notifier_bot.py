@@ -1876,15 +1876,6 @@ async def cb_refresh_status(call: CallbackQuery):
             await bot.delete_message(chat_id=chat_id, message_id=status_msg_id)
         except Exception:
             pass
-    if status_msg_id is None:
-        return
-
-    await asyncio.sleep(5)
-
-    try:
-        await bot.delete_message(chat_id=chat_id, message_id=status_msg_id)
-    except Exception:
-        pass
 
 
 @router.callback_query(F.data == "ui:main")
