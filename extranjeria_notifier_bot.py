@@ -1893,6 +1893,16 @@ async def cb_main(call: CallbackQuery):
         kb=_kb_main(u),
     )
 
+    asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
+
+
+
+
+
+
+
+
+
 
 
 @router.callback_query(F.data == "ui:toggle_on")
