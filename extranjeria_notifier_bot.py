@@ -8,7 +8,7 @@ from typing import Any
 from html import escape as _h  # 💬 HTML-екранирование для значений в тексте
 
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton,
@@ -28,6 +28,7 @@ REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@espanolingooo").strip()
 # 💬 Куди веде кнопка в сповіщенні (поки можна залишити так, потім заміниш)
 BOOKING_URL = os.getenv("BOOKING_URL", "https://icp.administracionelectronica.gob.es/icpplus/acCitar").strip()
 CITA_CHAT_URL = os.getenv("CITA_CHAT_URL", "https://t.me/+hKC3Q2eZhaswZDg8").strip()
+PROMO_START_URL = os.getenv("PROMO_START_URL", "https://t.me/CitaExtranjeria1Bot?start=from_group").strip()
 
 # 💬 Вікно сповіщень (не показуємо користувачу)
 MADRID_TZ = ZoneInfo("Europe/Madrid")
@@ -480,6 +481,27 @@ def _main_text(u: dict) -> str:
     )
     return text
 
+
+
+
+
+def _ensure_meta(store: dict) -> dict:
+    meta = store.get("_meta")
+    if not isinstance(meta, dict):
+        meta = {}
+        store["_meta"] = meta
+    chats = meta.get("chats")
+    if not isinstance(chats, dict):
+        chats = {}
+        meta["chats"] = chats
+    return chats
+
+
+def _promo_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="💬 Чат Сіти", url=CITA_CHAT_URL),
+        InlineKeyboardButton(text="🤖 Запустити бота", url=PROMO_START_URL),
+    ]])
 
 
 def _kb_main(u: dict) -> InlineKeyboardMarkup:
@@ -1730,6 +1752,47 @@ async def admin_audit_notify(message: Message):
         pass
 
 
+@router.message(Command("promo_once"))
+async def cmd_promo_once(message: Message):
+    if not message.from_user or (int(message.from_user.id) not in set(ADMIN_IDS)):
+        return
+
+    if message.chat.type not in ("group", "supergroup", "channel"):
+        await message.answer("Запусти /promo_once у групі або каналі.")
+        return
+
+    store = _load_json(DATA_PATH)
+    chats = _ensure_meta(store)
+
+    chat_id = str(message.chat.id)
+    rec = chats.get(chat_id)
+    if not isinstance(rec, dict):
+        rec = {}
+        chats[chat_id] = rec
+
+    if rec.get("promo_once_sent"):
+        await message.answer("✅ Промо вже було надіслано тут.")
+        return
+
+    text = (
+        "💌 Запуск бота — натисніть кнопку нижче.\n"
+        "💬 Питання/поради — у чаті Сіти."
+    )
+
+    sent = await message.answer(text, reply_markup=_promo_kb())
+
+    try:
+        await bot.pin_chat_message(message.chat.id, sent.message_id, disable_notification=True)
+        rec["promo_pinned_message_id"] = sent.message_id
+    except Exception:
+        pass
+
+    rec["promo_once_sent"] = True
+    _save_json_atomic(DATA_PATH, store)
+
+    await message.answer("✅ Готово. Можеш скопіювати/закріпити/видалити повідомлення вручну.")
+
+
 @router.callback_query(F.data == "ui:noop")
 async def cb_noop(call: CallbackQuery):
     await call.answer()
@@ -1751,6 +1814,7 @@ async def cb_main(call: CallbackQuery):
     )
 
     asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
+
 
 
 
