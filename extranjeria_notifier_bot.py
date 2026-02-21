@@ -76,6 +76,7 @@ def _is_admin_chat(chat_id: int) -> bool:
 # 💬 “Мигалка” для повідомлення "не бачу підписку"
 FLASH_SEC = 3
 _LAST_REFRESH_TS: dict[str, float] = {}
+_REFRESH_IN_FLIGHT: set[str] = set()
 
 
 # =========================
@@ -736,10 +737,7 @@ APPLY_PAGES = [
     "<b>🧾 Як подавати (2/7)</b>\n\n"
     "<b>BOE</b>\n"
     "Офіційний документ тут\n"
-    "👉 <a href=\"https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-4157\">Відкрити BOE</a>\n\n"
-    "<b>Резолюція</b>\n"
-    "Скачати резолюцію можна тут\n"
-    "👉 <a href=\"https://servicio.mir.es/nfrontal/asi_desc_res.html\">Скачати резолюцію</a>",
+    "👉 <a href=\"https://www.boe.es/buscar/doc.php?id=BOE-A-2026-3712\">Відкрити BOE</a>",
 
     "<b>🧾 Як подавати (3/7)</b>\n\n"
     "<b>Сіта для тимчасового захисту</b>\n"
@@ -1894,6 +1892,7 @@ async def cb_main(call: CallbackQuery):
     )
 
     asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
+
 
 
 
