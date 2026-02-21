@@ -1166,7 +1166,7 @@ async def _flash_enabled_notice_ua(chat_id: int) -> None:
     text_msg_id: int | None = None
 
     try:
-        st = await bot.send_sticker(chat_id=chat_id, sticker="CAACAgIAAxkBAAIZlmmZQivhfkWJP7sB8tHmcaMTVIipAAJNAwACtXHaBuhKR55mIVfgOgQ")
+        st = await bot.send_sticker(chat_id=chat_id, sticker="5461151367559141950")
         sticker_msg_id = int(st.message_id)
     except Exception:
         sticker_msg_id = None
@@ -1747,6 +1747,9 @@ async def cb_main(call: CallbackQuery):
         text=_main_text(u),
         kb=_kb_main(u),
     )
+
+    asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
+
 
 
 
