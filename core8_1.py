@@ -3130,7 +3130,11 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
 
     # 💬 menu:grammar может нажиматься, пока пользователь всё ещё в LessonStates.choosing_category
     # 💬 этот хендлер перехватывает все menu:* и если не обработать = будет вечная загрузка
-    if action in ("grammar", "gram"):
+    if action == "grammar":
+        await callback.answer("Раздел в разработке", show_alert=False)
+        return
+
+    if action == "gram":
         return await gram_menu_entry(callback, state)
 
 
@@ -3275,8 +3279,9 @@ async def category_chosen_cb(callback: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "menu:grammar")
 @track_handler
 async def cb_menu_grammar_global(callback: CallbackQuery, state: FSMContext):
-    # 💬 Глобальный вход в грамматику: работает из любого state, чтобы не было вечной загрузки
-    return await gram_menu_entry(callback, state)
+    # 💬 Временно отключено: только toast без сообщений в чат и без открытия грамматики
+    await callback.answer("Раздел в разработке", show_alert=False)
+    return
 
 # ================================================================================
 # 📊 Статистика: экран + шаринг другу
@@ -13715,7 +13720,6 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
-
 
 
 
