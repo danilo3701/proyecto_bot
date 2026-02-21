@@ -30,7 +30,7 @@ BOOKING_URL = os.getenv("BOOKING_URL", "https://icp.administracionelectronica.go
 CITA_CHAT_URL = os.getenv("CITA_CHAT_URL", "https://t.me/+hKC3Q2eZhaswZDg8").strip()
 PROMO_START_URL = os.getenv("PROMO_START_URL", "https://t.me/CitaExtranjeria1Bot?start=from_group").strip()
 REFRESH_STICKER_ID = "CAACAgIAAxkBAAIZzmmZ6EjnrxwPCaYsXR2yrhSUl6EWAAJUXAACp2-AS1fkWR4Yo5d4OgQ"
-REFRESH_COOLDOWN_SEC = 12
+REFRESH_COOLDOWN_SEC = 8
 
 # 💬 Вікно сповіщень (не показуємо користувачу)
 MADRID_TZ = ZoneInfo("Europe/Madrid")
@@ -1878,6 +1878,12 @@ async def cb_main(call: CallbackQuery):
         text=_main_text(u),
         kb=_kb_main(u),
     )
+
+    asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
+
+
+
+
 
 
 
