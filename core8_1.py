@@ -7075,11 +7075,16 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
         vocab_blocks = ph.get("vocab", []) or []
 
-        # 💬 фикс: "норма" фазы = реальное число раундов, как в show_phase_menu (без жёсткого 5)
-        need = 0
-        need += len(ph.get("quiz_pool", []) or []) + len(ph.get("textquiz_pool", []) or [])
-        need += sum(1 for b in vocab_blocks if b.get("type") in ("quiz", "textquiz"))
-        need += sum(1 for b in vocab_blocks if b.get("quiz"))
+        # 💬 фикс: для ALL IN прогресс фазы считаем по раундам (обычно 5), а не по количеству слов/квизов
+        phrases = ph.get("phrases", []) or []
+        has_round_mode = bool(ph.get("quiz_pool") or ph.get("textquiz_pool") or phrases)
+
+        if has_round_mode:
+            need = int(_lex_detect_total_rounds(phrases, default_total=5) or 5)
+        else:
+            need = 0
+            need += sum(1 for b in vocab_blocks if b.get("type") in ("quiz", "textquiz"))
+            need += sum(1 for b in vocab_blocks if b.get("quiz"))
 
         # 💬 fallback для legacy-фаз, где только ссылки
         if need <= 0:
@@ -13720,70 +13725,4 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
