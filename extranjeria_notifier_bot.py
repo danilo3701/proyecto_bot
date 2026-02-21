@@ -29,6 +29,8 @@ REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@espanolingooo").strip()
 BOOKING_URL = os.getenv("BOOKING_URL", "https://icp.administracionelectronica.gob.es/icpplus/acCitar").strip()
 CITA_CHAT_URL = os.getenv("CITA_CHAT_URL", "https://t.me/+hKC3Q2eZhaswZDg8").strip()
 PROMO_START_URL = os.getenv("PROMO_START_URL", "https://t.me/CitaExtranjeria1Bot?start=from_group").strip()
+REFRESH_STICKER_ID = "CAACAgIAAxkBAAIZzmmZ6EjnrxwPCaYsXR2yrhSUl6EWAAJUXAACp2-AS1fkWR4Yo5d4OgQ"
+REFRESH_COOLDOWN_SEC = 8
 
 # 💬 Вікно сповіщень (не показуємо користувачу)
 MADRID_TZ = ZoneInfo("Europe/Madrid")
@@ -73,6 +75,7 @@ def _is_admin_chat(chat_id: int) -> bool:
 
 # 💬 “Мигалка” для повідомлення "не бачу підписку"
 FLASH_SEC = 3
+_LAST_REFRESH_TS: dict[str, float] = {}
 
 
 # =========================
@@ -504,6 +507,12 @@ def _promo_kb() -> InlineKeyboardMarkup:
     ]])
 
 
+def _madrid_timestamp_str(now: dt.datetime | None = None) -> str:
+    now_madrid = (now or dt.datetime.now(MADRID_TZ)).astimezone(MADRID_TZ)
+    tz_abbr = now_madrid.tzname() or "CET"
+    return now_madrid.strftime(f"%Y-%m-%d %H:%M:%S {tz_abbr}")
+
+
 def _kb_main(u: dict) -> InlineKeyboardMarkup:
     enabled = bool(u.get("enabled"))
 
@@ -516,6 +525,7 @@ def _kb_main(u: dict) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🗺️ Обрати сервіс", callback_data="pick:province"),
             InlineKeyboardButton(text="📌 Важливо", callback_data="info:important:0"),
         ],
+        [InlineKeyboardButton(text="🔄 Оновити", callback_data="ui:refresh")],
         [
             InlineKeyboardButton(text="🧾 Як подавати", callback_data="info:apply:0"),
             InlineKeyboardButton(text="ℹ️ Як це працює", callback_data="info:how:0"),
@@ -1798,6 +1808,62 @@ async def cb_noop(call: CallbackQuery):
     await call.answer()
 
 
+@router.callback_query(F.data == "ui:refresh")
+async def cb_refresh_status(call: CallbackQuery):
+    await call.answer()
+
+    chat_id = call.message.chat.id
+    user_id = str(chat_id)
+
+    now_ts = asyncio.get_running_loop().time()
+    last_ts = _LAST_REFRESH_TS.get(user_id, 0.0)
+    if now_ts - last_ts < REFRESH_COOLDOWN_SEC:
+        try:
+            await call.answer("Спробуй трохи пізніше", show_alert=False)
+        except Exception:
+            pass
+        return
+    _LAST_REFRESH_TS[user_id] = now_ts
+
+    sub_status = "DISABLED"
+    try:
+        ok = await _is_subscribed(bot, call.from_user.id)
+        sub_status = "ENABLED" if ok else "DISABLED"
+    except Exception:
+        sub_status = "DISABLED"
+
+    timestamp = _madrid_timestamp_str()
+    text = (
+        f"🕒 <code>{timestamp}</code>\n"
+        "✅ Notifier=<b>ACTIVE</b>\n"
+        "✅ Alerts=<b>ENABLED</b>\n"
+        "✅ Delivery=<b>READY</b>\n"
+        f"✅ Subscription=<b>{sub_status}</b>"
+    )
+
+    try:
+        await bot.send_sticker(chat_id=chat_id, sticker=REFRESH_STICKER_ID)
+    except Exception:
+        pass
+
+    status_msg_id: int | None = None
+    try:
+        sent = await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        status_msg_id = int(sent.message_id)
+    except Exception:
+        status_msg_id = None
+
+    if status_msg_id is None:
+        return
+
+    await asyncio.sleep(5)
+
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=status_msg_id)
+    except Exception:
+        pass
+
+
 @router.callback_query(F.data == "ui:main")
 async def cb_main(call: CallbackQuery):
     await call.answer()
@@ -1814,6 +1880,7 @@ async def cb_main(call: CallbackQuery):
     )
 
     asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
+
 
 
 
