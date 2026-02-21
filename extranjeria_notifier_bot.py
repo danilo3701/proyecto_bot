@@ -1850,6 +1850,10 @@ async def cb_refresh_status(call: CallbackQuery):
         sticker_msg_id = int(st.message_id)
     except Exception:
         sticker_msg_id = None
+    try:
+        await bot.send_sticker(chat_id=chat_id, sticker=REFRESH_STICKER_ID)
+    except Exception:
+        pass
 
     status_msg_id: int | None = None
     try:
@@ -1872,6 +1876,15 @@ async def cb_refresh_status(call: CallbackQuery):
             await bot.delete_message(chat_id=chat_id, message_id=status_msg_id)
         except Exception:
             pass
+    if status_msg_id is None:
+        return
+
+    await asyncio.sleep(5)
+
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=status_msg_id)
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data == "ui:main")
@@ -1888,6 +1901,14 @@ async def cb_main(call: CallbackQuery):
         text=_main_text(u),
         kb=_kb_main(u),
     )
+
+    asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
+
+
+
+
+
+
 
 
 
