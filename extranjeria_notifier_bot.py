@@ -27,6 +27,7 @@ REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@espanolingooo").strip()
 
 # 💬 Куди веде кнопка в сповіщенні (поки можна залишити так, потім заміниш)
 BOOKING_URL = os.getenv("BOOKING_URL", "https://icp.administracionelectronica.gob.es/icpplus/acCitar").strip()
+CITA_CHAT_URL = os.getenv("CITA_CHAT_URL", "https://t.me/+hKC3Q2eZhaswZDg8").strip()
 
 # 💬 Вікно сповіщень (не показуємо користувачу)
 MADRID_TZ = ZoneInfo("Europe/Madrid")
@@ -498,6 +499,7 @@ def _kb_main(u: dict) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="ℹ️ Як це працює", callback_data="info:how:0"),
         ],
         [
+            InlineKeyboardButton(text="💬 Чат Сіти", url=CITA_CHAT_URL),
             InlineKeyboardButton(text="🌐 Сайт сіти", url=BOOKING_URL),  # 💬 прямий доступ
         ],
     ])
@@ -1166,7 +1168,7 @@ async def _flash_enabled_notice_ua(chat_id: int) -> None:
     text_msg_id: int | None = None
 
     try:
-        st = await bot.send_sticker(chat_id=chat_id, sticker="5461151367559141950")
+        st = await bot.send_sticker(chat_id=chat_id, sticker="CAACAgIAAxkBAAIZlmmZQivhfkWJP7sB8tHmcaMTVIipAAJNAwACtXHaBuhKR55mIVfgOgQ")
         sticker_msg_id = int(st.message_id)
     except Exception:
         sticker_msg_id = None
@@ -1749,6 +1751,7 @@ async def cb_main(call: CallbackQuery):
     )
 
     asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
+
 
 
 
