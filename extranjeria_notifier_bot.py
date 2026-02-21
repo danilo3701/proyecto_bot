@@ -1811,69 +1811,71 @@ async def cb_noop(call: CallbackQuery):
 
 @router.callback_query(F.data == "ui:refresh")
 async def cb_refresh_status(call: CallbackQuery):
-    await call.answer()
-
     chat_id = call.message.chat.id
     user_id = str(chat_id)
+
+    if user_id in _REFRESH_IN_FLIGHT:
+        await call.answer("Спробуй трохи пізніше", show_alert=False)
+        return
 
     now_ts = asyncio.get_running_loop().time()
     last_ts = _LAST_REFRESH_TS.get(user_id, 0.0)
     if now_ts - last_ts < REFRESH_COOLDOWN_SEC:
-        try:
-            await call.answer("Спробуй трохи пізніше", show_alert=False)
-        except Exception:
-            pass
+        await call.answer("Спробуй трохи пізніше", show_alert=False)
         return
+
+    _REFRESH_IN_FLIGHT.add(user_id)
     _LAST_REFRESH_TS[user_id] = now_ts
 
-    sub_status = "DISABLED"
     try:
-        ok = await _is_subscribed(bot, call.from_user.id)
-        sub_status = "ENABLED" if ok else "DISABLED"
-    except Exception:
+        await call.answer()
+
         sub_status = "DISABLED"
-
-    timestamp = _madrid_timestamp_str()
-    text = (
-        f"🕒 <code>{timestamp}</code>\n"
-        "✅ Notifier=<b>ACTIVE</b>\n"
-        "✅ Alerts=<b>ENABLED</b>\n"
-        "✅ Delivery=<b>READY</b>\n"
-        f"✅ Subscription=<b>{sub_status}</b>"
-    )
-
-    sticker_msg_id: int | None = None
-    try:
-        st = await bot.send_sticker(chat_id=chat_id, sticker=REFRESH_STICKER_ID)
-        sticker_msg_id = int(st.message_id)
-    except Exception:
-        sticker_msg_id = None
-    try:
-        await bot.send_sticker(chat_id=chat_id, sticker=REFRESH_STICKER_ID)
-    except Exception:
-        pass
-
-    status_msg_id: int | None = None
-    try:
-        sent = await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
-        status_msg_id = int(sent.message_id)
-    except Exception:
-        status_msg_id = None
-
-    # якщо текст не відправився — все одно спробуємо прибрати стікер (якщо він був)
-    await asyncio.sleep(5)
-
-    if sticker_msg_id is not None:
         try:
-            await bot.delete_message(chat_id=chat_id, message_id=sticker_msg_id)
+            ok = await _is_subscribed(bot, call.from_user.id)
+            sub_status = "ENABLED" if ok else "DISABLED"
         except Exception:
-            pass
+            sub_status = "DISABLED"
 
-    if status_msg_id is not None:
+        timestamp = _madrid_timestamp_str()
+        text = (
+            f"🕒 <code>{timestamp}</code>\n"
+            "✅ Notifier=<b>ACTIVE</b>\n"
+            "✅ Alerts=<b>ENABLED</b>\n"
+            "✅ Delivery=<b>READY</b>\n"
+            f"✅ Subscription=<b>{sub_status}</b>"
+        )
+
+        sticker_msg_id: int | None = None
         try:
-            await bot.delete_message(chat_id=chat_id, message_id=status_msg_id)
+            st = await bot.send_sticker(chat_id=chat_id, sticker=REFRESH_STICKER_ID)
+            sticker_msg_id = int(st.message_id)
         except Exception:
-            pass
+            sticker_msg_id = None
+
+        status_msg_id: int | None = None
+        try:
+            sent = await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+            status_msg_id = int(sent.message_id)
+        except Exception:
+            status_msg_id = None
+
+        # ждём 5 сек и убираем временные сообщения
+        await asyncio.sleep(5)
+
+        if sticker_msg_id is not None:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=sticker_msg_id)
+            except Exception:
+                pass
+
+        if status_msg_id is not None:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=status_msg_id)
+            except Exception:
+                pass
+    finally:
+        _REFRESH_IN_FLIGHT.discard(user_id)
 
 
 @router.callback_query(F.data == "ui:main")
@@ -1892,6 +1894,7 @@ async def cb_main(call: CallbackQuery):
     )
 
     asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
+
 
 
 
