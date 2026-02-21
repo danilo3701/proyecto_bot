@@ -30,7 +30,7 @@ BOOKING_URL = os.getenv("BOOKING_URL", "https://icp.administracionelectronica.go
 CITA_CHAT_URL = os.getenv("CITA_CHAT_URL", "https://t.me/+hKC3Q2eZhaswZDg8").strip()
 PROMO_START_URL = os.getenv("PROMO_START_URL", "https://t.me/CitaExtranjeria1Bot?start=from_group").strip()
 REFRESH_STICKER_ID = "CAACAgIAAxkBAAIZzmmZ6EjnrxwPCaYsXR2yrhSUl6EWAAJUXAACp2-AS1fkWR4Yo5d4OgQ"
-REFRESH_COOLDOWN_SEC = 8
+REFRESH_COOLDOWN_SEC = 12
 
 # 💬 Вікно сповіщень (не показуємо користувачу)
 MADRID_TZ = ZoneInfo("Europe/Madrid")
@@ -533,6 +533,9 @@ def _kb_main(u: dict) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="💬 Чат Сіти", url=CITA_CHAT_URL),
             InlineKeyboardButton(text="🌐 Сайт сіти", url=BOOKING_URL),  # 💬 прямий доступ
+        ],
+        [
+            InlineKeyboardButton(text="🧠 Вчити іспанську", url="https://t.me/espanoljuega_bot?start=channel"),
         ],
     ])
 
@@ -1841,6 +1844,12 @@ async def cb_refresh_status(call: CallbackQuery):
         f"✅ Subscription=<b>{sub_status}</b>"
     )
 
+    sticker_msg_id: int | None = None
+    try:
+        st = await bot.send_sticker(chat_id=chat_id, sticker=REFRESH_STICKER_ID)
+        sticker_msg_id = int(st.message_id)
+    except Exception:
+        sticker_msg_id = None
     try:
         await bot.send_sticker(chat_id=chat_id, sticker=REFRESH_STICKER_ID)
     except Exception:
@@ -1853,6 +1862,20 @@ async def cb_refresh_status(call: CallbackQuery):
     except Exception:
         status_msg_id = None
 
+    # якщо текст не відправився — все одно спробуємо прибрати стікер (якщо він був)
+    await asyncio.sleep(5)
+
+    if sticker_msg_id is not None:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=sticker_msg_id)
+        except Exception:
+            pass
+
+    if status_msg_id is not None:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=status_msg_id)
+        except Exception:
+            pass
     if status_msg_id is None:
         return
 
@@ -1880,6 +1903,7 @@ async def cb_main(call: CallbackQuery):
     )
 
     asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
+
 
 
 
