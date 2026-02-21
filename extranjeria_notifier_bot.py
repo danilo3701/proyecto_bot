@@ -26,7 +26,8 @@ DATA_PATH = os.getenv("DATA_PATH", "/data/notifier_users.json").strip()
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@espanolingooo").strip()
 
 # 💬 Куди веде кнопка в сповіщенні (поки можна залишити так, потім заміниш)
-BOOKING_URL = os.getenv("BOOKING_URL", "https://sede.administracionespublicas.gob.es/pagina/index/directorio/icpplus").strip()
+BOOKING_URL = os.getenv("BOOKING_URL", "https://icp.administracionelectronica.gob.es/icpplus/acCitar").strip()
+CITA_CHAT_URL = os.getenv("CITA_CHAT_URL", "https://t.me/+hKC3Q2eZhaswZDg8").strip()
 
 # 💬 Вікно сповіщень (не показуємо користувачу)
 MADRID_TZ = ZoneInfo("Europe/Madrid")
@@ -498,6 +499,7 @@ def _kb_main(u: dict) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="ℹ️ Як це працює", callback_data="info:how:0"),
         ],
         [
+            InlineKeyboardButton(text="💬 Чат Сіти", url=CITA_CHAT_URL),
             InlineKeyboardButton(text="🌐 Сайт сіти", url=BOOKING_URL),  # 💬 прямий доступ
         ],
     ])
@@ -973,6 +975,58 @@ def _today_key(now: dt.datetime) -> str:
     return now.strftime("%Y-%m-%d")
 
 
+def _pick_weekday_event_count_variant_b(
+    *,
+    random_quiet_roll: float | None = None,
+    random_count_roll: float | None = None,
+) -> int:
+    """
+    Variant B (только для будней):
+    - 30% -> 0 событий
+    - 70% -> выбираем 1/2/3 как 50% / 40% / 10%
+
+    Итог по будням:
+    - N=0: 30%
+    - N=1: 35%
+    - N=2: 28%
+    - N=3: 7%
+    """
+    quiet_roll = random.random() if random_quiet_roll is None else float(random_quiet_roll)
+    if quiet_roll < 0.30:
+        return 0
+
+    count_roll = random.random() if random_count_roll is None else float(random_count_roll)
+    if count_roll < 0.50:
+        return 1
+    if count_roll < 0.90:
+        return 2
+    return 3
+
+
+def _build_events_from_active_groups(
+    *,
+    pool_minutes: list[int],
+    active_groups: list[tuple[str, str, str]],
+    n_events: int,
+) -> list[dict[str, Any]]:
+    """
+    Собирает события дня из уникальных минут и активных групп.
+    """
+    if n_events <= 0 or not pool_minutes or not active_groups:
+        return []
+
+    n_events = min(int(n_events), len(pool_minutes))
+    chosen_minutes = sorted(random.sample(pool_minutes, k=n_events))
+
+    events: list[dict[str, Any]] = []
+    for m in chosen_minutes:
+        prov, office_id, service_id = random.choice(active_groups)
+        events.append(
+            {"min": int(m), "prov": prov, "office_id": office_id, "service_id": service_id}
+        )
+    return events
+
+
 def _event_delivery_decision(
     user: dict,
     event_prov: str,
@@ -1105,6 +1159,87 @@ async def _send_alert(user_chat_id: int, text: str) -> None:
         pass
 
 
+async def _flash_enabled_notice_ua(chat_id: int) -> None:
+    """
+    Короткое подтверждение включения уведомлений:
+    стикер + текст на 5 секунд, затем удаляем оба сообщения.
+    """
+    sticker_msg_id: int | None = None
+    text_msg_id: int | None = None
+
+    try:
+        st = await bot.send_sticker(chat_id=chat_id, sticker="CAACAgIAAxkBAAIZlmmZQivhfkWJP7sB8tHmcaMTVIipAAJNAwACtXHaBuhKR55mIVfgOgQ")
+        sticker_msg_id = int(st.message_id)
+    except Exception:
+        sticker_msg_id = None
+
+    try:
+        msg = await bot.send_message(
+            chat_id=chat_id,
+            text="✅ Сповіщення увімкнено. Зачекайте, будь ласка.",
+        )
+        text_msg_id = int(msg.message_id)
+    except Exception:
+        text_msg_id = None
+
+    await asyncio.sleep(5)
+
+    if sticker_msg_id is not None:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=sticker_msg_id)
+        except Exception:
+            pass
+
+    if text_msg_id is not None:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=text_msg_id)
+        except Exception:
+            pass
+
+
+
+async def _schedule_welcome_test_alert(user_id: str) -> None:
+    """
+    Через 5 хв після ввімкнення перевіряємо enabled і шлемо одноразовий тест.
+    """
+    await asyncio.sleep(300)
+
+    try:
+        store2 = _load_json(DATA_PATH)
+        u2 = _ensure_user(store2, user_id)
+        if not u2.get("enabled"):
+            return
+
+        prov = u2.get("province") or "не обрано"
+        office_id = u2.get("office_id")
+        svc_id = u2.get("service_id")
+
+        office_title = office_id or "не обрано"
+        svc_title = svc_id or "не обрано"
+
+        if prov in PROVINCES:
+            for o in PROVINCES[prov].get("offices", []):
+                if o.get("id") == office_id:
+                    office_title = o.get("title", office_title)
+                    break
+            for sv in PROVINCES[prov].get("services", []):
+                if sv.get("id") == svc_id:
+                    svc_title = sv.get("title", svc_title)
+                    break
+
+        test_text = (
+            "🧪 <b>ТЕСТ сповіщень</b>\n"
+            "Якщо ви бачите це повідомлення — сповіщення працюють ✅\n\n"
+            "<b>Ваші налаштування:</b>\n"
+            f"• Провінція: <b>{_h(str(prov))}</b>\n"
+            f"• Офіс: <b>{_h(str(office_title))}</b>\n"
+            f"• Послуга: <b>{_h(str(svc_title))}</b>\n\n"
+            "ℹ️ Це лише перевірка. Це <b>НЕ</b> означає, що з’явився реальний слот."
+        )
+        await _send_alert(int(user_id), test_text)
+    except Exception:
+        pass
+
 
 async def notifier_loop() -> None:
     """
@@ -1169,9 +1304,10 @@ async def notifier_loop() -> None:
 
         pool = _window_pool_minutes()
 
-        # 💬 Реалістичність: або тиша, або 1 “сигнал” за день
-        #    55% = 0, 45% = 1
-        n_events = 1 if random.random() < 0.45 else 0
+        # 💬 Variant B по будням:
+        #    30% = 0
+        #    70% = 1/2/3 по 50/40/10
+        n_events = _pick_weekday_event_count_variant_b()
 
 
         # 💬 Если нет групп/нет пользователей = тишина
@@ -1180,16 +1316,13 @@ async def notifier_loop() -> None:
             return daily_events[day_key]
 
         # 💬 Выбираем минуты и группы
-        n_events = min(n_events, len(pool))
-        chosen_minutes = sorted(random.sample(pool, k=n_events))
-
+        n_events = min(n_events, 3)
         groups_list = list(groups)
-        events: list[dict] = []
-        for m in chosen_minutes:
-            prov, office_id, service_id = random.choice(groups_list)
-            events.append(
-                {"min": int(m), "prov": prov, "office_id": office_id, "service_id": service_id}
-            )
+        events = _build_events_from_active_groups(
+            pool_minutes=pool,
+            active_groups=groups_list,
+            n_events=n_events,
+        )
 
         daily_events[day_key] = {"events": events, "fired": []}
         return daily_events[day_key]
@@ -1618,6 +1751,7 @@ async def cb_main(call: CallbackQuery):
     )
 
 
+
 @router.callback_query(F.data == "ui:toggle_on")
 async def cb_toggle_on(call: CallbackQuery):
     store = _load_json(DATA_PATH)
@@ -1674,7 +1808,16 @@ async def cb_sub_check(call: CallbackQuery):
 
     # 💬 подписка ок — включаем
     u["enabled"] = True
+
+    # 💬 одноразовый автотест через 5 минут после первого включения
+    should_schedule_welcome_test = not bool(u.get("welcome_test_sent"))
+    if should_schedule_welcome_test:
+        u["welcome_test_sent"] = True
+
     _save_json_atomic(DATA_PATH, store)
+
+    if should_schedule_welcome_test:
+        asyncio.create_task(_schedule_welcome_test_alert(user_id))
 
     await _edit_or_send_ui(
         chat_id=call.message.chat.id,
@@ -1683,6 +1826,8 @@ async def cb_sub_check(call: CallbackQuery):
         text=_main_text(u),
         kb=_kb_main(u),
     )
+
+    asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
 
 
 @router.callback_query(F.data == "ui:toggle_off")
