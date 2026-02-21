@@ -1887,6 +1887,7 @@ async def cb_main(call: CallbackQuery):
 
 
 
+
 @router.callback_query(F.data == "ui:toggle_on")
 async def cb_toggle_on(call: CallbackQuery):
     store = _load_json(DATA_PATH)
