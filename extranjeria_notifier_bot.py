@@ -1196,6 +1196,49 @@ async def _flash_enabled_notice_ua(chat_id: int) -> None:
 
 
 
+async def _schedule_welcome_test_alert(user_id: str) -> None:
+    """
+    Через 5 хв після ввімкнення перевіряємо enabled і шлемо одноразовий тест.
+    """
+    await asyncio.sleep(300)
+
+    try:
+        store2 = _load_json(DATA_PATH)
+        u2 = _ensure_user(store2, user_id)
+        if not u2.get("enabled"):
+            return
+
+        prov = u2.get("province") or "не обрано"
+        office_id = u2.get("office_id")
+        svc_id = u2.get("service_id")
+
+        office_title = office_id or "не обрано"
+        svc_title = svc_id or "не обрано"
+
+        if prov in PROVINCES:
+            for o in PROVINCES[prov].get("offices", []):
+                if o.get("id") == office_id:
+                    office_title = o.get("title", office_title)
+                    break
+            for sv in PROVINCES[prov].get("services", []):
+                if sv.get("id") == svc_id:
+                    svc_title = sv.get("title", svc_title)
+                    break
+
+        test_text = (
+            "🧪 <b>ТЕСТ сповіщень</b>\n"
+            "Якщо ви бачите це повідомлення — сповіщення працюють ✅\n\n"
+            "<b>Ваші налаштування:</b>\n"
+            f"• Провінція: <b>{_h(str(prov))}</b>\n"
+            f"• Офіс: <b>{_h(str(office_title))}</b>\n"
+            f"• Послуга: <b>{_h(str(svc_title))}</b>\n\n"
+            "ℹ️ Це лише перевірка. Це <b>НЕ</b> означає, що з’явився реальний слот."
+        )
+        await _send_alert(int(user_id), test_text)
+    except Exception:
+        pass
+
+
 async def notifier_loop() -> None:
     """
     Вариант S (безопасный):
@@ -1709,6 +1752,7 @@ async def cb_main(call: CallbackQuery):
 
 
 
+
 @router.callback_query(F.data == "ui:toggle_on")
 async def cb_toggle_on(call: CallbackQuery):
     store = _load_json(DATA_PATH)
@@ -1765,7 +1809,16 @@ async def cb_sub_check(call: CallbackQuery):
 
     # 💬 подписка ок — включаем
     u["enabled"] = True
+
+    # 💬 одноразовый автотест через 5 минут после первого включения
+    should_schedule_welcome_test = not bool(u.get("welcome_test_sent"))
+    if should_schedule_welcome_test:
+        u["welcome_test_sent"] = True
+
     _save_json_atomic(DATA_PATH, store)
+
+    if should_schedule_welcome_test:
+        asyncio.create_task(_schedule_welcome_test_alert(user_id))
 
     await _edit_or_send_ui(
         chat_id=call.message.chat.id,
