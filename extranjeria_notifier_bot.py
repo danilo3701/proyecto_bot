@@ -1708,6 +1708,7 @@ async def cb_main(call: CallbackQuery):
     asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
 
 
+
 @router.callback_query(F.data == "ui:toggle_on")
 async def cb_toggle_on(call: CallbackQuery):
     store = _load_json(DATA_PATH)
@@ -1773,6 +1774,8 @@ async def cb_sub_check(call: CallbackQuery):
         text=_main_text(u),
         kb=_kb_main(u),
     )
+
+    asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
 
 
 @router.callback_query(F.data == "ui:toggle_off")
