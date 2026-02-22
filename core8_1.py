@@ -201,9 +201,13 @@ from aiogram.fsm.storage.memory import MemoryStorage    # Хранение FSM �
 # ——— Роутеры админки ————————————————————————————————————————————
 # 💬 legacy-админка тем (НЕ грамматика). Может быть сломана/невалидна — не роняем весь бот на импорте.
 try:
-    from create_lesson_block import router as legacy_topics_router  # type: ignore
+    from create_lesson_block import (
+        router as legacy_topics_router,  # type: ignore
+        start_adding_topic as legacy_start_adding_topic,  # type: ignore
+    )
 except Exception as e:
     legacy_topics_router = None
+    legacy_start_adding_topic = None
     logging.exception("legacy_topics_router disabled (import failed): %s", e)
 
 
@@ -4672,6 +4676,16 @@ async def show_leaderboard(message: Message, state: FSMContext):
 
 
 # 🟢 Новый хендлер: Главное меню (/menu)
+@dp.message(Command("addtopic"))
+@track_handler
+async def addtopic_entry_fallback(message: Message, state: FSMContext):
+    # 💬 единая точка входа в /addtopic, даже если legacy-router не подключился
+    if legacy_start_adding_topic is None:
+        await message.answer("⚠️ /addtopic недоступна: create_lesson_block не импортирован (смотри startup-логи).")
+        return
+    return await legacy_start_adding_topic(message, state)
+
+
 @dp.message(Command("menu"))
 @track_handler
 async def menu_handler(message: Message, state: FSMContext):
@@ -13652,7 +13666,10 @@ if __name__ == '__main__':
         # 💬 Регистрируем команды бота (в меню Telegram: /start, /addtopic, /edittopic, /menu)
         # 💬 Обычному пользователю показываем только эти команды
         await bot.set_my_commands([
-            BotCommand(command="start", description="Запустить бота")
+            BotCommand(command="start", description="Запустить бота"),
+            BotCommand(command="addtopic", description="Добавить тему (админ)"),
+            BotCommand(command="edittopic", description="Редактировать темы (админ)"),
+            BotCommand(command="menu", description="Открыть меню"),
         ])
 
         migrate_runtime_files_to_volume()  # 💬 выполняется один раз при старте
@@ -13698,5 +13715,3 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
-
-
