@@ -323,10 +323,13 @@ ADS_VIDEO_FOLDER = "ads_videos" # ——— Папка с видеореклам
 
 # ——— Инициализация бота и FSM ——————————————————————————————————————
 # ——— Инициализация бота и FSM ——————————————————————————————————————
+RUN_HEALTHCHECK = "--healthcheck" in sys.argv
 BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
-if not BOT_TOKEN:
+if not BOT_TOKEN and not RUN_HEALTHCHECK:
     # 💬 если токен не задан в Railway Variables = падаем явно, чтобы не было "молчания"
     raise RuntimeError("BOT_TOKEN is empty. Set Railway Variables -> BOT_TOKEN for this service.")
+if not BOT_TOKEN and RUN_HEALTHCHECK:
+    BOT_TOKEN = "123456:HEALTHCHECK_TOKEN"
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp  = Dispatcher(storage=MemoryStorage())
@@ -852,6 +855,44 @@ async def _lex_prepare_round_session(state: FSMContext, round_idx: int):
         "round_textquiz_idx": round_textquiz_idx,
         "is_textquiz_round": is_text_round,
     }
+
+
+async def _lex_commit_offer_continue_progress(state: FSMContext) -> None:
+    # 💬 фикс: коммитим прогресс фазы на offer_continue, чтобы 📖% рос после возврата «Домой»
+    data = await state.get_data()
+    phase_id = data.get("selected_phase_id")
+    if phase_id is None:
+        return
+
+    per_phase = data.get("vocab_done_per_phase") or {}
+
+    lex_total = int(data.get("lex_round_total", 0) or 0)
+    if lex_total <= 0:
+        phrases = data.get("lex_active_phrases") or []
+        try:
+            lex_total = int(_lex_detect_total_rounds(phrases, default_total=5) or 5)
+        except Exception:
+            lex_total = 5
+
+    poll_total = max(0, int(lex_total) - 1)
+    poll_done = int(data.get("lex_round", 0) or 0)
+    is_text_round = bool(data.get("lex_is_textquiz_round", False))
+
+    completed_poll = poll_done
+    if (not is_text_round) and poll_total and (0 <= poll_done < poll_total):
+        completed_poll = poll_done + 1
+    completed_poll = max(0, min(completed_poll, poll_total))
+
+    text_done = 1 if bool(data.get("lex_textquiz_done_round", False)) else 0
+    done_rounds = max(0, completed_poll + text_done)
+
+    prev = per_phase.get(str(phase_id), per_phase.get(phase_id, 0))
+    per_phase[str(phase_id)] = max(int(prev or 0), int(done_rounds))
+
+    await state.update_data(
+        vocab_done_per_phase=per_phase,
+        total_quizzes_phase=int(poll_total + 1),
+    )
 
 
 import os
@@ -1413,14 +1454,22 @@ def reset_daily_words_if_needed(user_data):
 
 def migrate_runtime_files_to_volume():
     # 💬 переносим данные из контейнера в Volume (один раз) + синхронизируем topics
-    try:
-        if not os.path.exists(XP_DATA_PATH) and os.path.exists("xp_data.json"):
-            with open("xp_data.json", "rb") as src, open(XP_DATA_PATH, "wb") as dst:
-                dst.write(src.read())
+    def _safe_copy_json_if_missing(src_path: str, dst_path: str) -> None:
+        # 💬 не затираем volume-данные; копируем только если dst отсутствует и src валиден/не пуст
+        if os.path.exists(dst_path) or not os.path.exists(src_path):
+            return
+        try:
+            with open(src_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if not isinstance(payload, dict) or len(payload) == 0:
+                return
+        except Exception:
+            return
+        _atomic_json_dump(dst_path, payload)
 
-        if not os.path.exists(USER_DATA_PATH) and os.path.exists("user_data.json"):
-            with open("user_data.json", "rb") as src, open(USER_DATA_PATH, "wb") as dst:
-                dst.write(src.read())
+    try:
+        _safe_copy_json_if_missing("xp_data.json", XP_DATA_PATH)
+        _safe_copy_json_if_missing("user_data.json", USER_DATA_PATH)
 
         # 💬 гарантируем наличие папки тем в Railway Volume; GitHub ./topics не трогаем
         os.makedirs("/data/topics", exist_ok=True)
@@ -4457,34 +4506,42 @@ async def handle_unavailable_buttons(message: Message, state: FSMContext):
 @track_handler
 async def show_leaderboard(message: Message, state: FSMContext):
     xp_data = load_xp_data()
+
+    # 💬 Фиксированный список фейков для "длинного" списка рейтинга
+    FAKE_LEADERBOARD_USERS = [
+        ("fake_001", "Danylo"), ("fake_002", "Iryna"), ("fake_003", "Sofi"), ("fake_004", "Maks"), ("fake_005", "Nazar"),
+        ("fake_006", "Alina"), ("fake_007", "Vlad"), ("fake_008", "Yana"), ("fake_009", "Oksi"), ("fake_010", "Tymur"),
+        ("fake_011", "Misha"), ("fake_012", "Nika"), ("fake_013", "Roma"), ("fake_014", "Sasha"), ("fake_015", "Katya"),
+        ("fake_016", "Artem"), ("fake_017", "Pasha"), ("fake_018", "Zhenya"), ("fake_019", "Vika"), ("fake_020", "Yulia"),
+        ("fake_021", "Marko"), ("fake_022", "Bogdan"), ("fake_023", "Oksi2"), ("fake_024", "Ira"), ("fake_025", "Taras"),
+        ("fake_026", "Sergii"), ("fake_027", "Alina3"), ("fake_028", "Nika7"), ("fake_029", "Maks9"), ("fake_030", "Alex"),
+    ]
+
     users = []
     for uid, u in xp_data.items():
+        uid_str = str(uid)
         name = (u.get("name", "") or "").strip()
         week = int(u.get("words_learned_week", 0) or 0)
         month = int(u.get("words_learned_month", 0) or 0)
         stars_total = int(u.get("stars_total", 0) or 0)  # 💬 ⭐️ за закрытые блоки
 
         users.append({
-            "uid": str(uid),
+            "uid": uid_str,
             "name": name or f"User {uid}",
             "words_learned_week": week,
             "words_learned_month": month,
             "stars_total": stars_total
         })
 
-    FAKE_USERS_COUNT = 60
-    for i in range(1, FAKE_USERS_COUNT + 1):
-        week_val = (i * 3) % 21
-        month_val = week_val + ((i * 5) % 37)
-        stars_val = (i * 7) % 13
+    # 💬 Фейки оставляем в списке, но ВСЕ метрики = 0, чтобы не попадали в топы
+    for fake_uid, fake_name in FAKE_LEADERBOARD_USERS:
         users.append({
-            "uid": f"fake_{i}",
-            "name": f"Learner{i}",
-            "words_learned_week": week_val,
-            "words_learned_month": month_val,
-            "stars_total": stars_val,
+            "uid": fake_uid,
+            "name": fake_name,
+            "words_learned_week": 0,
+            "words_learned_month": 0,
+            "stars_total": 0,
         })
-
 
     current_uid = str(message.from_user.id)
     data = await state.get_data()  # 💬 берём FSM-data один раз, чтобы render_block мог читать actor_uid/actor_name и last_menu_msg_id
@@ -4512,6 +4569,7 @@ async def show_leaderboard(message: Message, state: FSMContext):
                 str(u.get("uid", "")),
             ),
         )
+        sorted_real = [u for u in sorted_all if not str(u.get("uid", "")).startswith("fake_")]
 
         current_user = next((u for u in users if str(u.get("uid", "")) == current_uid), None)
         if current_user is None:
@@ -4526,17 +4584,17 @@ async def show_leaderboard(message: Message, state: FSMContext):
         users_count = len(sorted_all)
         res = [f"<b>{title}</b>", "<pre>"]
 
-        if not sorted_all or all(
-            int(u.get(period_key, 0) or 0) == 0 and int(u.get("stars_total", 0) or 0) == 0 for u in sorted_all
+        if not sorted_real or all(
+            int(u.get(period_key, 0) or 0) == 0 and int(u.get("stars_total", 0) or 0) == 0 for u in sorted_real
         ):
             res.append("Пока нет результатов за этот период")
             res.append(f"↳👥 {users_count}")
             res.append("</pre>")
             return "\n".join(res)
 
-        top5 = sorted_all[:5]
+        top5 = sorted_real[:5]  # 💬 Top-5 строим только по реальным пользователям
         my_rank = None
-        for idx, u in enumerate(sorted_all, 1):
+        for idx, u in enumerate(sorted_real, 1):
             if str(u.get("uid", "")) == current_uid:
                 my_rank = idx
                 break
@@ -4771,8 +4829,7 @@ async def stats_handler(message: Message, state: FSMContext):
     from collections import Counter
     topics_words_total = Counter()
 
-    # 💬 собираем по каждому пользователю: клики сегодня + слова по темам
-    per_user_rows = []
+    # 💬 /stats теперь только агрегаты (без вывода каждого пользователя)
 
     for uid, u in xp_data.items():
         if not isinstance(u, dict):
@@ -4786,10 +4843,6 @@ async def stats_handler(message: Message, state: FSMContext):
         words_today += int(u.get("words_learned_today", 0) or 0)
 
         analytics = u.get("analytics", {})
-        days = analytics.get("days", {})
-        dayrec = days.get(today) if isinstance(days, dict) else None
-        clicks_today = int(dayrec.get("clicks", 0) or 0) if isinstance(dayrec, dict) else 0
-
         tw = analytics.get("topics_words", {})
         user_topics = {}
         if isinstance(tw, dict):
@@ -4802,13 +4855,6 @@ async def stats_handler(message: Message, state: FSMContext):
                     user_topics[tk] = c_int
                     topics_words_total[tk] += c_int
 
-        per_user_rows.append({
-            "uid": uid,
-            "name": (u.get("name") or "").strip() or "Без имени",
-            "tg_username": (u.get("tg_username") or "").strip(),
-            "clicks_today": clicks_today,
-            "topics": user_topics
-        })
 
     def title_for_topic(key: str) -> str:
         # 💬 показываем название темы в статистике
@@ -4825,27 +4871,6 @@ async def stats_handler(message: Message, state: FSMContext):
     lines.append(f"🍪 Слов выучено всего = <b>{words_total}</b>")
     lines.append(f"🍪 Слов сегодня = <b>{words_today}</b>")
 
-    lines.append("")
-    lines.append("<b>👤 По пользователям</b>")
-    lines.append("🖱 клики сегодня + 🍪 слова по темам")
-
-    if per_user_rows:
-        # 💬 выводим всех, сортировка по кликам сегодня (desc)
-        per_user_rows.sort(key=lambda r: (r.get("clicks_today", 0), r.get("uid", "")), reverse=True)
-
-        for r in per_user_rows:
-            uname = f" {r['tg_username']}" if r.get("tg_username") else ""
-            lines.append(f"• <b>{r['name']}</b>{uname} <code>{r['uid']}</code> = 🖱 <b>{r['clicks_today']}</b>")
-
-            tdict = r.get("topics", {}) or {}
-            if tdict:
-                for tk, cnt in sorted(tdict.items(), key=lambda x: int(x[1] or 0), reverse=True):
-                    lines.append(f"↳ {title_for_topic(tk)} = <b>{cnt}</b> 🍪")
-            else:
-                lines.append("↳ тем пока нет")
-
-    else:
-        lines.append("— пользователей нет —")
 
     lines.append("")
     lines.append("<b>🔝 Темы по словам (всего)</b>")
@@ -7012,11 +7037,16 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
 
         vocab_blocks = ph.get("vocab", []) or []
 
-        # 💬 фикс: "норма" фазы = реальное число раундов, как в show_phase_menu (без жёсткого 5)
-        need = 0
-        need += len(ph.get("quiz_pool", []) or []) + len(ph.get("textquiz_pool", []) or [])
-        need += sum(1 for b in vocab_blocks if b.get("type") in ("quiz", "textquiz"))
-        need += sum(1 for b in vocab_blocks if b.get("quiz"))
+        # 💬 фикс: для ALL IN прогресс фазы считаем по раундам (обычно 5), а не по количеству слов/квизов
+        phrases = ph.get("phrases", []) or []
+        has_round_mode = bool(ph.get("quiz_pool") or ph.get("textquiz_pool") or phrases)
+
+        if has_round_mode:
+            need = int(_lex_detect_total_rounds(phrases, default_total=5) or 5)
+        else:
+            need = 0
+            need += sum(1 for b in vocab_blocks if b.get("type") in ("quiz", "textquiz"))
+            need += sum(1 for b in vocab_blocks if b.get("quiz"))
 
         # 💬 fallback для legacy-фаз, где только ссылки
         if need <= 0:
@@ -12228,11 +12258,19 @@ async def handle_offer_continue_vocab(message: Message, state: FSMContext):
     reaction   = params.get("reaction")
     next_stage = params.get("next")
 
+    logging.info(
+        "offer_continue(message): next=%s lex_mode_active=%s lex_round=%s",
+        next_stage,
+        bool(data.get("lex_mode_active", False)),
+        data.get("lex_round"),
+    )
+
     if reaction:
         await smart_reply(message, reaction, parse_mode="HTML")
 
     # 💬 Если пользователь выбрал выход в меню — сразу уходим в меню урока
     if next_stage == "home":
+        await _lex_commit_offer_continue_progress(state)
         # 💬 что делает эта часть: фикс «липкого» offer_continue
         # = при выходе в меню мы коммитим переход вперёд, чтобы при повторном входе
         # не показывался последний квиз прошлого раунда
@@ -12285,8 +12323,8 @@ async def handle_offer_continue_vocab(message: Message, state: FSMContext):
         if data.get("lex_mode_active"):
             # 💬 что делает эта часть: вместо старого "следующий сет" = запускаем следующий раунд
             data2 = await state.get_data()
-            cur_round = data2.get("lex_round", 0)
-            total = data2.get("lex_round_total", 4)
+            cur_round = int(data2.get("lex_round", 0) or 0)
+            total = int(data2.get("lex_round_total", 4) or 4)
             next_round = cur_round + 1
 
             if next_round >= total:
@@ -12301,7 +12339,21 @@ async def handle_offer_continue_vocab(message: Message, state: FSMContext):
                 )  # 💬 что делает эта часть: завершили все раунды = чистим и выходим
                 return await lesson_menu_handler(message, state)
 
-            await _lex_prepare_round_session(state, round_idx=next_round)
+            rounds = await _lex_prepare_round_session(state, round_idx=next_round)
+
+            round_quiz_indices = rounds.get("round_quiz_indices", [])
+            round_textquiz_idx = rounds.get("round_textquiz_idx")
+            next_vocab_index = round_quiz_indices[0] if round_quiz_indices else (round_textquiz_idx or 0)
+
+            await state.update_data(
+                lex_round=next_round,
+                lex_round_quiz_indices=round_quiz_indices,
+                lex_round_textquiz_idx=round_textquiz_idx,
+                vocab_index=next_vocab_index,
+                lex_textquiz_done_round=False,
+                lex_is_textquiz_round=bool(rounds.get("is_textquiz_round", False)),
+                current_stage=None,
+            )
 
             asyncio.create_task(send_and_auto_delete_text(bot, message.chat.id, f"Раунд {next_round + 1} из {total}", delay=2))
             return await send_one_vocab(message, state)
@@ -13258,7 +13310,12 @@ async def _show_offer_continue_after_textquiz(message: Message, state: FSMContex
 )
 @track_handler
 async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
-    await cb.answer()
+    try:
+        await cb.answer()
+    except TelegramBadRequest as e:
+        # 💬 двойной клик/просроченный callback не должен ронять offer_continue
+        if "query is too old" not in str(e).lower() and "query id is invalid" not in str(e).lower():
+            raise
     data = await state.get_data()
     scene = data["current_scene"]
     stage, choice = cb.data.split(":", 1)
@@ -13385,6 +13442,13 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
         params     = scene["replies"][choice]
         next_stage = params.get("next")
 
+        logging.info(
+            "offer_continue(callback): next=%s lex_mode_active=%s lex_round=%s",
+            next_stage,
+            bool(data.get("lex_mode_active", False)),
+            data.get("lex_round"),
+        )
+
         # 1) Показываем реакцию (если есть)
         if params.get("reaction"):
             try:
@@ -13433,42 +13497,55 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
         # 💬 перед выходом (Домой/Продолжить) фиксируем прогресс фазы,
         # 💬 чтобы 📖 % в меню темы обновился даже если юзер нажал "Домой"
         try:
-            phase_id = data.get("selected_phase_id")
-            if phase_id is not None:
-                per_phase = data.get("vocab_done_per_phase") or {}
-
-                # 💬 что делает эта часть: PHRASE PACK v2 = прогресс по раундам (1–5)
-                lex_total = int(data.get("lex_round_total", 0) or 0)  # 💬 всего раундов в сессии (poll + text)
-                poll_total = max(0, lex_total - 1) if lex_total else 4  # 💬 poll-раунды (обычно 4)
-                poll_done = int(data.get("lex_round", 0) or 0)          # 💬 индекс текущего poll-раунда (0..poll_total)
-
-                # 💬 что делает эта часть: считаем прогресс закрытого poll-раунда, но НЕ двигаем lex_round
-                # lex_round = индекс текущего раунда, его двигаем только при старте следующего раунда
-                completed_poll = poll_done
-                if lex_total and not data.get("lex_textquiz_done_round") and poll_total:
-                    if 0 <= poll_done < poll_total:
-                        completed_poll = poll_done + 1  # 💬 закрыли текущий poll-раунд
-
-                completed_poll = max(0, min(completed_poll, poll_total))
-
-                text_done = 1 if data.get("lex_textquiz_done_round") else 0  # 💬 text-раунд
-                done_rounds = completed_poll + text_done  # 💬 прогресс для меню, без влияния на порядок раундов
-
-                total_rounds = poll_total + 1
-
-
-                prev = per_phase.get(str(phase_id), per_phase.get(phase_id, 0))
-                per_phase[str(phase_id)] = max(int(prev or 0), int(done_rounds))  # 💬 сохраняем частичный прогресс
-                await state.update_data(vocab_done_per_phase=per_phase)
-
-                # 💬 что делает эта часть: total_quizzes_phase нужен другим местам = держим консистентно "5"
-                await state.update_data(total_quizzes_phase=int(total_rounds))
+            await _lex_commit_offer_continue_progress(state)
         except Exception:
             pass  # 💬 меню не должно падать из-за синхронизации прогресса
 
 
         # Переход по результату
         if next_stage == "next_item":
+            if data.get("lex_mode_active"):
+                cur_round = int(data.get("lex_round", 0) or 0)
+                total = int(data.get("lex_round_total", 4) or 4)
+                next_round = cur_round + 1
+
+                if next_round >= total:
+                    await state.update_data(
+                        lex_mode_active=False,
+                        lex_session_vocab_list=None,
+                        lex_active_phrases=None,
+                        lex_round=0,
+                        lex_round_total=0,
+                        lex_textquiz_phrase_cursor=0,
+                        lex_textquiz_done_round=False,
+                        current_stage=None,
+                    )
+                    return await lesson_menu_handler(cb.message, state)
+
+                rounds = await _lex_prepare_round_session(state, round_idx=next_round)
+                round_quiz_indices = rounds.get("round_quiz_indices", [])
+                round_textquiz_idx = rounds.get("round_textquiz_idx")
+                next_vocab_index = round_quiz_indices[0] if round_quiz_indices else (round_textquiz_idx or 0)
+
+                await state.update_data(
+                    lex_round=next_round,
+                    lex_round_quiz_indices=round_quiz_indices,
+                    lex_round_textquiz_idx=round_textquiz_idx,
+                    vocab_index=next_vocab_index,
+                    lex_textquiz_done_round=False,
+                    lex_is_textquiz_round=bool(rounds.get("is_textquiz_round", False)),
+                    current_stage=None,
+                )
+                asyncio.create_task(
+                    send_and_auto_delete_text(
+                        bot,
+                        cb.message.chat.id,
+                        f"Раунд {next_round + 1} из {total}",
+                        delay=2,
+                    )
+                )
+                return await send_one_vocab(cb.message, state)
+
             curr = data.get("vocab_index", 0)
             vocab_list = get_vocab_list(data)
             candidate = curr + 1
@@ -13496,6 +13573,8 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
 
             # 💬 FIX: lex_mode_active должен читаться из FSM data, а не как локальная переменная
             lex_mode_active = bool(data.get("lex_mode_active", False))
+            lex_total = int(data.get("lex_round_total", 0) or 0)
+            poll_total = max(0, lex_total - 1) if lex_total else 0
 
             if lex_mode_active and lex_total:
                 poll_done = int(data.get("lex_round", 0) or 0)
@@ -13587,8 +13666,18 @@ if __name__ == '__main__':
                     pass
 
 
+    def run_healthcheck() -> int:
+        # 💬 минимальный healthcheck: не запускаем polling, только проверяем чтение хранилищ
+        migrate_runtime_files_to_volume()
+        xp = load_xp_data() or {}
+        ud = load_user_data() or {}
+        print(f"healthcheck_ok xp_users={len(xp)} user_users={len(ud)}")
+        return 0
+
     import asyncio
     try:
+        if RUN_HEALTHCHECK:
+            sys.exit(run_healthcheck())
         asyncio.run(main())
     except KeyboardInterrupt:
         # 💬 последние два хендлера
@@ -13605,7 +13694,6 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
-
 
 
 
