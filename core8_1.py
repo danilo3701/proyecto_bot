@@ -7074,8 +7074,8 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         if done >= need:
             completed_phases += 1  # 💬 фаза полностью пройдена (все 5 раундов / все link)
 
-    # 💬 прогресс 📖 = частичный (по юнитам), чтобы рос после каждого раунда
-    vocab_pct = (vocab_done_units / vocab_total_units) if vocab_total_units else 0.0  # 💬 0 если нет фаз
+    # 💬 прогресс 📖 считаем только по полностью закрытым фазам (по просьбе: без промежуточных 50% после 1-го раунда)
+    vocab_pct = (completed_phases / total_phases_for_unlock) if total_phases_for_unlock else 0.0
     stars = "⭐" * completed_phases + "☆" * (total_phases_for_unlock - completed_phases)
 
 
@@ -11221,7 +11221,8 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     )
 
     # 💬 что делает эта часть: если это финальная textquiz-сессия и всё закрыли = финалим и уходим в меню
-    if data.get("textquiz_session_active") and (not pending) and (not redo_text):
+    # 💬 важно: в ALL IN (lex_mode_active) не выходим в меню на этом шаге — продолжаем раунд
+    if data.get("textquiz_session_active") and (not data.get("lex_mode_active")) and (not pending) and (not redo_text):
         # 💬 что делает эта часть: удаляем последний вопрос и ответ перед выходом в меню
         prompt_id = data.get("last_prompt_id")
         extra_fb_id = data.get("last_textquiz_extra_fb_id")
@@ -11257,6 +11258,11 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     await state.update_data(pending_textquiz=pending, redo_stack_text=redo_text)
 
     if next_idx is None:
+        # 💬 ALL IN: в текстовом раунде продолжаем оставшиеся textquiz через линейный индекс, а не выходим в меню после 1-го правильного
+        if data.get("lex_mode_active"):
+            await state.update_data(vocab_index=idx + 1)
+            return await send_one_vocab(message, state)
+
         # 💬 что делает эта часть: все textquiz закрыты = финал и сразу меню
         end_msg = await smart_reply(message, "🎉 Это конец блока. Молодец!")
         asyncio.create_task(_delete_messages_after_delay(message.chat.id, [end_msg.message_id], delay=10.0))
@@ -11287,17 +11293,7 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     correct_cnt = data2.get("textquiz_correct", 0)
 
  
-    if is_correct:
-        correct_cnt += 1
-        phase_cnt = data2.get("textquiz_correct_phase", 0) + 1  # 💬 прогресс именно внутри фазы
-        await state.update_data(
-            textquiz_correct=correct_cnt,
-            textquiz_correct_phase=phase_cnt
-        )
-        data2["textquiz_correct"] = correct_cnt
-        data2["textquiz_correct_phase"] = phase_cnt
-
-
+    # 💬 счётчики correct уже обновили выше, здесь только читаем текущее состояние
     threshold = data2.get("xp_threshold", 0)
     topic_xp = (
         load_xp_data()
@@ -13699,7 +13695,6 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
-
 
 
 
