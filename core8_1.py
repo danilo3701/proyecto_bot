@@ -382,9 +382,13 @@ dp.include_router(podcasts_router)  # 💬 подключаем модуль "П
 # 💬 legacy-админка тем подключается только если импорт успешен (иначе бот не должен падать)
 if legacy_topics_router is not None:
     dp.include_router(legacy_topics_router)
-    logging.info("legacy_topics_router enabled: /addtopic handlers are registered")
+    msg = "legacy_topics_router enabled: /addtopic handlers are registered"
+    print(f"ℹ️ {msg}", flush=True)
+    logging.info(msg)
 else:
-    logging.warning("legacy_topics_router disabled: /addtopic handlers are NOT registered")
+    msg = "legacy_topics_router disabled: /addtopic handlers are NOT registered"
+    print(f"⚠️ {msg}", flush=True)
+    logging.warning(msg)
 
 # ——— Загружаем уроки (ТОЛЬКО /data/topics) ———————————————————————
 topics = load_topics_from_volume()  # 💬 стартовая загрузка тем из Railway Volume
@@ -13667,9 +13671,6 @@ if __name__ == '__main__':
         # 💬 Обычному пользователю показываем только эти команды
         await bot.set_my_commands([
             BotCommand(command="start", description="Запустить бота"),
-            BotCommand(command="addtopic", description="Добавить тему (админ)"),
-            BotCommand(command="edittopic", description="Редактировать темы (админ)"),
-            BotCommand(command="menu", description="Открыть меню"),
         ])
 
         migrate_runtime_files_to_volume()  # 💬 выполняется один раз при старте
