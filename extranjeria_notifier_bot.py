@@ -1515,6 +1515,20 @@ async def notifier_loop() -> None:
 router = Router()
 
 
+@router.message(F.new_chat_members)
+@router.message(F.left_chat_member)
+async def cleanup_group_service_messages(message: Message):
+    # 💬 Тихо чистимо service-повідомлення про join/left тільки в групах.
+    if message.chat.type not in {"group", "supergroup"}:
+        return
+
+    try:
+        await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+    except Exception:
+        # 💬 Якщо немає прав/обмеження Telegram — просто пропускаємо без спаму в чат.
+        pass
+
+
 @router.message(CommandStart())
 async def on_start(message: Message):
     # 💬 удаляем /start пользователя, чтобы чат был чище
@@ -1924,6 +1938,17 @@ async def cb_main(call: CallbackQuery):
         text=_main_text(u),
         kb=_kb_main(u),
     )
+
+    asyncio.create_task(_flash_enabled_notice_ua(call.message.chat.id))
+
+
+
+
+
+
+
+
+
 
 
 
