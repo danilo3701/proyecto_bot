@@ -378,13 +378,9 @@ dp.include_router(podcasts_router)  # 💬 подключаем модуль "П
 # 💬 legacy-админка тем подключается только если импорт успешен (иначе бот не должен падать)
 if legacy_topics_router is not None:
     dp.include_router(legacy_topics_router)
-    msg = "legacy_topics_router enabled: /addtopic handlers are registered"
-    print(f"ℹ️ {msg}", flush=True)
-    logging.info(msg)
+    logging.info("legacy_topics_router enabled: /addtopic handlers are registered")
 else:
-    msg = "legacy_topics_router disabled: /addtopic handlers are NOT registered"
-    print(f"⚠️ {msg}", flush=True)
-    logging.warning(msg)
+    logging.warning("legacy_topics_router disabled: /addtopic handlers are NOT registered")
 
 # ——— Загружаем уроки (ТОЛЬКО /data/topics) ———————————————————————
 topics = load_topics_from_volume()  # 💬 стартовая загрузка тем из Railway Volume
