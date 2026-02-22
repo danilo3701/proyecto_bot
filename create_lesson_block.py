@@ -535,7 +535,10 @@ async def get_category_or_ads(message: Message, state: FSMContext):
         )
         return await state.set_state(NewTopicStates.waiting_channel)
 
-    if text not in ["📚 Лексика"]:
+    normalized = (text or "").strip().lower()
+    is_lex_pick = normalized in {"📚 лексика", "лексика"}
+
+    if not is_lex_pick:
         await message.answer("❗ Выбери одну из кнопок.")
         return
 
@@ -560,7 +563,7 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 
     await state.set_state(NewTopicStates.adding_category)
 
-@router.message(StateFilter("*"), F.text.in_(["📚 Лексика", "⬅️ Назад"]))
+@router.message(StateFilter("*"), F.text.in_(["📚 Лексика", "Лексика", "⬅️ Назад", "Назад"]))
 async def _admin_editmode_category_fallback(message: Message, state: FSMContext):
     st = await state.get_data()
     if not st.get(ADMIN_EDIT_MODE_KEY):
