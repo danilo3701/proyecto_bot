@@ -13315,7 +13315,12 @@ async def _show_offer_continue_after_textquiz(message: Message, state: FSMContex
 )
 @track_handler
 async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
-    await cb.answer()
+    try:
+        await cb.answer()
+    except TelegramBadRequest as e:
+        # 💬 двойной клик/просроченный callback не должен ронять offer_continue
+        if "query is too old" not in str(e).lower() and "query id is invalid" not in str(e).lower():
+            raise
     data = await state.get_data()
     scene = data["current_scene"]
     stage, choice = cb.data.split(":", 1)
