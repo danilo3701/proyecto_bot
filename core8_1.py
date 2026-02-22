@@ -11221,7 +11221,8 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     )
 
     # 💬 что делает эта часть: если это финальная textquiz-сессия и всё закрыли = финалим и уходим в меню
-    if data.get("textquiz_session_active") and (not pending) and (not redo_text):
+    # 💬 важно: в ALL IN (lex_mode_active) не выходим в меню на этом шаге — продолжаем раунд
+    if data.get("textquiz_session_active") and (not data.get("lex_mode_active")) and (not pending) and (not redo_text):
         # 💬 что делает эта часть: удаляем последний вопрос и ответ перед выходом в меню
         prompt_id = data.get("last_prompt_id")
         extra_fb_id = data.get("last_textquiz_extra_fb_id")
@@ -11292,17 +11293,7 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     correct_cnt = data2.get("textquiz_correct", 0)
 
  
-    if is_correct:
-        correct_cnt += 1
-        phase_cnt = data2.get("textquiz_correct_phase", 0) + 1  # 💬 прогресс именно внутри фазы
-        await state.update_data(
-            textquiz_correct=correct_cnt,
-            textquiz_correct_phase=phase_cnt
-        )
-        data2["textquiz_correct"] = correct_cnt
-        data2["textquiz_correct_phase"] = phase_cnt
-
-
+    # 💬 счётчики correct уже обновили выше, здесь только читаем текущее состояние
     threshold = data2.get("xp_threshold", 0)
     topic_xp = (
         load_xp_data()
