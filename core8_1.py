@@ -7074,8 +7074,8 @@ async def lesson_menu_handler(message: Message, state: FSMContext):
         if done >= need:
             completed_phases += 1  # 💬 фаза полностью пройдена (все 5 раундов / все link)
 
-    # 💬 прогресс 📖 = частичный (по юнитам), чтобы рос после каждого раунда
-    vocab_pct = (vocab_done_units / vocab_total_units) if vocab_total_units else 0.0  # 💬 0 если нет фаз
+    # 💬 прогресс 📖 считаем только по полностью закрытым фазам (по просьбе: без промежуточных 50% после 1-го раунда)
+    vocab_pct = (completed_phases / total_phases_for_unlock) if total_phases_for_unlock else 0.0
     stars = "⭐" * completed_phases + "☆" * (total_phases_for_unlock - completed_phases)
 
 
@@ -11257,6 +11257,11 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
     await state.update_data(pending_textquiz=pending, redo_stack_text=redo_text)
 
     if next_idx is None:
+        # 💬 ALL IN: в текстовом раунде продолжаем оставшиеся textquiz через линейный индекс, а не выходим в меню после 1-го правильного
+        if data.get("lex_mode_active"):
+            await state.update_data(vocab_index=idx + 1)
+            return await send_one_vocab(message, state)
+
         # 💬 что делает эта часть: все textquiz закрыты = финал и сразу меню
         end_msg = await smart_reply(message, "🎉 Это конец блока. Молодец!")
         asyncio.create_task(_delete_messages_after_delay(message.chat.id, [end_msg.message_id], delay=10.0))
@@ -13699,7 +13704,6 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
-
 
 
 
