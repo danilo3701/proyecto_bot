@@ -4834,8 +4834,7 @@ async def stats_handler(message: Message, state: FSMContext):
     from collections import Counter
     topics_words_total = Counter()
 
-    # 💬 собираем по каждому пользователю: клики сегодня + слова по темам
-    per_user_rows = []
+    # 💬 /stats теперь только агрегаты (без вывода каждого пользователя)
 
     for uid, u in xp_data.items():
         if not isinstance(u, dict):
@@ -4849,10 +4848,6 @@ async def stats_handler(message: Message, state: FSMContext):
         words_today += int(u.get("words_learned_today", 0) or 0)
 
         analytics = u.get("analytics", {})
-        days = analytics.get("days", {})
-        dayrec = days.get(today) if isinstance(days, dict) else None
-        clicks_today = int(dayrec.get("clicks", 0) or 0) if isinstance(dayrec, dict) else 0
-
         tw = analytics.get("topics_words", {})
         user_topics = {}
         if isinstance(tw, dict):
@@ -4865,13 +4860,6 @@ async def stats_handler(message: Message, state: FSMContext):
                     user_topics[tk] = c_int
                     topics_words_total[tk] += c_int
 
-        per_user_rows.append({
-            "uid": uid,
-            "name": (u.get("name") or "").strip() or "Без имени",
-            "tg_username": (u.get("tg_username") or "").strip(),
-            "clicks_today": clicks_today,
-            "topics": user_topics
-        })
 
     def title_for_topic(key: str) -> str:
         # 💬 показываем название темы в статистике
@@ -4888,27 +4876,6 @@ async def stats_handler(message: Message, state: FSMContext):
     lines.append(f"🍪 Слов выучено всего = <b>{words_total}</b>")
     lines.append(f"🍪 Слов сегодня = <b>{words_today}</b>")
 
-    lines.append("")
-    lines.append("<b>👤 По пользователям</b>")
-    lines.append("🖱 клики сегодня + 🍪 слова по темам")
-
-    if per_user_rows:
-        # 💬 выводим всех, сортировка по кликам сегодня (desc)
-        per_user_rows.sort(key=lambda r: (r.get("clicks_today", 0), r.get("uid", "")), reverse=True)
-
-        for r in per_user_rows:
-            uname = f" {r['tg_username']}" if r.get("tg_username") else ""
-            lines.append(f"• <b>{r['name']}</b>{uname} <code>{r['uid']}</code> = 🖱 <b>{r['clicks_today']}</b>")
-
-            tdict = r.get("topics", {}) or {}
-            if tdict:
-                for tk, cnt in sorted(tdict.items(), key=lambda x: int(x[1] or 0), reverse=True):
-                    lines.append(f"↳ {title_for_topic(tk)} = <b>{cnt}</b> 🍪")
-            else:
-                lines.append("↳ тем пока нет")
-
-    else:
-        lines.append("— пользователей нет —")
 
     lines.append("")
     lines.append("<b>🔝 Темы по словам (всего)</b>")
