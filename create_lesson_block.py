@@ -2302,6 +2302,12 @@ async def handle_main_menu(message: Message, state: FSMContext):
         await _adm_show_actions_msg(message, state, note_text="ℹ️ Редактирование через inline-кнопки")
         return
 
+    # 💬 защита от "тихого" зависания: если кнопка/текст не распознаны, даём явный ответ
+    keyboard = get_main_menu(category)
+    await message.answer("❗ Не понял действие. Нажми кнопку из меню ниже.", reply_markup=keyboard)
+    await state.set_state(NewTopicStates.waiting_first_choice)
+    return
+
 
 @router.message(NewTopicStates.waiting_delete_topic_confirm)
 async def confirm_delete_topic(message: Message, state: FSMContext):
