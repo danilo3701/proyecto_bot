@@ -13578,6 +13578,8 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
 
             # 💬 FIX: lex_mode_active должен читаться из FSM data, а не как локальная переменная
             lex_mode_active = bool(data.get("lex_mode_active", False))
+            lex_total = int(data.get("lex_round_total", 0) or 0)
+            poll_total = max(0, lex_total - 1) if lex_total else 0
 
             if lex_mode_active and lex_total:
                 poll_done = int(data.get("lex_round", 0) or 0)
@@ -13697,4 +13699,7 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
+
+
+
 
