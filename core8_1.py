@@ -8714,7 +8714,11 @@ async def vocab_phase_back_to_menu(cb: CallbackQuery, state: FSMContext):
 @track_handler
 async def topic_phase_done_clicked(cb: CallbackQuery, state: FSMContext):
     # 💬 что делает эта часть: не даём открыть уже завершённый пак
-    await cb.answer("✅ Блок уже пройден. Молодчина!", show_alert=True)
+    try:
+        await cb.answer("✅ Эта фаза уже пройдена. Молодчина!", show_alert=True)
+    except TelegramBadRequest as e:
+        if "query is too old" not in str(e).lower() and "query id is invalid" not in str(e).lower():
+            raise
     return
 
 # ─────────────────────────────────────────────────────────
@@ -10112,7 +10116,8 @@ async def handle_review_failed_vocab(poll_answer: PollAnswer, state: FSMContext)
     if poll_answer.poll_id != data.get("current_poll_id"):
         return
     # 2) Сразу сбрасываем текущий poll_id, чтобы таймаут не сел
-    await state.update_data(current_poll_id=None)
+    # 💬 любой реальный ответ = обнуляем streak тайм-аутов (не считаем "подряд" через ответы)
+    await state.update_data(current_poll_id=None, vocab_timeout_streak=0)
 
     # 3) Достаём индекс и блок
     idx = data.get("failed_vocab", [])[0]
@@ -10245,12 +10250,11 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
         return
 
     data = await state.get_data()
-
-    streak = int(data.get("vocab_timeout_streak", 0) or 0) + 1
-    await state.update_data(vocab_timeout_streak=streak)  # 💬 считаем серию тайм-аутов подряд (один инкремент)
-
     if data.get("current_poll_id") != poll_id:
         return  # 💬 квиз уже обработан или это не текущий poll
+
+    streak = int(data.get("vocab_timeout_streak", 0) or 0) + 1
+    await state.update_data(vocab_timeout_streak=streak)  # 💬 считаем только РЕАЛЬНЫЕ подряд тайм-ауты текущего poll
 
     poll_msg_id = data.get("current_poll_message_id")
 
@@ -10272,8 +10276,8 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
             pass
 
 
-    # 💬 сброс poll_id, чтобы не словить двойную обработку
-    await state.update_data(current_poll_id=None)
+    # 💬 сброс poll_id/message_id, чтобы не словить двойную обработку
+    await state.update_data(current_poll_id=None, current_poll_message_id=None)
 
     # 💬 короткий сигнал пользователю
     asyncio.create_task(
@@ -10318,15 +10322,9 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
 
     data = await state.get_data()
     try:
-        pmid = data.get("current_poll_message_id")
-        if pmid:
-            await bot.delete_message(chat_id, pmid)
+        if poll_msg_id:
+            await bot.delete_message(chat_id, poll_msg_id)
             await _delete_vocab_quiz_progress_message(chat_id, state)  # 💬 удаляем прогресс вместе с poll по таймауту
-
-    except Exception:
-        pass
-    try:
-        await bot.delete_message(chat_id, fb.message_id)
     except Exception:
         pass
         
@@ -10350,11 +10348,6 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
             from_user=fu,
             text=""
         )
-
-    if streak >= 2:
-        await state.update_data(vocab_timeout_streak=0)  # 💬 авто-выход = сбрасываем серию тайм-аутов
-        return await lesson_menu_handler(_fake_msg(), state)  # 💬 закрываем квиз и уходим в меню, сохранив набранное
-
 
     # 💬 защита от кривого idx или не quiz блока
     if idx >= len(vocab_list) or vocab_list[idx].get("type") != "quiz":
@@ -10429,6 +10422,7 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
             redo_stack=[],
             redo_active=False,
             pending_textquiz=[],
+            vocab_timeout_streak=0,
         )
         await state.set_state(LessonStates.showing_vocab)
         
@@ -10466,7 +10460,8 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
             vocab_index=next_idx,
             pending_textquiz=pending,
             current_stage="show_textquiz",  # 💬 запускаем 5-й раунд = textquiz-сет
-            current_poll_id=None
+            current_poll_id=None,
+            vocab_timeout_streak=0,
         )
         await state.set_state(LessonStates.vocab_textquiz)  # 💬 переключаем FSM на ответы textquiz
         return await send_one_vocab(_fake_msg(), state)
@@ -10493,6 +10488,7 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
         redo_stack=[],
         redo_active=False,
         pending_textquiz=[],
+        vocab_timeout_streak=0,
     )
     await state.set_state(LessonStates.showing_vocab)
     
