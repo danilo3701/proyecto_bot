@@ -8737,12 +8737,15 @@ async def start_vocab(message: Message, state: FSMContext):
             pass
         await state.update_data(last_menu_msg_id=None)
 
+    # 💬 clean-chat страховка: пробуем убрать предыдущий 🎲 перед новым стартом потока
+    stale_dice_msg_id = data.get("last_dice_msg_id")
+    if stale_dice_msg_id:
+        await _safe_delete_message(message.chat.id, stale_dice_msg_id)
+        await state.update_data(last_dice_msg_id=None)
+
     async def _autodelete_msg(m: Message, delay_s: float = 5.0):
         await asyncio.sleep(delay_s)
-        try:
-            await m.delete()
-        except Exception:
-            pass
+        await _safe_delete_message(m.chat.id, m.message_id)
 
     # 💬 дополнительно прячем клавиатуру, чтобы кнопки меню исчезли
     clear_msg = await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
@@ -8759,7 +8762,18 @@ async def start_vocab(message: Message, state: FSMContext):
 
     # 2) Дайс-анимация
     dice_msg = await message.answer_dice(reply_markup=ReplyKeyboardRemove())
-    asyncio.create_task(_autodelete_msg(dice_msg, 5.0))  # 💬 убираем кубик через 5 сек
+    await state.update_data(last_dice_msg_id=dice_msg.message_id)  # 💬 сохраняем id кубика для надёжного cleanup
+
+    async def _autodelete_dice(chat_id: int, message_id: int, delay_s: float = 5.0):
+        await asyncio.sleep(delay_s)
+        await _safe_delete_message(chat_id, message_id)
+
+        # 💬 очищаем ссылку только если это всё ещё тот же кубик
+        st = await state.get_data()
+        if st.get("last_dice_msg_id") == message_id:
+            await state.update_data(last_dice_msg_id=None)
+
+    asyncio.create_task(_autodelete_dice(dice_msg.chat.id, dice_msg.message_id, 5.0))  # 💬 убираем кубик через 5 сек
     await asyncio.sleep(DICE_DELETE_DELAY_S)  # 💬 короткая задержка под анимацию
 
 
