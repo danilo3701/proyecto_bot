@@ -8714,7 +8714,11 @@ async def vocab_phase_back_to_menu(cb: CallbackQuery, state: FSMContext):
 @track_handler
 async def topic_phase_done_clicked(cb: CallbackQuery, state: FSMContext):
     # 💬 что делает эта часть: не даём открыть уже завершённый пак
-    await cb.answer("✅ Блок уже пройден. Молодчина!", show_alert=True)
+    try:
+        await cb.answer("✅ Эта фаза уже пройдена. Молодчина!", show_alert=True)
+    except TelegramBadRequest as e:
+        if "query is too old" not in str(e).lower() and "query id is invalid" not in str(e).lower():
+            raise
     return
 
 # ─────────────────────────────────────────────────────────
