@@ -14,14 +14,21 @@
 
 ---
 
-## 2) Обычный ежедневный сценарий
+## 2) Обычный ежедневный сценарий (ОДНА команда)
 
 1. Внести изменения в проект.
 2. Выполнить:
 
 ```powershell
-mkpr -Title "Fix callback duplicate handling" -Type fix
+prsame
 ```
+
+Если нужен свой заголовок:
+
+```powershell
+prsame "fix api timeout"
+```
+
 
 Что произойдёт автоматически:
 - создастся ветка `work/<дата>-<название>`
@@ -32,10 +39,16 @@ mkpr -Title "Fix callback duplicate handling" -Type fix
 
 ---
 
-## 3) Если PR ещё не готов (Draft)
+## 3) Если PR ещё не готов (Draft, тоже одна команда)
 
 ```powershell
-mkpr -Title "WIP: improve onboarding flow" -Type feature -Draft
+prdraft
+```
+
+Если нужен свой заголовок:
+
+```powershell
+prdraft "wip onboarding"
 ```
 
 Draft = черновик PR (его можно проверять, но не надо сразу мерджить).
@@ -44,11 +57,7 @@ Draft = черновик PR (его можно проверять, но не н�
 
 ## 4) Если нужно продолжить тот же PR
 
-```powershell
-mkpr -Title "Add tests for onboarding" -Type fix -UseCurrentBranch
-```
-
-Это использует текущую ветку (без создания новой).
+`prsame` и `prdraft` уже работают в текущей ветке (без создания новой).
 
 ---
 

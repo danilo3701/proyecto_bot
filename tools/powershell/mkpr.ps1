@@ -1,26 +1,20 @@
 <#
-mkpr — create GitHub Pull Request from PowerShell with templates.
+mkpr — create/update GitHub Pull Request from PowerShell with templates.
 
-Quick start:
-  . .\tools\powershell\mkpr.ps1
-  mkpr -Title "Fix duplicate callback handling" -Type fix
+Super-short commands (no long text needed):
+  prsame                 # update/create regular PR from current branch
+  prdraft                # update/create Draft PR from current branch
+  prsame "hotfix api"    # same, but custom title
+  prdraft "wip tests"    # draft with custom title
 
-Common modes:
-  # New branch + commit + push + regular PR
-  mkpr -Title "Fix callback race" -Type fix
-
-  # New branch + commit + push + Draft PR
-  mkpr -Title "WIP: rework onboarding" -Type feature -Draft
-
-  # Continue on current branch (commit/push if needed), then create/open PR
-  mkpr -Title "Add tests for /start" -Type fix -UseCurrentBranch
+Full command (optional):
+  mkpr -Title "Fix callback race" -Type fix -UseCurrentBranch
 #>
 
 function mkpr {
   [CmdletBinding()]
   param(
-    [Parameter(Mandatory = $true)]
-    [string]$Title,
+    [string]$Title = '',
 
     [ValidateSet('fix', 'feature', 'refactor')]
     [string]$Type = 'fix',
@@ -32,11 +26,9 @@ function mkpr {
     [switch]$UseCurrentBranch
   )
 
-  # Preconditions
   if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     throw "git is not installed or not in PATH."
   }
-
   if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw "gh is not installed or not in PATH."
   }
@@ -68,6 +60,10 @@ function mkpr {
       return
     }
 
+    if ([string]::IsNullOrWhiteSpace($Title)) {
+      $Title = "update"
+    }
+
     $stamp = Get-Date -Format "yyyy-MM-dd-HHmmss"
     $slug = ($Title.ToLower() -replace '[^a-z0-9]+','-').Trim('-')
     if (-not $slug) { $slug = 'changes' }
@@ -77,7 +73,11 @@ function mkpr {
     if ($LASTEXITCODE -ne 0) { throw "Failed to create branch $branch" }
   }
 
-  # Commit only if there are local changes
+  if ([string]::IsNullOrWhiteSpace($Title)) {
+    $kind = if ($Draft) { 'wip' } else { 'update' }
+    $Title = "$kind: $branch"
+  }
+
   if ($hasLocalChanges) {
     git add -A
     git commit -m $Title | Out-Null
@@ -87,7 +87,6 @@ function mkpr {
     if ($LASTEXITCODE -ne 0) { throw "Push failed." }
   }
   else {
-    # still ensure branch exists remotely (best effort)
     git push -u origin $branch | Out-Null
   }
 
@@ -97,7 +96,6 @@ function mkpr {
   }
   $body = Get-Content $templatePath -Raw
 
-  # If PR already exists for branch, open it instead of creating duplicate
   if ([string]::IsNullOrWhiteSpace($Repo)) {
     $existingPrUrl = gh pr view --head $branch --json url -q .url 2>$null
   }
@@ -119,4 +117,13 @@ function mkpr {
   else {
     gh pr create -R $Repo --base $Base --head $branch --title $Title --body $body @draftArg
   }
+}
+
+# One-command helpers for non-technical workflow
+function prsame([string]$Title = '') {
+  mkpr -Title $Title -Type fix -UseCurrentBranch
+}
+
+function prdraft([string]$Title = '') {
+  mkpr -Title $Title -Type feature -UseCurrentBranch -Draft
 }
