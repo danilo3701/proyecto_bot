@@ -4716,9 +4716,9 @@ async def lex_unlock_handler(message: Message, state: FSMContext):
     save_user_data(data)
 
     if u["lex_admin_unlock"]:
-        await message.answer("✅ Админ-доступ включён = разделы в лексике открыты без 70%")  # 💬 подтверждение
+        await message.answer("✅ Админ-доступ включён = разделы в лексике открыты без 50%")  # 💬 подтверждение
     else:
-        await message.answer("🔒 Админ-доступ выключен = снова работает ограничение 70%")  # 💬 подтверждение
+        await message.answer("🔒 Админ-доступ выключен = снова работает ограничение 50%")  # 💬 подтверждение
 
     await lesson_menu_handler(message, state)  # 💬 сразу перерисовываем меню темы с учётом lex_admin_unlock
 
@@ -5182,7 +5182,7 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
             vocab_textquiz_prompt_id=None,    # 💬 чистим id textquiz вопроса
             last_oc_msg_id=None,              # 💬 на всякий случай, чтобы не удалить чужое
             offer_continue_target_idx=None,   # 💬 сброс точки прыжка
-            unlocked=False,                   # 💬 новый топик стартует закрытым до 70%
+            unlocked=False,                   # 💬 новый топик стартует закрытым до 50%
             lex_mode_active=False,
         )  # 💬 сбрасываем прогресс, чтобы новый топик не наследовал 100%
 
@@ -11331,29 +11331,43 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
     data2 = await state.get_data()
     
-    # 💬 Разблокирование по прогрессу «Учить слова» (70% фаз)
+    # 💬 Разблокирование по прогрессу «Учить слова» (минимум 50% фаз)
     phases = topics.get(data2.get("selected_topic", ""), {}).get("vocab", [])
-    total_phases = len(phases)
     per_phase = data2.get("vocab_done_per_phase", {})
-    
+
     completed_phases = 0
+    total_phases_for_unlock = 0
+
     for ph in phases:
         phase_id = ph.get("phase_id")
         blocks = ph.get("vocab", []) or []
 
-        # 💬 норма фазы = реальное число раундов (pool + quiz/textquiz + inline quiz)
-        need_quizzes = 0
-        need_quizzes += len(ph.get("quiz_pool", []) or []) + len(ph.get("textquiz_pool", []) or [])
-        need_quizzes += sum(1 for b in blocks if b.get("type") in ("quiz", "textquiz"))
-        need_quizzes += sum(1 for b in blocks if b.get("quiz"))
+        # 💬 синхронизируем расчёт с lesson_menu_handler (ALL IN = раунды, legacy = quiz/textquiz/link)
+        phrases = ph.get("phrases", []) or []
+        has_round_mode = bool(ph.get("quiz_pool") or ph.get("textquiz_pool") or phrases)
+
+        if has_round_mode:
+            need_quizzes = int(_lex_detect_total_rounds(phrases, default_total=5) or 5)
+        else:
+            need_quizzes = 0
+            need_quizzes += sum(1 for b in blocks if b.get("type") in ("quiz", "textquiz"))
+            need_quizzes += sum(1 for b in blocks if b.get("quiz"))
+
+        if need_quizzes <= 0:
+            need_quizzes = len([b for b in blocks if "link" in b or "url" in b])
+
+        if need_quizzes <= 0:
+            continue
+
+        total_phases_for_unlock += 1
 
         done_here = per_phase.get(str(phase_id), per_phase.get(phase_id, 0)) or 0
         if need_quizzes > 0 and int(done_here) >= int(need_quizzes):
             completed_phases += 1
 
-    
-    vocab_unlock_percent = (completed_phases / total_phases * 100) if total_phases else 100
-    if not data2.get("unlocked", False) and vocab_unlock_percent >= 70:
+
+    vocab_unlock_percent = (completed_phases / total_phases_for_unlock * 100) if total_phases_for_unlock else 100
+    if not data2.get("unlocked", False) and vocab_unlock_percent >= 50:
         await state.update_data(unlocked=True)  # 💬 фиксируем разблокировку
         await message.answer("🔐 <b>Блоки разблокированы! 🎉</b>", parse_mode="HTML")
 
