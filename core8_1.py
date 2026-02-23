@@ -4716,9 +4716,9 @@ async def lex_unlock_handler(message: Message, state: FSMContext):
     save_user_data(data)
 
     if u["lex_admin_unlock"]:
-        await message.answer("✅ Админ-доступ включён = разделы в лексике открыты без 70%")  # 💬 подтверждение
+        await message.answer("✅ Админ-доступ включён = разделы в лексике открыты без 50%")  # 💬 подтверждение
     else:
-        await message.answer("🔒 Админ-доступ выключен = снова работает ограничение 70%")  # 💬 подтверждение
+        await message.answer("🔒 Админ-доступ выключен = снова работает ограничение 50%")  # 💬 подтверждение
 
     await lesson_menu_handler(message, state)  # 💬 сразу перерисовываем меню темы с учётом lex_admin_unlock
 
@@ -5182,7 +5182,7 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
             vocab_textquiz_prompt_id=None,    # 💬 чистим id textquiz вопроса
             last_oc_msg_id=None,              # 💬 на всякий случай, чтобы не удалить чужое
             offer_continue_target_idx=None,   # 💬 сброс точки прыжка
-            unlocked=False,                   # 💬 новый топик стартует закрытым до 70%
+            unlocked=False,                   # 💬 новый топик стартует закрытым до 50%
             lex_mode_active=False,
         )  # 💬 сбрасываем прогресс, чтобы новый топик не наследовал 100%
 
@@ -10115,8 +10115,8 @@ async def handle_review_failed_vocab(poll_answer: PollAnswer, state: FSMContext)
     # 1) Отфильтровываем чужие poll’ы
     if poll_answer.poll_id != data.get("current_poll_id"):
         return
-    # 2) Сразу сбрасываем текущий poll_id, чтобы таймаут не сел
-    await state.update_data(current_poll_id=None)
+    # 2) Сразу сбрасываем текущий poll_id и стрик тайм-аутов: между тайм-аутами был реальный ответ
+    await state.update_data(current_poll_id=None, vocab_timeout_streak=0)
 
     # 3) Достаём индекс и блок
     idx = data.get("failed_vocab", [])[0]
@@ -10250,11 +10250,11 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
 
     data = await state.get_data()
 
-    streak = int(data.get("vocab_timeout_streak", 0) or 0) + 1
-    await state.update_data(vocab_timeout_streak=streak)  # 💬 считаем серию тайм-аутов подряд (один инкремент)
-
     if data.get("current_poll_id") != poll_id:
         return  # 💬 квиз уже обработан или это не текущий poll
+
+    streak = int(data.get("vocab_timeout_streak", 0) or 0) + 1
+    await state.update_data(vocab_timeout_streak=streak)  # 💬 считаем серию только для актуального poll (строго подряд)
 
     poll_msg_id = data.get("current_poll_message_id")
 
@@ -10329,11 +10329,7 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
 
     except Exception:
         pass
-    try:
-        await bot.delete_message(chat_id, fb.message_id)
-    except Exception:
-        pass
-        
+
     # 💬 прогресс обновится перед следующим квизом, здесь уже удалили его вместе с poll
 
 
@@ -10354,11 +10350,6 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
             from_user=fu,
             text=""
         )
-
-    if streak >= 2:
-        await state.update_data(vocab_timeout_streak=0)  # 💬 авто-выход = сбрасываем серию тайм-аутов
-        return await lesson_menu_handler(_fake_msg(), state)  # 💬 закрываем квиз и уходим в меню, сохранив набранное
-
 
     # 💬 защита от кривого idx или не quiz блока
     if idx >= len(vocab_list) or vocab_list[idx].get("type") != "quiz":
@@ -10433,6 +10424,7 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
             redo_stack=[],
             redo_active=False,
             pending_textquiz=[],
+            vocab_timeout_streak=0,
         )
         await state.set_state(LessonStates.showing_vocab)
         
@@ -10470,7 +10462,8 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
             vocab_index=next_idx,
             pending_textquiz=pending,
             current_stage="show_textquiz",  # 💬 запускаем 5-й раунд = textquiz-сет
-            current_poll_id=None
+            current_poll_id=None,
+            vocab_timeout_streak=0,
         )
         await state.set_state(LessonStates.vocab_textquiz)  # 💬 переключаем FSM на ответы textquiz
         return await send_one_vocab(_fake_msg(), state)
@@ -10497,6 +10490,7 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
         redo_stack=[],
         redo_active=False,
         pending_textquiz=[],
+        vocab_timeout_streak=0,
     )
     await state.set_state(LessonStates.showing_vocab)
     
@@ -11007,6 +11001,7 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
                         vocab_index=next_idx,
                         pending_textquiz=pending,
                         current_poll_id=None,
+                        vocab_timeout_streak=0,
                     )
                     return await send_one_vocab(_fake_msg(), state)
 
@@ -11016,6 +11011,7 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
                 await state.update_data(
                     current_stage="offer_continue",
                     current_scene=oc_scene,
+                    vocab_timeout_streak=0,
                 )
                 await state.set_state(LessonStates.showing_vocab)  # 💬 важно: cb_scenario_vocab слушает showing_vocab
 
@@ -11079,14 +11075,14 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
             failed = data.get("failed_vocab", []) or []
             if failed:
-                await state.update_data(current_poll_id=None)  # 💬 сбрасываем poll id перед пересдачей
+                await state.update_data(current_poll_id=None, vocab_timeout_streak=0)  # 💬 сбрасываем poll id/тайм-аут-стрик перед пересдачей
                 await state.set_state(LessonStates.review_failed_vocab)  # 💬 пересдача ошибок до offer_continue
                 return await send_failed_vocab(poll_answer.user.id, state)
 
             # 💬 textquiz тоже нет — обычный offer_continue
             # 💬 textquiz тоже нет — показываем inline offer_continue (единый формат с cb_scenario_vocab)
             oc = random.choice(scenarios["offer_continue"])
-            await state.update_data(current_stage="offer_continue", current_scene=oc)
+            await state.update_data(current_stage="offer_continue", current_scene=oc, vocab_timeout_streak=0)
 
             kb = InlineKeyboardMarkup(
                 inline_keyboard=[[
@@ -11331,29 +11327,43 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
     data2 = await state.get_data()
     
-    # 💬 Разблокирование по прогрессу «Учить слова» (70% фаз)
+    # 💬 Разблокирование по прогрессу «Учить слова» (минимум 50% фаз)
     phases = topics.get(data2.get("selected_topic", ""), {}).get("vocab", [])
-    total_phases = len(phases)
     per_phase = data2.get("vocab_done_per_phase", {})
-    
+
     completed_phases = 0
+    total_phases_for_unlock = 0
+
     for ph in phases:
         phase_id = ph.get("phase_id")
         blocks = ph.get("vocab", []) or []
 
-        # 💬 норма фазы = реальное число раундов (pool + quiz/textquiz + inline quiz)
-        need_quizzes = 0
-        need_quizzes += len(ph.get("quiz_pool", []) or []) + len(ph.get("textquiz_pool", []) or [])
-        need_quizzes += sum(1 for b in blocks if b.get("type") in ("quiz", "textquiz"))
-        need_quizzes += sum(1 for b in blocks if b.get("quiz"))
+        # 💬 синхронизируем расчёт с lesson_menu_handler (ALL IN = раунды, legacy = quiz/textquiz/link)
+        phrases = ph.get("phrases", []) or []
+        has_round_mode = bool(ph.get("quiz_pool") or ph.get("textquiz_pool") or phrases)
+
+        if has_round_mode:
+            need_quizzes = int(_lex_detect_total_rounds(phrases, default_total=5) or 5)
+        else:
+            need_quizzes = 0
+            need_quizzes += sum(1 for b in blocks if b.get("type") in ("quiz", "textquiz"))
+            need_quizzes += sum(1 for b in blocks if b.get("quiz"))
+
+        if need_quizzes <= 0:
+            need_quizzes = len([b for b in blocks if "link" in b or "url" in b])
+
+        if need_quizzes <= 0:
+            continue
+
+        total_phases_for_unlock += 1
 
         done_here = per_phase.get(str(phase_id), per_phase.get(phase_id, 0)) or 0
         if need_quizzes > 0 and int(done_here) >= int(need_quizzes):
             completed_phases += 1
 
-    
-    vocab_unlock_percent = (completed_phases / total_phases * 100) if total_phases else 100
-    if not data2.get("unlocked", False) and vocab_unlock_percent >= 70:
+
+    vocab_unlock_percent = (completed_phases / total_phases_for_unlock * 100) if total_phases_for_unlock else 100
+    if not data2.get("unlocked", False) and vocab_unlock_percent >= 50:
         await state.update_data(unlocked=True)  # 💬 фиксируем разблокировку
         await message.answer("🔐 <b>Блоки разблокированы! 🎉</b>", parse_mode="HTML")
 
