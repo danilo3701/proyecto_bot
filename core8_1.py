@@ -201,9 +201,13 @@ from aiogram.fsm.storage.memory import MemoryStorage    # Хранение FSM �
 # ——— Роутеры админки ————————————————————————————————————————————
 # 💬 legacy-админка тем (НЕ грамматика). Может быть сломана/невалидна — не роняем весь бот на импорте.
 try:
-    from create_lesson_block import router as legacy_topics_router  # type: ignore
+    from create_lesson_block import (
+        router as legacy_topics_router,  # type: ignore
+        start_adding_topic as legacy_start_adding_topic,  # type: ignore
+    )
 except Exception as e:
     legacy_topics_router = None
+    legacy_start_adding_topic = None
     logging.exception("legacy_topics_router disabled (import failed): %s", e)
 
 
@@ -378,6 +382,13 @@ dp.include_router(podcasts_router)  # 💬 подключаем модуль "П
 # 💬 legacy-админка тем подключается только если импорт успешен (иначе бот не должен падать)
 if legacy_topics_router is not None:
     dp.include_router(legacy_topics_router)
+    msg = "legacy_topics_router enabled: /addtopic handlers are registered"
+    print(f"ℹ️ {msg}", flush=True)
+    logging.info(msg)
+else:
+    msg = "legacy_topics_router disabled: /addtopic handlers are NOT registered"
+    print(f"⚠️ {msg}", flush=True)
+    logging.warning(msg)
 
 # ——— Загружаем уроки (ТОЛЬКО /data/topics) ———————————————————————
 topics = load_topics_from_volume()  # 💬 стартовая загрузка тем из Railway Volume
@@ -4669,6 +4680,16 @@ async def show_leaderboard(message: Message, state: FSMContext):
 
 
 # 🟢 Новый хендлер: Главное меню (/menu)
+@dp.message(Command("addtopic"))
+@track_handler
+async def addtopic_entry_fallback(message: Message, state: FSMContext):
+    # 💬 единая точка входа в /addtopic, даже если legacy-router не подключился
+    if legacy_start_adding_topic is None:
+        await message.answer("⚠️ /addtopic недоступна: create_lesson_block не импортирован (смотри startup-логи).")
+        return
+    return await legacy_start_adding_topic(message, state)
+
+
 @dp.message(Command("menu"))
 @track_handler
 async def menu_handler(message: Message, state: FSMContext):
@@ -8712,12 +8733,15 @@ async def start_vocab(message: Message, state: FSMContext):
             pass
         await state.update_data(last_menu_msg_id=None)
 
+    # 💬 clean-chat страховка: пробуем убрать предыдущий 🎲 перед новым стартом потока
+    stale_dice_msg_id = data.get("last_dice_msg_id")
+    if stale_dice_msg_id:
+        await _safe_delete_message(message.chat.id, stale_dice_msg_id)
+        await state.update_data(last_dice_msg_id=None)
+
     async def _autodelete_msg(m: Message, delay_s: float = 5.0):
         await asyncio.sleep(delay_s)
-        try:
-            await m.delete()
-        except Exception:
-            pass
+        await _safe_delete_message(m.chat.id, m.message_id)
 
     # 💬 дополнительно прячем клавиатуру, чтобы кнопки меню исчезли
     clear_msg = await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
@@ -8734,7 +8758,18 @@ async def start_vocab(message: Message, state: FSMContext):
 
     # 2) Дайс-анимация
     dice_msg = await message.answer_dice(reply_markup=ReplyKeyboardRemove())
-    asyncio.create_task(_autodelete_msg(dice_msg, 5.0))  # 💬 убираем кубик через 5 сек
+    await state.update_data(last_dice_msg_id=dice_msg.message_id)  # 💬 сохраняем id кубика для надёжного cleanup
+
+    async def _autodelete_dice(chat_id: int, message_id: int, delay_s: float = 5.0):
+        await asyncio.sleep(delay_s)
+        await _safe_delete_message(chat_id, message_id)
+
+        # 💬 очищаем ссылку только если это всё ещё тот же кубик
+        st = await state.get_data()
+        if st.get("last_dice_msg_id") == message_id:
+            await state.update_data(last_dice_msg_id=None)
+
+    asyncio.create_task(_autodelete_dice(dice_msg.chat.id, dice_msg.message_id, 5.0))  # 💬 убираем кубик через 5 сек
     await asyncio.sleep(DICE_DELETE_DELAY_S)  # 💬 короткая задержка под анимацию
 
 
@@ -11105,6 +11140,7 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
     xp_fb = None  # 💬 чтобы не было NameError, если XP-фидбэк не создаём (оставили только реакцию)
     extra_fb = None  # 💬 чтобы не было NameError, если доп-фидбэк не создался из-за раннего выхода/исключения
+    prompt_id_snapshot = data.get("last_prompt_id")  # 💬 фикс от гонок: удаляем именно тот вопрос, на который отвечают сейчас
 
 
     # 💬 что делает эта часть: защита от выхода за границы списка
@@ -11419,25 +11455,31 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
 
     # 💬 5) Удаляем всё: вопрос, ответ пользователя, XP-фидбэк и (если есть) extra-фидбэк
-    chat_id   = message.chat.id
-    prompt_id = (await state.get_data()).get("last_prompt_id")
-    # собираем ID (учитываем, что xp_fb может быть None, если был только стикер)
-    to_delete = [prompt_id, message.message_id]  # 💬 базовый набор: вопрос + ответ
+    chat_id = message.chat.id
+    extra_fb_id_snapshot = data.get("last_textquiz_extra_fb_id")  # 💬 fallback id, если объект extra_fb не сохранился
+
+    # 💬 фикс от гонок: удаляем prompt по snapshot (из старта хендлера), а не по "текущему" state
+    to_delete = [prompt_id_snapshot, message.message_id]
     if isinstance(xp_fb, Message):
-        to_delete.append(xp_fb.message_id)       # 💬 удаляем текстовый XP-фидбэк, если он был
+        to_delete.append(xp_fb.message_id)
     if isinstance(extra_fb, Message):
-        to_delete.append(extra_fb.message_id)    # 💬 удаляем доп. фидбэк (печенька / правильный ответ)
+        to_delete.append(extra_fb.message_id)
+    elif extra_fb_id_snapshot:
+        to_delete.append(extra_fb_id_snapshot)
+
+    # 💬 убираем дубликаты id, чтобы не пытаться удалить одно и то же дважды
+    uniq_ids = []
+    seen_ids = set()
     for mid in to_delete:
-        if not mid:
-            continue
-        try:
-            await message.bot.delete_message(chat_id, mid)  # 💬 удаляем через message.bot (актуальный инстанс бота)
-        except TelegramBadRequest:
-            # 💬 например: message can't be deleted / уже удалили / нет прав
-            pass
-        except Exception:
-            # 💬 страховка от других ошибок удаления, чтобы не рвать FSM
-            pass
+        if mid and mid not in seen_ids:
+            uniq_ids.append(mid)
+            seen_ids.add(mid)
+
+    for mid in uniq_ids:
+        await _safe_delete_message(chat_id, mid)
+
+    # 💬 после попытки удаления очищаем служебные id, чтобы не тянуть "хвосты" в следующий textquiz
+    await state.update_data(last_textquiz_extra_fb_id=None)
 
 
 
@@ -13457,15 +13499,44 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
             except TelegramBadRequest:
                 pass
 
-        # 2) Небольшая пауза для чтения реакции
-        await asyncio.sleep(REPLY_REACTION_READ_DELAY_S)
+        # 2) cleanup offer_continue запускаем в фоне (без блокировки перехода к следующему шагу)
+        chat_id = cb.message.chat.id
+        callback_msg_id = cb.message.message_id
+        last_oc_msg_id = data.get("last_oc_msg_id")
 
+        async def _cleanup_offer_continue_later() -> None:
+            try:
+                await asyncio.sleep(REPLY_REACTION_READ_DELAY_S)
 
-        # 3) Убираем inline-кнопки
-        try:
-            await cb.message.edit_reply_markup()
-        except TelegramBadRequest:
-            pass
+                # 💬 сначала убираем inline-кнопки, чтобы сообщение стало неактивным
+                try:
+                    await bot.edit_message_reply_markup(chat_id=chat_id, message_id=callback_msg_id, reply_markup=None)
+                except TelegramBadRequest:
+                    pass
+                except Exception:
+                    pass
+
+                # 💬 удаляем сохранённое offer_continue-сообщение (если это не то же самое)
+                if last_oc_msg_id and last_oc_msg_id != callback_msg_id:
+                    try:
+                        await bot.delete_message(chat_id, last_oc_msg_id)
+                    except TelegramBadRequest:
+                        pass
+                    except Exception:
+                        pass
+
+                # 💬 удаляем сообщение, по кнопке которого кликнули
+                try:
+                    await bot.delete_message(chat_id, callback_msg_id)
+                except TelegramBadRequest:
+                    pass
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        asyncio.create_task(_cleanup_offer_continue_later())
+        await state.update_data(last_oc_msg_id=None)  # 💬 чистим сразу, чтобы не пытаться удалить повторно
 
         # 💬 что делает эта часть: если textquiz поставил точный target_idx, то "Продолжить" прыгает туда без инкремента
         target_idx = data.get("offer_continue_target_idx")
@@ -13477,22 +13548,6 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
 
             # 💬 что делает эта часть: target сломан/вышел за границы = просто чистим и падаем в обычную логику ниже
             await state.update_data(offer_continue_target_idx=None)
-
-
-        # 💬 удаляем сообщение offer_continue целиком: текст, реакцию, кнопки
-        try:
-            last_oc_msg_id = data.get("last_oc_msg_id")
-            if last_oc_msg_id and last_oc_msg_id != cb.message.message_id:
-                await bot.delete_message(cb.message.chat.id, last_oc_msg_id)  # 💬 удаляем сохранённый offer_continue
-        except TelegramBadRequest:
-            pass
-
-        try:
-            await cb.message.delete()  # 💬 удаляем то сообщение, по кнопке которого кликнули
-        except TelegramBadRequest:
-            pass
-
-        await state.update_data(last_oc_msg_id=None)  # 💬 чистим, чтобы не пытаться удалить повторно
 
 
         # 💬 перед выходом (Домой/Продолжить) фиксируем прогресс фазы,
@@ -13649,7 +13704,7 @@ if __name__ == '__main__':
         # 💬 Регистрируем команды бота (в меню Telegram: /start, /addtopic, /edittopic, /menu)
         # 💬 Обычному пользователю показываем только эти команды
         await bot.set_my_commands([
-            BotCommand(command="start", description="Запустить бота")
+            BotCommand(command="start", description="Запустить бота"),
         ])
 
         migrate_runtime_files_to_volume()  # 💬 выполняется один раз при старте
@@ -13695,6 +13750,3 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
-
-
-
