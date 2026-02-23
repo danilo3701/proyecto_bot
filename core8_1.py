@@ -201,9 +201,13 @@ from aiogram.fsm.storage.memory import MemoryStorage    # Хранение FSM �
 # ——— Роутеры админки ————————————————————————————————————————————
 # 💬 legacy-админка тем (НЕ грамматика). Может быть сломана/невалидна — не роняем весь бот на импорте.
 try:
-    from create_lesson_block import router as legacy_topics_router  # type: ignore
+    from create_lesson_block import (
+        router as legacy_topics_router,  # type: ignore
+        start_adding_topic as legacy_start_adding_topic,  # type: ignore
+    )
 except Exception as e:
     legacy_topics_router = None
+    legacy_start_adding_topic = None
     logging.exception("legacy_topics_router disabled (import failed): %s", e)
 
 
@@ -378,6 +382,13 @@ dp.include_router(podcasts_router)  # 💬 подключаем модуль "П
 # 💬 legacy-админка тем подключается только если импорт успешен (иначе бот не должен падать)
 if legacy_topics_router is not None:
     dp.include_router(legacy_topics_router)
+    msg = "legacy_topics_router enabled: /addtopic handlers are registered"
+    print(f"ℹ️ {msg}", flush=True)
+    logging.info(msg)
+else:
+    msg = "legacy_topics_router disabled: /addtopic handlers are NOT registered"
+    print(f"⚠️ {msg}", flush=True)
+    logging.warning(msg)
 
 # ——— Загружаем уроки (ТОЛЬКО /data/topics) ———————————————————————
 topics = load_topics_from_volume()  # 💬 стартовая загрузка тем из Railway Volume
@@ -4669,6 +4680,16 @@ async def show_leaderboard(message: Message, state: FSMContext):
 
 
 # 🟢 Новый хендлер: Главное меню (/menu)
+@dp.message(Command("addtopic"))
+@track_handler
+async def addtopic_entry_fallback(message: Message, state: FSMContext):
+    # 💬 единая точка входа в /addtopic, даже если legacy-router не подключился
+    if legacy_start_adding_topic is None:
+        await message.answer("⚠️ /addtopic недоступна: create_lesson_block не импортирован (смотри startup-логи).")
+        return
+    return await legacy_start_adding_topic(message, state)
+
+
 @dp.message(Command("menu"))
 @track_handler
 async def menu_handler(message: Message, state: FSMContext):
@@ -11105,6 +11126,7 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
     xp_fb = None  # 💬 чтобы не было NameError, если XP-фидбэк не создаём (оставили только реакцию)
     extra_fb = None  # 💬 чтобы не было NameError, если доп-фидбэк не создался из-за раннего выхода/исключения
+    prompt_id_snapshot = data.get("last_prompt_id")  # 💬 фикс от гонок: удаляем именно тот вопрос, на который отвечают сейчас
 
 
     # 💬 что делает эта часть: защита от выхода за границы списка
@@ -11419,25 +11441,31 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
 
     # 💬 5) Удаляем всё: вопрос, ответ пользователя, XP-фидбэк и (если есть) extra-фидбэк
-    chat_id   = message.chat.id
-    prompt_id = (await state.get_data()).get("last_prompt_id")
-    # собираем ID (учитываем, что xp_fb может быть None, если был только стикер)
-    to_delete = [prompt_id, message.message_id]  # 💬 базовый набор: вопрос + ответ
+    chat_id = message.chat.id
+    extra_fb_id_snapshot = data.get("last_textquiz_extra_fb_id")  # 💬 fallback id, если объект extra_fb не сохранился
+
+    # 💬 фикс от гонок: удаляем prompt по snapshot (из старта хендлера), а не по "текущему" state
+    to_delete = [prompt_id_snapshot, message.message_id]
     if isinstance(xp_fb, Message):
-        to_delete.append(xp_fb.message_id)       # 💬 удаляем текстовый XP-фидбэк, если он был
+        to_delete.append(xp_fb.message_id)
     if isinstance(extra_fb, Message):
-        to_delete.append(extra_fb.message_id)    # 💬 удаляем доп. фидбэк (печенька / правильный ответ)
+        to_delete.append(extra_fb.message_id)
+    elif extra_fb_id_snapshot:
+        to_delete.append(extra_fb_id_snapshot)
+
+    # 💬 убираем дубликаты id, чтобы не пытаться удалить одно и то же дважды
+    uniq_ids = []
+    seen_ids = set()
     for mid in to_delete:
-        if not mid:
-            continue
-        try:
-            await message.bot.delete_message(chat_id, mid)  # 💬 удаляем через message.bot (актуальный инстанс бота)
-        except TelegramBadRequest:
-            # 💬 например: message can't be deleted / уже удалили / нет прав
-            pass
-        except Exception:
-            # 💬 страховка от других ошибок удаления, чтобы не рвать FSM
-            pass
+        if mid and mid not in seen_ids:
+            uniq_ids.append(mid)
+            seen_ids.add(mid)
+
+    for mid in uniq_ids:
+        await _safe_delete_message(chat_id, mid)
+
+    # 💬 после попытки удаления очищаем служебные id, чтобы не тянуть "хвосты" в следующий textquiz
+    await state.update_data(last_textquiz_extra_fb_id=None)
 
 
 
@@ -13649,7 +13677,7 @@ if __name__ == '__main__':
         # 💬 Регистрируем команды бота (в меню Telegram: /start, /addtopic, /edittopic, /menu)
         # 💬 Обычному пользователю показываем только эти команды
         await bot.set_my_commands([
-            BotCommand(command="start", description="Запустить бота")
+            BotCommand(command="start", description="Запустить бота"),
         ])
 
         migrate_runtime_files_to_volume()  # 💬 выполняется один раз при старте
@@ -13695,6 +13723,3 @@ if __name__ == '__main__':
         logging.info(msg)
         print(msg)
         sys.exit(0)
-
-
-
