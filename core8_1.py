@@ -10343,11 +10343,7 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
 
     except Exception:
         pass
-    try:
-        await bot.delete_message(chat_id, fb.message_id)
-    except Exception:
-        pass
-        
+
     # 💬 прогресс обновится перед следующим квизом, здесь уже удалили его вместе с poll
 
 
@@ -10368,11 +10364,6 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
             from_user=fu,
             text=""
         )
-
-    if streak >= 2:
-        await state.update_data(vocab_timeout_streak=0)  # 💬 авто-выход = сбрасываем серию тайм-аутов
-        return await lesson_menu_handler(_fake_msg(), state)  # 💬 закрываем квиз и уходим в меню, сохранив набранное
-
 
     # 💬 защита от кривого idx или не quiz блока
     if idx >= len(vocab_list) or vocab_list[idx].get("type") != "quiz":
@@ -10447,6 +10438,7 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
             redo_stack=[],
             redo_active=False,
             pending_textquiz=[],
+            vocab_timeout_streak=0,
         )
         await state.set_state(LessonStates.showing_vocab)
         
