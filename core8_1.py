@@ -10129,8 +10129,8 @@ async def handle_review_failed_vocab(poll_answer: PollAnswer, state: FSMContext)
     # 1) Отфильтровываем чужие poll’ы
     if poll_answer.poll_id != data.get("current_poll_id"):
         return
-    # 2) Сразу сбрасываем текущий poll_id, чтобы таймаут не сел
-    await state.update_data(current_poll_id=None)
+    # 2) Сразу сбрасываем текущий poll_id и стрик тайм-аутов: между тайм-аутами был реальный ответ
+    await state.update_data(current_poll_id=None, vocab_timeout_streak=0)
 
     # 3) Достаём индекс и блок
     idx = data.get("failed_vocab", [])[0]
@@ -10264,11 +10264,11 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
 
     data = await state.get_data()
 
-    streak = int(data.get("vocab_timeout_streak", 0) or 0) + 1
-    await state.update_data(vocab_timeout_streak=streak)  # 💬 считаем серию тайм-аутов подряд (один инкремент)
-
     if data.get("current_poll_id") != poll_id:
         return  # 💬 квиз уже обработан или это не текущий poll
+
+    streak = int(data.get("vocab_timeout_streak", 0) or 0) + 1
+    await state.update_data(vocab_timeout_streak=streak)  # 💬 считаем серию только для актуального poll (строго подряд)
 
     poll_msg_id = data.get("current_poll_message_id")
 
@@ -10484,7 +10484,8 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
             vocab_index=next_idx,
             pending_textquiz=pending,
             current_stage="show_textquiz",  # 💬 запускаем 5-й раунд = textquiz-сет
-            current_poll_id=None
+            current_poll_id=None,
+            vocab_timeout_streak=0,
         )
         await state.set_state(LessonStates.vocab_textquiz)  # 💬 переключаем FSM на ответы textquiz
         return await send_one_vocab(_fake_msg(), state)
@@ -10511,6 +10512,7 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
         redo_stack=[],
         redo_active=False,
         pending_textquiz=[],
+        vocab_timeout_streak=0,
     )
     await state.set_state(LessonStates.showing_vocab)
     
@@ -11021,6 +11023,7 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
                         vocab_index=next_idx,
                         pending_textquiz=pending,
                         current_poll_id=None,
+                        vocab_timeout_streak=0,
                     )
                     return await send_one_vocab(_fake_msg(), state)
 
@@ -11030,6 +11033,7 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
                 await state.update_data(
                     current_stage="offer_continue",
                     current_scene=oc_scene,
+                    vocab_timeout_streak=0,
                 )
                 await state.set_state(LessonStates.showing_vocab)  # 💬 важно: cb_scenario_vocab слушает showing_vocab
 
@@ -11093,14 +11097,14 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
             failed = data.get("failed_vocab", []) or []
             if failed:
-                await state.update_data(current_poll_id=None)  # 💬 сбрасываем poll id перед пересдачей
+                await state.update_data(current_poll_id=None, vocab_timeout_streak=0)  # 💬 сбрасываем poll id/тайм-аут-стрик перед пересдачей
                 await state.set_state(LessonStates.review_failed_vocab)  # 💬 пересдача ошибок до offer_continue
                 return await send_failed_vocab(poll_answer.user.id, state)
 
             # 💬 textquiz тоже нет — обычный offer_continue
             # 💬 textquiz тоже нет — показываем inline offer_continue (единый формат с cb_scenario_vocab)
             oc = random.choice(scenarios["offer_continue"])
-            await state.update_data(current_stage="offer_continue", current_scene=oc)
+            await state.update_data(current_stage="offer_continue", current_scene=oc, vocab_timeout_streak=0)
 
             kb = InlineKeyboardMarkup(
                 inline_keyboard=[[
