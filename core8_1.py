@@ -13489,15 +13489,44 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
             except TelegramBadRequest:
                 pass
 
-        # 2) Небольшая пауза для чтения реакции
-        await asyncio.sleep(REPLY_REACTION_READ_DELAY_S)
+        # 2) cleanup offer_continue запускаем в фоне (без блокировки перехода к следующему шагу)
+        chat_id = cb.message.chat.id
+        callback_msg_id = cb.message.message_id
+        last_oc_msg_id = data.get("last_oc_msg_id")
 
+        async def _cleanup_offer_continue_later() -> None:
+            try:
+                await asyncio.sleep(REPLY_REACTION_READ_DELAY_S)
 
-        # 3) Убираем inline-кнопки
-        try:
-            await cb.message.edit_reply_markup()
-        except TelegramBadRequest:
-            pass
+                # 💬 сначала убираем inline-кнопки, чтобы сообщение стало неактивным
+                try:
+                    await bot.edit_message_reply_markup(chat_id=chat_id, message_id=callback_msg_id, reply_markup=None)
+                except TelegramBadRequest:
+                    pass
+                except Exception:
+                    pass
+
+                # 💬 удаляем сохранённое offer_continue-сообщение (если это не то же самое)
+                if last_oc_msg_id and last_oc_msg_id != callback_msg_id:
+                    try:
+                        await bot.delete_message(chat_id, last_oc_msg_id)
+                    except TelegramBadRequest:
+                        pass
+                    except Exception:
+                        pass
+
+                # 💬 удаляем сообщение, по кнопке которого кликнули
+                try:
+                    await bot.delete_message(chat_id, callback_msg_id)
+                except TelegramBadRequest:
+                    pass
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        asyncio.create_task(_cleanup_offer_continue_later())
+        await state.update_data(last_oc_msg_id=None)  # 💬 чистим сразу, чтобы не пытаться удалить повторно
 
         # 💬 что делает эта часть: если textquiz поставил точный target_idx, то "Продолжить" прыгает туда без инкремента
         target_idx = data.get("offer_continue_target_idx")
@@ -13509,22 +13538,6 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
 
             # 💬 что делает эта часть: target сломан/вышел за границы = просто чистим и падаем в обычную логику ниже
             await state.update_data(offer_continue_target_idx=None)
-
-
-        # 💬 удаляем сообщение offer_continue целиком: текст, реакцию, кнопки
-        try:
-            last_oc_msg_id = data.get("last_oc_msg_id")
-            if last_oc_msg_id and last_oc_msg_id != cb.message.message_id:
-                await bot.delete_message(cb.message.chat.id, last_oc_msg_id)  # 💬 удаляем сохранённый offer_continue
-        except TelegramBadRequest:
-            pass
-
-        try:
-            await cb.message.delete()  # 💬 удаляем то сообщение, по кнопке которого кликнули
-        except TelegramBadRequest:
-            pass
-
-        await state.update_data(last_oc_msg_id=None)  # 💬 чистим, чтобы не пытаться удалить повторно
 
 
         # 💬 перед выходом (Домой/Продолжить) фиксируем прогресс фазы,
