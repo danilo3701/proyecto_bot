@@ -4716,9 +4716,9 @@ async def lex_unlock_handler(message: Message, state: FSMContext):
     save_user_data(data)
 
     if u["lex_admin_unlock"]:
-        await message.answer("✅ Админ-доступ включён = разделы в лексике открыты без 70%")  # 💬 подтверждение
+        await message.answer("✅ Админ-доступ включён = разделы в лексике открыты без 50%")  # 💬 подтверждение
     else:
-        await message.answer("🔒 Админ-доступ выключен = снова работает ограничение 70%")  # 💬 подтверждение
+        await message.answer("🔒 Админ-доступ выключен = снова работает ограничение 50%")  # 💬 подтверждение
 
     await lesson_menu_handler(message, state)  # 💬 сразу перерисовываем меню темы с учётом lex_admin_unlock
 
@@ -5182,7 +5182,7 @@ async def topic_chosen(query: CallbackQuery, state: FSMContext):
             vocab_textquiz_prompt_id=None,    # 💬 чистим id textquiz вопроса
             last_oc_msg_id=None,              # 💬 на всякий случай, чтобы не удалить чужое
             offer_continue_target_idx=None,   # 💬 сброс точки прыжка
-            unlocked=False,                   # 💬 новый топик стартует закрытым до 70%
+            unlocked=False,                   # 💬 новый топик стартует закрытым до 50%
             lex_mode_active=False,
         )  # 💬 сбрасываем прогресс, чтобы новый топик не наследовал 100%
 
@@ -8737,12 +8737,15 @@ async def start_vocab(message: Message, state: FSMContext):
             pass
         await state.update_data(last_menu_msg_id=None)
 
+    # 💬 clean-chat страховка: пробуем убрать предыдущий 🎲 перед новым стартом потока
+    stale_dice_msg_id = data.get("last_dice_msg_id")
+    if stale_dice_msg_id:
+        await _safe_delete_message(message.chat.id, stale_dice_msg_id)
+        await state.update_data(last_dice_msg_id=None)
+
     async def _autodelete_msg(m: Message, delay_s: float = 5.0):
         await asyncio.sleep(delay_s)
-        try:
-            await m.delete()
-        except Exception:
-            pass
+        await _safe_delete_message(m.chat.id, m.message_id)
 
     # 💬 дополнительно прячем клавиатуру, чтобы кнопки меню исчезли
     clear_msg = await message.answer('\u00AD', reply_markup=ReplyKeyboardRemove())
@@ -8759,7 +8762,18 @@ async def start_vocab(message: Message, state: FSMContext):
 
     # 2) Дайс-анимация
     dice_msg = await message.answer_dice(reply_markup=ReplyKeyboardRemove())
-    asyncio.create_task(_autodelete_msg(dice_msg, 5.0))  # 💬 убираем кубик через 5 сек
+    await state.update_data(last_dice_msg_id=dice_msg.message_id)  # 💬 сохраняем id кубика для надёжного cleanup
+
+    async def _autodelete_dice(chat_id: int, message_id: int, delay_s: float = 5.0):
+        await asyncio.sleep(delay_s)
+        await _safe_delete_message(chat_id, message_id)
+
+        # 💬 очищаем ссылку только если это всё ещё тот же кубик
+        st = await state.get_data()
+        if st.get("last_dice_msg_id") == message_id:
+            await state.update_data(last_dice_msg_id=None)
+
+    asyncio.create_task(_autodelete_dice(dice_msg.chat.id, dice_msg.message_id, 5.0))  # 💬 убираем кубик через 5 сек
     await asyncio.sleep(DICE_DELETE_DELAY_S)  # 💬 короткая задержка под анимацию
 
 
@@ -10999,6 +11013,7 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
                         vocab_index=next_idx,
                         pending_textquiz=pending,
                         current_poll_id=None,
+                        vocab_timeout_streak=0,
                     )
                     return await send_one_vocab(_fake_msg(), state)
 
@@ -11008,6 +11023,7 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
                 await state.update_data(
                     current_stage="offer_continue",
                     current_scene=oc_scene,
+                    vocab_timeout_streak=0,
                 )
                 await state.set_state(LessonStates.showing_vocab)  # 💬 важно: cb_scenario_vocab слушает showing_vocab
 
@@ -11071,14 +11087,14 @@ async def handle_vocab_poll_answer(poll_answer: PollAnswer, state: FSMContext):
 
             failed = data.get("failed_vocab", []) or []
             if failed:
-                await state.update_data(current_poll_id=None)  # 💬 сбрасываем poll id перед пересдачей
+                await state.update_data(current_poll_id=None, vocab_timeout_streak=0)  # 💬 сбрасываем poll id/тайм-аут-стрик перед пересдачей
                 await state.set_state(LessonStates.review_failed_vocab)  # 💬 пересдача ошибок до offer_continue
                 return await send_failed_vocab(poll_answer.user.id, state)
 
             # 💬 textquiz тоже нет — обычный offer_continue
             # 💬 textquiz тоже нет — показываем inline offer_continue (единый формат с cb_scenario_vocab)
             oc = random.choice(scenarios["offer_continue"])
-            await state.update_data(current_stage="offer_continue", current_scene=oc)
+            await state.update_data(current_stage="offer_continue", current_scene=oc, vocab_timeout_streak=0)
 
             kb = InlineKeyboardMarkup(
                 inline_keyboard=[[
@@ -11323,29 +11339,43 @@ async def handle_vocab_textquiz_answer(message: Message, state: FSMContext):
 
     data2 = await state.get_data()
     
-    # 💬 Разблокирование по прогрессу «Учить слова» (70% фаз)
+    # 💬 Разблокирование по прогрессу «Учить слова» (минимум 50% фаз)
     phases = topics.get(data2.get("selected_topic", ""), {}).get("vocab", [])
-    total_phases = len(phases)
     per_phase = data2.get("vocab_done_per_phase", {})
-    
+
     completed_phases = 0
+    total_phases_for_unlock = 0
+
     for ph in phases:
         phase_id = ph.get("phase_id")
         blocks = ph.get("vocab", []) or []
 
-        # 💬 норма фазы = реальное число раундов (pool + quiz/textquiz + inline quiz)
-        need_quizzes = 0
-        need_quizzes += len(ph.get("quiz_pool", []) or []) + len(ph.get("textquiz_pool", []) or [])
-        need_quizzes += sum(1 for b in blocks if b.get("type") in ("quiz", "textquiz"))
-        need_quizzes += sum(1 for b in blocks if b.get("quiz"))
+        # 💬 синхронизируем расчёт с lesson_menu_handler (ALL IN = раунды, legacy = quiz/textquiz/link)
+        phrases = ph.get("phrases", []) or []
+        has_round_mode = bool(ph.get("quiz_pool") or ph.get("textquiz_pool") or phrases)
+
+        if has_round_mode:
+            need_quizzes = int(_lex_detect_total_rounds(phrases, default_total=5) or 5)
+        else:
+            need_quizzes = 0
+            need_quizzes += sum(1 for b in blocks if b.get("type") in ("quiz", "textquiz"))
+            need_quizzes += sum(1 for b in blocks if b.get("quiz"))
+
+        if need_quizzes <= 0:
+            need_quizzes = len([b for b in blocks if "link" in b or "url" in b])
+
+        if need_quizzes <= 0:
+            continue
+
+        total_phases_for_unlock += 1
 
         done_here = per_phase.get(str(phase_id), per_phase.get(phase_id, 0)) or 0
         if need_quizzes > 0 and int(done_here) >= int(need_quizzes):
             completed_phases += 1
 
-    
-    vocab_unlock_percent = (completed_phases / total_phases * 100) if total_phases else 100
-    if not data2.get("unlocked", False) and vocab_unlock_percent >= 70:
+
+    vocab_unlock_percent = (completed_phases / total_phases_for_unlock * 100) if total_phases_for_unlock else 100
+    if not data2.get("unlocked", False) and vocab_unlock_percent >= 50:
         await state.update_data(unlocked=True)  # 💬 фиксируем разблокировку
         await message.answer("🔐 <b>Блоки разблокированы! 🎉</b>", parse_mode="HTML")
 
@@ -13481,15 +13511,44 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
             except TelegramBadRequest:
                 pass
 
-        # 2) Небольшая пауза для чтения реакции
-        await asyncio.sleep(REPLY_REACTION_READ_DELAY_S)
+        # 2) cleanup offer_continue запускаем в фоне (без блокировки перехода к следующему шагу)
+        chat_id = cb.message.chat.id
+        callback_msg_id = cb.message.message_id
+        last_oc_msg_id = data.get("last_oc_msg_id")
 
+        async def _cleanup_offer_continue_later() -> None:
+            try:
+                await asyncio.sleep(REPLY_REACTION_READ_DELAY_S)
 
-        # 3) Убираем inline-кнопки
-        try:
-            await cb.message.edit_reply_markup()
-        except TelegramBadRequest:
-            pass
+                # 💬 сначала убираем inline-кнопки, чтобы сообщение стало неактивным
+                try:
+                    await bot.edit_message_reply_markup(chat_id=chat_id, message_id=callback_msg_id, reply_markup=None)
+                except TelegramBadRequest:
+                    pass
+                except Exception:
+                    pass
+
+                # 💬 удаляем сохранённое offer_continue-сообщение (если это не то же самое)
+                if last_oc_msg_id and last_oc_msg_id != callback_msg_id:
+                    try:
+                        await bot.delete_message(chat_id, last_oc_msg_id)
+                    except TelegramBadRequest:
+                        pass
+                    except Exception:
+                        pass
+
+                # 💬 удаляем сообщение, по кнопке которого кликнули
+                try:
+                    await bot.delete_message(chat_id, callback_msg_id)
+                except TelegramBadRequest:
+                    pass
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        asyncio.create_task(_cleanup_offer_continue_later())
+        await state.update_data(last_oc_msg_id=None)  # 💬 чистим сразу, чтобы не пытаться удалить повторно
 
         # 💬 что делает эта часть: если textquiz поставил точный target_idx, то "Продолжить" прыгает туда без инкремента
         target_idx = data.get("offer_continue_target_idx")
@@ -13501,22 +13560,6 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
 
             # 💬 что делает эта часть: target сломан/вышел за границы = просто чистим и падаем в обычную логику ниже
             await state.update_data(offer_continue_target_idx=None)
-
-
-        # 💬 удаляем сообщение offer_continue целиком: текст, реакцию, кнопки
-        try:
-            last_oc_msg_id = data.get("last_oc_msg_id")
-            if last_oc_msg_id and last_oc_msg_id != cb.message.message_id:
-                await bot.delete_message(cb.message.chat.id, last_oc_msg_id)  # 💬 удаляем сохранённый offer_continue
-        except TelegramBadRequest:
-            pass
-
-        try:
-            await cb.message.delete()  # 💬 удаляем то сообщение, по кнопке которого кликнули
-        except TelegramBadRequest:
-            pass
-
-        await state.update_data(last_oc_msg_id=None)  # 💬 чистим, чтобы не пытаться удалить повторно
 
 
         # 💬 перед выходом (Домой/Продолжить) фиксируем прогресс фазы,
