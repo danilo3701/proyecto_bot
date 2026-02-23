@@ -10129,7 +10129,8 @@ async def handle_review_failed_vocab(poll_answer: PollAnswer, state: FSMContext)
     # 1) Отфильтровываем чужие poll’ы
     if poll_answer.poll_id != data.get("current_poll_id"):
         return
-    # 2) Сразу сбрасываем текущий poll_id и стрик тайм-аутов: между тайм-аутами был реальный ответ
+    # 2) Сразу сбрасываем текущий poll_id, чтобы таймаут не сел
+    # 💬 любой реальный ответ = обнуляем streak тайм-аутов (не считаем "подряд" через ответы)
     await state.update_data(current_poll_id=None, vocab_timeout_streak=0)
 
     # 3) Достаём индекс и блок
@@ -10263,12 +10264,11 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
         return
 
     data = await state.get_data()
-
     if data.get("current_poll_id") != poll_id:
         return  # 💬 квиз уже обработан или это не текущий poll
 
     streak = int(data.get("vocab_timeout_streak", 0) or 0) + 1
-    await state.update_data(vocab_timeout_streak=streak)  # 💬 считаем серию только для актуального poll (строго подряд)
+    await state.update_data(vocab_timeout_streak=streak)  # 💬 считаем только РЕАЛЬНЫЕ подряд тайм-ауты текущего poll
 
     poll_msg_id = data.get("current_poll_message_id")
 
@@ -10290,8 +10290,8 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
             pass
 
 
-    # 💬 сброс poll_id, чтобы не словить двойную обработку
-    await state.update_data(current_poll_id=None)
+    # 💬 сброс poll_id/message_id, чтобы не словить двойную обработку
+    await state.update_data(current_poll_id=None, current_poll_message_id=None)
 
     # 💬 короткий сигнал пользователю
     asyncio.create_task(
@@ -10336,14 +10336,12 @@ async def _vocab_quiz_timeout_handler(poll_id: str, chat_id: int, state: FSMCont
 
     data = await state.get_data()
     try:
-        pmid = data.get("current_poll_message_id")
-        if pmid:
-            await bot.delete_message(chat_id, pmid)
+        if poll_msg_id:
+            await bot.delete_message(chat_id, poll_msg_id)
             await _delete_vocab_quiz_progress_message(chat_id, state)  # 💬 удаляем прогресс вместе с poll по таймауту
-
     except Exception:
         pass
-
+        
     # 💬 прогресс обновится перед следующим квизом, здесь уже удалили его вместе с poll
 
 
