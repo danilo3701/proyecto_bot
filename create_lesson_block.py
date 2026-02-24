@@ -472,9 +472,15 @@ def get_edit_menu():
 
 @router.message(Command("addtopic"))
 async def start_adding_topic(message: Message, state: FSMContext):
-    await state.clear()
-    await state.update_data(**{ADMIN_TOPIC_FLOW_KEY: True})
-    keyboard = ReplyKeyboardMarkup(
+    try:
+        logging.info(
+            "[addtopic.lex.debug] start_adding_topic user_id=%s prev_state=%s",
+            getattr(getattr(message, "from_user", None), "id", None),
+            await state.get_state(),
+        )
+        await state.clear()
+        await state.update_data(**{ADMIN_TOPIC_FLOW_KEY: True})
+        keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📚 Лексика")],
             [KeyboardButton(text="ADD"), KeyboardButton(text="CHANALS")],
@@ -483,16 +489,29 @@ async def start_adding_topic(message: Message, state: FSMContext):
         resize_keyboard=True
     )
 
-
-
-    await message.answer("📂 Выбери КАТЕГОРИЮ темы:", reply_markup=keyboard)
-    await state.set_state(NewTopicStates.waiting_category)
+        await message.answer("📂 Выбери КАТЕГОРИЮ темы:", reply_markup=keyboard)
+        await state.set_state(NewTopicStates.waiting_category)
+    except Exception as e:
+        logging.exception("[addtopic.lex.debug] start_adding_topic exception: %s", e)
+        raise
 
 # === Шаг 1: выбор категории ===
 
 @router.message(NewTopicStates.waiting_category)
 async def get_category_or_ads(message: Message, state: FSMContext):
-    text = message.text.strip()
+    text = (message.text or "").strip()
+
+    try:
+        st_debug = await state.get_data()
+        logging.info(
+            "[addtopic.lex.debug] category_handler_enter user_id=%s text=%r state=%s state_keys=%s",
+            getattr(getattr(message, "from_user", None), "id", None),
+            message.text,
+            await state.get_state(),
+            sorted(list((st_debug or {}).keys())),
+        )
+    except Exception as e:
+        logging.exception("[addtopic.lex.debug] failed to log category_handler_enter: %s", e)
 
     st = await state.get_data()
     if text == "⬅️ Назад" and st.get(ADMIN_EDIT_MODE_KEY):
@@ -568,6 +587,15 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 @router.message(StateFilter("*"), F.text.in_(["📚 Лексика", "Лексика", "⬅️ Назад", "Назад"]))
 async def _admin_editmode_category_fallback(message: Message, state: FSMContext):
     st = await state.get_data()
+    logging.info(
+        "[addtopic.lex.debug] category_fallback_hit user_id=%s text=%r state=%s admin_edit_mode=%s admin_topic_flow=%s state_keys=%s",
+        getattr(getattr(message, "from_user", None), "id", None),
+        message.text,
+        await state.get_state(),
+        bool(st.get(ADMIN_EDIT_MODE_KEY)),
+        bool(st.get(ADMIN_TOPIC_FLOW_KEY)),
+        sorted(list((st or {}).keys())),
+    )
     if not (st.get(ADMIN_EDIT_MODE_KEY) or st.get(ADMIN_TOPIC_FLOW_KEY)):
         return
 
@@ -580,7 +608,11 @@ async def _admin_editmode_category_fallback(message: Message, state: FSMContext)
 
 
     await state.set_state(NewTopicStates.waiting_category)  # 💬 чинит “залипший” state, чтобы кнопки снова ловились
-    return await get_category_or_ads(message, state)
+    try:
+        return await get_category_or_ads(message, state)
+    except Exception as e:
+        logging.exception("[addtopic.lex.debug] category_fallback delegation exception: %s", e)
+        raise
 
 
 @router.callback_query(F.data == "adm:close")
