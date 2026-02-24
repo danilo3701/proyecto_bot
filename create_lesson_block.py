@@ -122,6 +122,15 @@ def _ikb(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
         keyboard.append([InlineKeyboardButton(text=t, callback_data=cb) for t, cb in row])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+
+def _admin_topic_card_kb(tid: str) -> InlineKeyboardMarkup:
+    # 💬 единая клавиатура карточки темы (без home/close)
+    return _ikb([
+        [("👁 Просмотр", "adm:topic_preview"), ("✏️ Редактировать", "adm:topic_edit")],
+        [("🗑 Удалить тему", f"adm:topic_del:{tid}")],
+        [("⬅️ К списку тем", "adm:topics")],
+    ])
+
 async def _inline_replace(cb: CallbackQuery, state: FSMContext, text: str, kb: InlineKeyboardMarkup):
     # 💬 редактируем текущее сообщение, чтобы не плодить новые
     try:
@@ -735,13 +744,7 @@ async def admin_open_topic(cb: CallbackQuery, state: FSMContext):
     title = str(topic_data.get("visible_title") or topic_data.get("title") or topic_data.get("name") or tid).strip()  # 💬 заголовок темы как в grammar_feature
 
     
-    kb = _ikb([
-        [("👁 Просмотр", "adm:topic_preview"), ("✏️ Редактировать", "adm:topic_edit")],
-        [("🗑 Удалить тему", f"adm:topic_del:{tid}")],
-        [("⬅️ К списку тем", "adm:topics")],
-        [("🏠 В меню /addtopic", "adm:home")],  # 💬 выход из админки
-        [("⬅️ Закрыть", "adm:close")],          # 💬 закрыть inline
-    ])
+    kb = _admin_topic_card_kb(tid)
 
 
     await _inline_replace(cb, state, f"✅ Открыта тема: <b>{title}</b>\nЧто сделать?", kb)
@@ -760,13 +763,7 @@ async def admin_topic_card(cb: CallbackQuery, state: FSMContext):
 
     title = str(topic_data.get("visible_title") or topic_data.get("name") or tid).strip()
 
-    kb = _ikb([
-        [("👁 Просмотр", "adm:topic_preview"), ("✏️ Редактировать", "adm:topic_edit")],
-        [("🗑 Удалить тему", f"adm:topic_del:{tid}")],
-        [("⬅️ К списку тем", "adm:topics")],
-        [("🏠 В меню /addtopic", "adm:home")],
-        [("⬅️ Закрыть", "adm:close")],
-    ])
+    kb = _admin_topic_card_kb(tid)
 
     await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "topic_card"})
     await _inline_replace(
@@ -1429,13 +1426,7 @@ async def _admin_show_topic_card(cb: CallbackQuery, state: FSMContext):
         await cb.answer("Нет открытой темы", show_alert=True)
         return
     title = topic.get("visible_title") or topic.get("name") or "тема"
-    kb = _ikb([
-        [("👁 Просмотр", "adm:topic_preview"), ("✏️ Редактировать", "adm:topic_edit")],
-        [("🗑 Удалить тему", f"adm:topic_del:{tid}")],
-        [("⬅️ К списку тем", "adm:topics")],
-        [("🏠 В меню /addtopic", "adm:home")],
-        [("⬅️ Закрыть", "adm:close")],
-    ])
+    kb = _admin_topic_card_kb(tid)
     await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "topic_card"})
     await _inline_replace(cb, state, f"✅ Открыта тема: <b>{_preview_text(str(title), 80)}</b>\nЧто сделать?", kb)
     await cb.answer()
