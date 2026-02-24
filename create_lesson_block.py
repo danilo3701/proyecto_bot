@@ -495,6 +495,33 @@ async def start_adding_topic(message: Message, state: FSMContext):
         logging.exception("[addtopic.lex.debug] start_adding_topic exception: %s", e)
         raise
 
+
+async def _enter_edit_topics_mode(message: Message, state: FSMContext) -> None:
+    """💬 Общий вход в режим «Редактировать темы» (кнопка и /edittopic)."""
+    await state.clear()
+    await state.update_data(**{ADMIN_EDIT_MODE_KEY: True, ADMIN_TOPIC_FLOW_KEY: True})
+
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📚 Лексика")],
+            [KeyboardButton(text="⬅️ Назад")],
+        ],
+        resize_keyboard=True
+    )
+
+    await message.answer("✏️ Редактирование тем.\nВыбери категорию:", reply_markup=kb)
+    await state.set_state(NewTopicStates.waiting_category)
+
+
+@router.message(Command("edittopic"))
+async def start_edit_topic(message: Message, state: FSMContext):
+    logging.info(
+        "[addtopic.lex.debug] start_edit_topic user_id=%s prev_state=%s",
+        getattr(getattr(message, "from_user", None), "id", None),
+        await state.get_state(),
+    )
+    await _enter_edit_topics_mode(message, state)
+
 # === Шаг 1: выбор категории ===
 
 @router.message(NewTopicStates.waiting_category)
@@ -525,19 +552,7 @@ async def get_category_or_ads(message: Message, state: FSMContext):
             getattr(getattr(message, "from_user", None), "id", None),
             await state.get_state(),
         )
-        await state.clear()
-        await state.update_data(**{ADMIN_EDIT_MODE_KEY: True})
-
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="📚 Лексика")],
-                [KeyboardButton(text="⬅️ Назад")],
-            ],
-            resize_keyboard=True
-        )
-
-        await message.answer("✏️ Редактирование тем.\nВыбери категорию:", reply_markup=kb)  # 💬 шаг 1 фильтра
-        await state.set_state(NewTopicStates.waiting_category)  # 💬 возвращаем state, иначе кнопки категории не ловятся
+        await _enter_edit_topics_mode(message, state)
         return
 
 
@@ -5495,3 +5510,20 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
 
 
 
+
+@router.message(StateFilter("*"))
+async def _topics_router_debug_seen(message: Message, state: FSMContext):
+    """💬 Диагностика: видим все сообщения, дошедшие до topics-router (без ответа в чат)."""
+    try:
+        data = await state.get_data()
+        logging.info(
+            "[topics.router.seen] user_id=%s chat_id=%s text=%r state=%s keys=%s",
+            getattr(getattr(message, "from_user", None), "id", None),
+            getattr(getattr(message, "chat", None), "id", None),
+            message.text,
+            await state.get_state(),
+            sorted(list((data or {}).keys())),
+        )
+    except Exception as e:
+        logging.exception("[topics.router.seen] debug log exception: %s", e)
+    return
