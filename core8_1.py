@@ -204,10 +204,12 @@ try:
     from create_lesson_block import (
         router as legacy_topics_router,  # type: ignore
         start_adding_topic as legacy_start_adding_topic,  # type: ignore
+        start_edit_topic as legacy_start_edit_topic,  # type: ignore
     )
 except Exception as e:
     legacy_topics_router = None
     legacy_start_adding_topic = None
+    legacy_start_edit_topic = None
     logging.exception("legacy_topics_router disabled (import failed): %s", e)
 
 
@@ -4711,6 +4713,16 @@ async def addtopic_entry_fallback(message: Message, state: FSMContext):
         await message.answer("⚠️ /addtopic недоступна: create_lesson_block не импортирован (смотри startup-логи).")
         return
     return await legacy_start_adding_topic(message, state)
+
+
+@dp.message(Command("edittopic"))
+@track_handler
+async def edittopic_entry_fallback(message: Message, state: FSMContext):
+    # 💬 единая точка входа в /edittopic, целевой flow живёт в create_lesson_block
+    if legacy_start_edit_topic is None:
+        await message.answer("⚠️ /edittopic недоступна: create_lesson_block не импортирован (смотри startup-логи).")
+        return
+    return await legacy_start_edit_topic(message, state)
 
 
 @dp.message(Command("menu"))
