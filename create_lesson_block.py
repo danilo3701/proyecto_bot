@@ -5495,3 +5495,20 @@ async def delete_ad_by_index(message: Message, state: FSMContext):
 
 
 
+
+@router.message(StateFilter("*"))
+async def _topics_router_debug_seen(message: Message, state: FSMContext):
+    """💬 Диагностика: видим все сообщения, дошедшие до topics-router (без ответа в чат)."""
+    try:
+        data = await state.get_data()
+        logging.info(
+            "[topics.router.seen] user_id=%s chat_id=%s text=%r state=%s keys=%s",
+            getattr(getattr(message, "from_user", None), "id", None),
+            getattr(getattr(message, "chat", None), "id", None),
+            message.text,
+            await state.get_state(),
+            sorted(list((data or {}).keys())),
+        )
+    except Exception as e:
+        logging.exception("[topics.router.seen] debug log exception: %s", e)
+    return
