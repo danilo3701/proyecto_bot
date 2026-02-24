@@ -395,6 +395,10 @@ else:
     print(f"⚠️ {msg}", flush=True)
     logging.warning("%s | reason=%s", msg, reason)
 
+logging.info(
+    "router include order: grammar_router -> battle_router -> bonuses_router -> referral_router -> podcasts_router -> legacy_topics_router(if enabled)"
+)
+
 # ——— Загружаем уроки (ТОЛЬКО /data/topics) ———————————————————————
 topics = load_topics_from_volume()  # 💬 стартовая загрузка тем из Railway Volume
 
@@ -13703,6 +13707,20 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
 
     # 7) всё прочее — домой
     return await lesson_menu_handler(cb.message, state)
+
+
+@dp.message(StateFilter("*"), F.text.in_(["📚 Лексика", "Лексика", "Учиться"]))
+@track_handler
+async def debug_unhandled_lex_tap(message: Message, state: FSMContext):
+    data = await state.get_data()
+    logging.warning(
+        "[addtopic.lex.debug] handled_by=core8_1:debug_unhandled_lex_tap user_id=%s text=%r state=%s keys=%s | likely no previous handler consumed this text",
+        getattr(getattr(message, "from_user", None), "id", None),
+        message.text,
+        await state.get_state(),
+        sorted(list((data or {}).keys())),
+    )
+    return
 
 
 

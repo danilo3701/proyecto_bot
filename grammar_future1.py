@@ -43,6 +43,10 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types.reaction_type_emoji import ReactionTypeEmoji
 router = Router()
 
+logging.info(
+    "grammar_future1 router loaded: only explicit handlers are registered (no wildcard for '📚 Лексика/Лексика/Учиться')"
+)
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -988,6 +992,13 @@ async def gram_quiz_stop(message: Message, state: FSMContext) -> None:
     Остановка quiz-flow
     """
     data = await state.get_data()
+    logging.info(
+        "[grammar_future1.debug] handled_by=grammar_future1:gram_quiz_stop user_id=%s text=%r state=%s keys=%s",
+        getattr(getattr(message, "from_user", None), "id", None),
+        message.text,
+        await state.get_state(),
+        sorted(list((data or {}).keys())),
+    )
     if not data.get("gram_in_quiz"):
         return
     
