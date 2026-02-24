@@ -597,12 +597,6 @@ async def _admin_editmode_category_fallback(message: Message, state: FSMContext)
         sorted(list((st or {}).keys())),
     )
     if not (st.get(ADMIN_EDIT_MODE_KEY) or st.get(ADMIN_TOPIC_FLOW_KEY)):
-        logging.warning(
-            "[addtopic.lex.debug] category_fallback_ignored_out_of_flow user_id=%s text=%r state=%s",
-            getattr(getattr(message, "from_user", None), "id", None),
-            message.text,
-            await state.get_state(),
-        )
         return
 
     cur = await state.get_state()
