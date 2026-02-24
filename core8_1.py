@@ -13709,6 +13709,27 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
     return await lesson_menu_handler(cb.message, state)
 
 
+@dp.message(StateFilter("*"), F.text.in_(["📚 Лексика", "Лексика", "Учиться"]))
+@track_handler
+async def debug_unhandled_lex_tap(message: Message, state: FSMContext):
+    data = await state.get_data()
+    logging.warning(
+        "[addtopic.lex.debug] handled_by=core8_1:debug_unhandled_lex_tap user_id=%s text=%r state=%s keys=%s | likely no previous handler consumed this text",
+        getattr(getattr(message, "from_user", None), "id", None),
+        message.text,
+        await state.get_state(),
+        sorted(list((data or {}).keys())),
+    )
+    return
+
+
+
+
+
+
+
+
+
 #================================================================================
 #   🚀 Запуск бота
 # ================================================================================
