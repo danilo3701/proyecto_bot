@@ -96,6 +96,7 @@ ADMIN_INLINE_MSG_ID_KEY = "admin_inline_msg_id"  # 💬 где хранится 
 ADMIN_TOPIC_MAP_KEY = "admin_topic_map"          # 💬 tid -> filename stem для callback
 
 ADMIN_EDIT_MODE_KEY = "admin_edit_mode"            # 💬 режим фильтрованного редактирования
+ADMIN_TOPIC_FLOW_KEY = "admin_topic_flow"          # 💬 маркер сценария /addtopic для fallback
 ADMIN_EDIT_CATEGORY_KEY = "admin_edit_category"    # 💬 выбранная категория (lex/gram)
 ADMIN_EDIT_LEVEL_KEY = "admin_edit_level"          # 💬 выбранный уровень (A0/A1-A2/B1-B2/C1)
 
@@ -471,7 +472,9 @@ def get_edit_menu():
 
 @router.message(Command("addtopic"))
 async def start_adding_topic(message: Message, state: FSMContext):
+    logging.info("[addtopic_diag] start_adding_topic user_id=%s prev_state=%s text=%r", getattr(message.from_user, "id", None), await state.get_state(), getattr(message, "text", None))
     await state.clear()
+    await state.update_data(**{ADMIN_TOPIC_FLOW_KEY: True})
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📚 Лексика")],
@@ -490,9 +493,10 @@ async def start_adding_topic(message: Message, state: FSMContext):
 
 @router.message(NewTopicStates.waiting_category)
 async def get_category_or_ads(message: Message, state: FSMContext):
-    text = message.text.strip()
+    text = (message.text or "").strip()
 
     st = await state.get_data()
+    logging.info("[addtopic_diag] get_category_or_ads user_id=%s text=%r state=%s data_keys=%s admin_edit=%s topic_flow=%s", getattr(message.from_user, "id", None), text, await state.get_state(), sorted(list(st.keys())), bool(st.get(ADMIN_EDIT_MODE_KEY)), bool(st.get(ADMIN_TOPIC_FLOW_KEY)))
     if text == "⬅️ Назад" and st.get(ADMIN_EDIT_MODE_KEY):
         return await start_adding_topic(message, state)  # 💬 выход из режима редактирования
 
@@ -566,10 +570,12 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 @router.message(StateFilter("*"), F.text.in_(["📚 Лексика", "Лексика", "⬅️ Назад", "Назад"]))
 async def _admin_editmode_category_fallback(message: Message, state: FSMContext):
     st = await state.get_data()
-    if not st.get(ADMIN_EDIT_MODE_KEY):
+    cur = await state.get_state()
+    logging.info("[addtopic_diag] category_fallback user_id=%s text=%r state=%s data_keys=%s admin_edit=%s topic_flow=%s", getattr(message.from_user, "id", None), getattr(message, "text", None), cur, sorted(list(st.keys())), bool(st.get(ADMIN_EDIT_MODE_KEY)), bool(st.get(ADMIN_TOPIC_FLOW_KEY)))
+    if not (st.get(ADMIN_EDIT_MODE_KEY) or st.get(ADMIN_TOPIC_FLOW_KEY)):
+        logging.info("[addtopic_diag] category_fallback skipped: no admin/topic marker")
         return
 
-    cur = await state.get_state()
     if cur in {
         NewTopicStates.waiting_category.state,
         NewTopicStates.adding_category.state
@@ -578,6 +584,7 @@ async def _admin_editmode_category_fallback(message: Message, state: FSMContext)
 
 
     await state.set_state(NewTopicStates.waiting_category)  # 💬 чинит “залипший” state, чтобы кнопки снова ловились
+    logging.info("[addtopic_diag] category_fallback forced_state=waiting_category")
     return await get_category_or_ads(message, state)
 
 
@@ -593,6 +600,7 @@ async def adm_close(cb: CallbackQuery, state: FSMContext):
     await state.update_data(
         **{
             ADMIN_EDIT_MODE_KEY: False,
+            ADMIN_TOPIC_FLOW_KEY: False,
             ADMIN_INLINE_MSG_ID_KEY: None,
             ADMIN_EDIT_CATEGORY_KEY: None,
             ADMIN_EDIT_LEVEL_KEY: None,
@@ -608,6 +616,7 @@ async def admin_home(cb: CallbackQuery, state: FSMContext):
     except Exception:
         pass
     await cb.answer()
+    await state.update_data(**{ADMIN_TOPIC_FLOW_KEY: False})
     return await start_adding_topic(cb.message, state)
 
 
@@ -1954,7 +1963,7 @@ def _preview_item(item: dict) -> str:
 # === Главное меню: обработка выбора блока или просмотр/сохранение ===
 @router.message(NewTopicStates.waiting_first_choice)
 async def handle_main_menu(message: Message, state: FSMContext):
-    text = message.text.strip()
+    text = (message.text or "").strip()
     data = await state.get_data()
     topic_path = data.get("topic_path")  # 💬 вытаскиваем путь темы заранее, чтобы не ловить UnboundLocalError
 
@@ -3021,7 +3030,7 @@ async def create_phase(message: Message, state: FSMContext):
 
 @router.message(NewTopicStates.waiting_phase_choice)
 async def choose_phase(message: Message, state: FSMContext):
-    text = message.text.strip()
+    text = (message.text or "").strip()
     # — Создать новую фазу
     if text == "➕ Новая фаза":
         new_phase = await _create_vocab_phase_auto(state)  # 💬 создаём пак автоматически
@@ -3563,7 +3572,7 @@ async def get_vocab_link(message: Message, state: FSMContext):
 # 3) Пост-блоковое меню для всех блоков (часть 1)
 @router.message(NewTopicStates.waiting_post_action)
 async def handle_post_action(message: Message, state: FSMContext):
-    text = message.text.strip()
+    text = (message.text or "").strip()
     data = await state.get_data()
     last_block = data.get("last_block")
 
@@ -3823,7 +3832,7 @@ async def get_ex_link(message: Message, state: FSMContext):
 # ——— Добавить текст ———
 @router.message(NewTopicStates.waiting_ex_text)
 async def save_ex_text(message: Message, state: FSMContext):
-    text = message.text.strip()
+    text = (message.text or "").strip()
     data = await state.get_data()
     topic = data["topic"]
     ex_list = topic.setdefault("exercises", [])
@@ -3843,7 +3852,7 @@ async def save_ex_text(message: Message, state: FSMContext):
 
 @router.message(NewTopicStates.waiting_ex_photo_text, F.text)
 async def handle_ex_photo_text(message: Message, state: FSMContext):
-    text = message.text.strip()
+    text = (message.text or "").strip()
     if text == '-':
         await state.update_data(ex_photo_caption=None)
     else:

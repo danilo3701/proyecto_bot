@@ -200,6 +200,7 @@ from aiogram.fsm.storage.memory import MemoryStorage    # Хранение FSM �
 
 # ——— Роутеры админки ————————————————————————————————————————————
 # 💬 legacy-админка тем (НЕ грамматика). Может быть сломана/невалидна — не роняем весь бот на импорте.
+legacy_topics_router_import_error = None
 try:
     from create_lesson_block import (
         router as legacy_topics_router,  # type: ignore
@@ -208,6 +209,7 @@ try:
 except Exception as e:
     legacy_topics_router = None
     legacy_start_adding_topic = None
+    legacy_topics_router_import_error = repr(e)
     logging.exception("legacy_topics_router disabled (import failed): %s", e)
 
 
@@ -383,11 +385,10 @@ dp.include_router(podcasts_router)  # 💬 подключаем модуль "П
 if legacy_topics_router is not None:
     dp.include_router(legacy_topics_router)
     msg = "legacy_topics_router enabled: /addtopic handlers are registered"
-    print(f"ℹ️ {msg}", flush=True)
     logging.info(msg)
 else:
-    msg = "legacy_topics_router disabled: /addtopic handlers are NOT registered"
-    print(f"⚠️ {msg}", flush=True)
+    reason = legacy_topics_router_import_error or "unknown"
+    msg = f"legacy_topics_router disabled: /addtopic handlers are NOT registered; reason={reason}"
     logging.warning(msg)
 
 # ——— Загружаем уроки (ТОЛЬКО /data/topics) ———————————————————————
