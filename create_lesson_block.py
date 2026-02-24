@@ -778,26 +778,121 @@ async def admin_topic_card(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.callback_query(F.data == "adm:topic_preview")
-async def admin_topic_preview(cb: CallbackQuery, state: FSMContext):
-    # 💬 показываем предпросмотр темы прямо в inline карточке
+async def _admin_show_topic_view_menu(cb: CallbackQuery, state: FSMContext, tid: str):
     topic_data, _ = await _admin_load_topic_from_disk(state)
     if not topic_data:
         await cb.answer("Тема не загружена", show_alert=True)
         return
 
+    title = str(topic_data.get("visible_title") or topic_data.get("name") or tid).strip()
     text_preview = _admin_render_preview_text(topic_data)
 
     kb = _ikb([
-        [("⬅️ Назад", "adm:topic_card"), ("✏️ Редактировать", "adm:topic_edit")],
+        [("📘 Словарь", f"adm:topic_view:vocab:{tid}")],
+        [("🎥 Видео", f"adm:topic_view:videos:{tid}")],
+        [("📖 Читать", f"adm:topic_view:read:{tid}")],
         [("⬅️ К списку тем", "adm:topics")],
+        [("⬅️ К карточке темы", "adm:topic_card")],
         [("🏠 В меню /addtopic", "adm:home")],
         [("⬅️ Закрыть", "adm:close")],
     ])
 
-    await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "topic_preview"})
-    await _inline_replace(cb, state, text_preview, kb)
+    await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "topic_view_menu"})
+    await _inline_replace(
+        cb,
+        state,
+        f"👁 <b>Просмотр темы: {_preview_text(title, 80)}</b>\n\n{text_preview}",
+        kb,
+    )
     await cb.answer()
+
+
+@router.callback_query(F.data == "adm:topic_preview")
+async def admin_topic_preview(cb: CallbackQuery, state: FSMContext):
+    # 💬 вместо summary-экрана открываем меню просмотра темы
+    st = await state.get_data()
+    tid = st.get(ADMIN_CURRENT_TID_KEY) or ""
+    if not tid:
+        await cb.answer("Тема не выбрана", show_alert=True)
+        return
+
+    await _admin_show_topic_view_menu(cb, state, tid)
+
+
+@router.callback_query(F.data.startswith("adm:topic_view:menu:"))
+async def admin_topic_view_menu(cb: CallbackQuery, state: FSMContext):
+    tid = (cb.data or "").split("adm:topic_view:menu:", 1)[1].strip()
+    await _admin_show_topic_view_menu(cb, state, tid)
+
+
+@router.callback_query(F.data.startswith("adm:topic_view:vocab:"))
+async def admin_topic_view_vocab(cb: CallbackQuery, state: FSMContext):
+    topic_data, _ = await _admin_load_topic_from_disk(state)
+    if not topic_data:
+        await cb.answer("Тема не загружена", show_alert=True)
+        return
+    tid = (cb.data or "").split("adm:topic_view:vocab:", 1)[1].strip()
+
+    kb = _ikb([
+        [("⬅️ Назад", f"adm:topic_view:back:{tid}")],
+        [("🏠 В меню /addtopic", "adm:home")],
+        [("⬅️ Закрыть", "adm:close")],
+    ])
+    await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "topic_view_vocab"})
+    await _inline_replace(cb, state, _admin_render_topic_view_section(topic_data, "vocab"), kb)
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("adm:topic_view:videos:"))
+async def admin_topic_view_videos(cb: CallbackQuery, state: FSMContext):
+    topic_data, _ = await _admin_load_topic_from_disk(state)
+    if not topic_data:
+        await cb.answer("Тема не загружена", show_alert=True)
+        return
+    tid = (cb.data or "").split("adm:topic_view:videos:", 1)[1].strip()
+
+    kb = _ikb([
+        [("⬅️ Назад", f"adm:topic_view:back:{tid}")],
+        [("🏠 В меню /addtopic", "adm:home")],
+        [("⬅️ Закрыть", "adm:close")],
+    ])
+    await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "topic_view_videos"})
+    await _inline_replace(cb, state, _admin_render_topic_view_section(topic_data, "videos"), kb)
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("adm:topic_view:read:"))
+async def admin_topic_view_read(cb: CallbackQuery, state: FSMContext):
+    topic_data, _ = await _admin_load_topic_from_disk(state)
+    if not topic_data:
+        await cb.answer("Тема не загружена", show_alert=True)
+        return
+    tid = (cb.data or "").split("adm:topic_view:read:", 1)[1].strip()
+
+    kb = _ikb([
+        [("⬅️ Назад", f"adm:topic_view:back:{tid}")],
+        [("🏠 В меню /addtopic", "adm:home")],
+        [("⬅️ Закрыть", "adm:close")],
+    ])
+    await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "topic_view_read"})
+    await _inline_replace(cb, state, _admin_render_topic_view_section(topic_data, "read"), kb)
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("adm:topic_view:back:"))
+async def admin_topic_view_back(cb: CallbackQuery, state: FSMContext):
+    tid = (cb.data or "").split("adm:topic_view:back:", 1)[1].strip()
+    await _admin_show_topic_view_menu(cb, state, tid)
+
+
+@router.callback_query(F.data == "adm:topic_view:back")
+async def admin_topic_view_back_plain(cb: CallbackQuery, state: FSMContext):
+    st = await state.get_data()
+    tid = st.get(ADMIN_CURRENT_TID_KEY) or ""
+    if not tid:
+        await cb.answer("Тема не выбрана", show_alert=True)
+        return
+    await _admin_show_topic_view_menu(cb, state, tid)
 
 
 @router.callback_query(F.data == "adm:topic_edit")
@@ -1463,6 +1558,66 @@ def _admin_render_preview_text(topic_data: dict) -> str:
     return "\n".join(lines)
 
 
+
+
+def _admin_render_topic_view_section(topic_data: dict, section: str) -> str:
+    # 💬 текст для экранов просмотра разделов темы
+    title = topic_data.get("visible_title") or topic_data.get("name") or "тема"
+
+    if section == "vocab":
+        phases = topic_data.get("vocab") or []
+        lines = [
+            f"📘 <b>Словарь: {_preview_text(str(title), 80)}</b>",
+            f"Фаз: <b>{len(phases)}</b>",
+            "",
+        ]
+        if not phases:
+            lines.append("Пока пусто.")
+            return "\n".join(lines)
+
+        for idx, phase in enumerate(phases, start=1):
+            phase_name = _preview_text(str((phase or {}).get("phase_name") or f"Фаза {idx}"), 60)
+            vocab_count = len((phase or {}).get("vocab") or [])
+            blocks_count = len((phase or {}).get("blocks") or [])
+            lines.append(f"{idx}. <b>{phase_name}</b> — vocab: {vocab_count}, blocks: {blocks_count}")
+        return "\n".join(lines)
+
+    if section == "videos":
+        videos = topic_data.get("videos") or []
+        lines = [
+            f"🎥 <b>Видео: {_preview_text(str(title), 80)}</b>",
+            f"Ссылок: <b>{len(videos)}</b>",
+            "",
+        ]
+        if not videos:
+            lines.append("Пока пусто.")
+            return "\n".join(lines)
+
+        for idx, video in enumerate(videos, start=1):
+            if isinstance(video, dict):
+                v_title = _preview_text(str(video.get("title") or f"Видео {idx}"), 60)
+                v_link = _preview_text(str(video.get("url") or video.get("link") or "—"), 70)
+                lines.append(f"{idx}. <b>{v_title}</b>\n   🔗 {v_link}")
+            else:
+                lines.append(f"{idx}. {_preview_text(str(video), 70)}")
+        return "\n".join(lines)
+
+    reading = topic_data.get("reading") or []
+    lines = [
+        f"📖 <b>Читать: {_preview_text(str(title), 80)}</b>",
+        f"Паков: <b>{len(reading)}</b>",
+        "",
+    ]
+    if not reading:
+        lines.append("Пока пусто.")
+        return "\n".join(lines)
+
+    for idx, pack in enumerate(reading, start=1):
+        pack_title = _preview_text(str((pack or {}).get("title") or f"Пак {idx}"), 60)
+        fragments_count = len((pack or {}).get("fragments") or [])
+        assets_count = len((pack or {}).get("assets") or [])
+        lines.append(f"{idx}. <b>{pack_title}</b> — фрагменты: {fragments_count}, медиа: {assets_count}")
+    return "\n".join(lines)
 async def _admin_show_sections(cb: CallbackQuery, state: FSMContext):
     # 💬 меню выбора раздела
     topic, _ = await _admin_load_topic_from_disk(state)
