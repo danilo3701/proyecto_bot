@@ -789,6 +789,8 @@ async def admin_topic_preview(cb: CallbackQuery, state: FSMContext):
     text_preview = _admin_render_preview_text(topic_data)
 
     kb = _ikb([
+        [("📚 Словарь", "adm:topic_view:vocab"), ("🎥 Видео", "adm:topic_view:videos")],
+        [("📖 Читать", "adm:topic_view:read")],
         [("⬅️ Назад", "adm:topic_card"), ("✏️ Редактировать", "adm:topic_edit")],
         [("⬅️ К списку тем", "adm:topics")],
         [("🏠 В меню /addtopic", "adm:home")],
@@ -798,6 +800,130 @@ async def admin_topic_preview(cb: CallbackQuery, state: FSMContext):
     await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "topic_preview"})
     await _inline_replace(cb, state, text_preview, kb)
     await cb.answer()
+
+
+def _adm_reading_items(topic_data: dict) -> list:
+    # 💬 поддерживаем разные схемы: reading/list, reading_packs/list, одиночный reading-dict
+    reading_raw = topic_data.get("reading")
+    if isinstance(reading_raw, list):
+        return reading_raw
+    if isinstance(reading_raw, dict):
+        return [reading_raw]
+
+    packs = topic_data.get("reading_packs")
+    if isinstance(packs, list):
+        return packs
+    if isinstance(packs, dict):
+        return [packs]
+    return []
+
+
+def _adm_reading_pack_to_lines(pack, idx: int) -> list[str]:
+    if isinstance(pack, str):
+        val = pack.strip()
+        return [f"Reading {idx}:", val if val else "пока нет"]
+
+    if not isinstance(pack, dict):
+        return [f"Reading {idx}:", "пока нет"]
+
+    title = str(pack.get("title") or pack.get("name") or f"Reading {idx}").strip()
+    lines = [f"Название: {title}"]
+
+    txt = str(pack.get("text") or "").strip()
+    if txt:
+        lines.append(txt)
+
+    fragments = pack.get("fragments")
+    if isinstance(fragments, list):
+        for frag in fragments:
+            frag_txt = str(frag).strip()
+            if frag_txt:
+                lines.append(frag_txt)
+    elif isinstance(fragments, str) and fragments.strip():
+        lines.append(fragments.strip())
+
+    if len(lines) == 1:
+        lines.append("пока нет")
+    return lines
+
+
+async def _adm_topic_view_render(cb: CallbackQuery, state: FSMContext, heading: str, body_lines: list[str]):
+    text = f"{heading}\n```\n" + "\n".join(body_lines or ["пока нет"]) + "\n```"
+    kb = _ikb([
+        [("⬅️ Назад к просмотру", "adm:topic_preview")],
+        [("⬅️ К карточке темы", "adm:topic_card"), ("⬅️ Закрыть", "adm:close")],
+    ])
+    try:
+        await cb.message.edit_text(text, reply_markup=kb, disable_web_page_preview=True)
+    except TelegramBadRequest:
+        try:
+            await cb.message.edit_reply_markup(reply_markup=kb)
+        except Exception:
+            pass
+    await cb.answer()
+
+
+@router.callback_query(F.data == "adm:topic_view:vocab")
+async def admin_topic_view_vocab(cb: CallbackQuery, state: FSMContext):
+    topic_data, _ = await _admin_load_topic_from_disk(state)
+    phases = topic_data.get("vocab") if isinstance(topic_data, dict) else []
+    body = []
+
+    if isinstance(phases, list):
+        for p_idx, ph in enumerate(phases, start=1):
+            if isinstance(ph, dict):
+                items = ph.get("vocab") or ph.get("phrases") or []
+                if not isinstance(items, list):
+                    items = [items]
+            else:
+                items = [ph]
+
+            rendered_items = [str(x).strip() for x in items if str(x).strip()]
+            line = "; ".join(rendered_items) if rendered_items else "пока нет"
+            body.append(f"Phase {p_idx}: {line}")
+
+    if not body:
+        body = ["пока нет"]
+
+    await _adm_topic_view_render(cb, state, "📚 Словарь", body)
+
+
+@router.callback_query(F.data == "adm:topic_view:videos")
+async def admin_topic_view_videos(cb: CallbackQuery, state: FSMContext):
+    topic_data, _ = await _admin_load_topic_from_disk(state)
+    videos = topic_data.get("videos") if isinstance(topic_data, dict) else []
+    body = []
+
+    if isinstance(videos, list):
+        for video in videos:
+            if isinstance(video, dict):
+                link = str(video.get("link") or video.get("url") or "").strip()
+                if link:
+                    body.append(link)
+            else:
+                txt = str(video).strip()
+                if txt:
+                    body.append(txt)
+
+    if not body:
+        body = ["пока нет"]
+
+    await _adm_topic_view_render(cb, state, "🎥 Видео", body)
+
+
+@router.callback_query(F.data == "adm:topic_view:read")
+async def admin_topic_view_read(cb: CallbackQuery, state: FSMContext):
+    topic_data, _ = await _admin_load_topic_from_disk(state)
+    body = []
+    for idx, pack in enumerate(_adm_reading_items(topic_data if isinstance(topic_data, dict) else {}), start=1):
+        if body:
+            body.append("")
+        body.extend(_adm_reading_pack_to_lines(pack, idx))
+
+    if not body:
+        body = ["пока нет"]
+
+    await _adm_topic_view_render(cb, state, "📖 Читать", body)
 
 
 @router.callback_query(F.data == "adm:topic_edit")
