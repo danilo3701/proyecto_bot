@@ -375,16 +375,8 @@ if not getattr(bot, "_bcid_fix_installed", False):
 
 
 # ——— Подключаем админские роутеры ————————————————————————————————
-dp.include_router(grammar_router)   # 💬 подключаем НОВУЮ грамматику (чтобы /grammar_admin и callbacks не были unhandled)
-logging.info("router include: grammar_router")
-
-dp.include_router(battle_router)    # 💬 подключаем хендлеры "Битвы"
-dp.include_router(bonuses_router)   # 💬 подключаем хендлеры «Бонусы»
-dp.include_router(referral_router)
-dp.include_router(podcasts_router)  # 💬 подключаем модуль "Подкасты"
-
-
-# 💬 legacy-админка тем подключается только если импорт успешен (иначе бот не должен падать)
+# 💬 ВАЖНО: legacy_topics_router ставим ПЕРВЫМ, чтобы его FSM-хендлеры /addtopic-/edittopic
+# 💬 не перехватывались другими модулями при одинаково широких фильтрах.
 if legacy_topics_router is not None:
     dp.include_router(legacy_topics_router)
     msg = "legacy_topics_router enabled: /addtopic handlers are registered"
@@ -397,10 +389,18 @@ else:
     print(f"⚠️ {msg}", flush=True)
     logging.warning("%s | reason=%s", msg, reason)
 
+dp.include_router(grammar_router)   # 💬 подключаем НОВУЮ грамматику (чтобы /grammar_admin и callbacks не были unhandled)
+logging.info("router include: grammar_router")
+
+dp.include_router(battle_router)    # 💬 подключаем хендлеры "Битвы"
+dp.include_router(bonuses_router)   # 💬 подключаем хендлеры «Бонусы»
+dp.include_router(referral_router)
+dp.include_router(podcasts_router)  # 💬 подключаем модуль "Подкасты"
+
 logging.info(
-    "router include order: grammar_router -> battle_router -> bonuses_router -> referral_router -> podcasts_router -> legacy_topics_router(if enabled)"
+    "router include order: legacy_topics_router(if enabled) -> grammar_router -> battle_router -> bonuses_router -> referral_router -> podcasts_router"
 )
-logging.info("router include order (focus): grammar_router -> legacy_topics_router")
+logging.info("router include order (focus): legacy_topics_router -> grammar_router")
 
 # ——— Загружаем уроки (ТОЛЬКО /data/topics) ———————————————————————
 topics = load_topics_from_volume()  # 💬 стартовая загрузка тем из Railway Volume
@@ -4719,6 +4719,11 @@ async def addtopic_entry_fallback(message: Message, state: FSMContext):
 @track_handler
 async def edittopic_entry_fallback(message: Message, state: FSMContext):
     # 💬 единая точка входа в /edittopic, целевой flow живёт в create_lesson_block
+    logging.info(
+        "[addtopic.lex.debug] core8_1:edittopic_entry_fallback user_id=%s state=%s",
+        getattr(getattr(message, "from_user", None), "id", None),
+        await state.get_state(),
+    )
     if legacy_start_edit_topic is None:
         await message.answer("⚠️ /edittopic недоступна: create_lesson_block не импортирован (смотри startup-логи).")
         return
