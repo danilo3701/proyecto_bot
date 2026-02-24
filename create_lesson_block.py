@@ -96,6 +96,7 @@ ADMIN_INLINE_MSG_ID_KEY = "admin_inline_msg_id"  # 💬 где хранится 
 ADMIN_TOPIC_MAP_KEY = "admin_topic_map"          # 💬 tid -> filename stem для callback
 
 ADMIN_EDIT_MODE_KEY = "admin_edit_mode"            # 💬 режим фильтрованного редактирования
+ADMIN_TOPIC_FLOW_KEY = "admin_topic_flow"          # 💬 маркер сценария /addtopic для fallback
 ADMIN_EDIT_CATEGORY_KEY = "admin_edit_category"    # 💬 выбранная категория (lex/gram)
 ADMIN_EDIT_LEVEL_KEY = "admin_edit_level"          # 💬 выбранный уровень (A0/A1-A2/B1-B2/C1)
 
@@ -472,6 +473,7 @@ def get_edit_menu():
 @router.message(Command("addtopic"))
 async def start_adding_topic(message: Message, state: FSMContext):
     await state.clear()
+    await state.update_data(**{ADMIN_TOPIC_FLOW_KEY: True})
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📚 Лексика")],
@@ -566,7 +568,7 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 @router.message(StateFilter("*"), F.text.in_(["📚 Лексика", "Лексика", "⬅️ Назад", "Назад"]))
 async def _admin_editmode_category_fallback(message: Message, state: FSMContext):
     st = await state.get_data()
-    if not st.get(ADMIN_EDIT_MODE_KEY):
+    if not (st.get(ADMIN_EDIT_MODE_KEY) or st.get(ADMIN_TOPIC_FLOW_KEY)):
         return
 
     cur = await state.get_state()
@@ -593,6 +595,7 @@ async def adm_close(cb: CallbackQuery, state: FSMContext):
     await state.update_data(
         **{
             ADMIN_EDIT_MODE_KEY: False,
+            ADMIN_TOPIC_FLOW_KEY: False,
             ADMIN_INLINE_MSG_ID_KEY: None,
             ADMIN_EDIT_CATEGORY_KEY: None,
             ADMIN_EDIT_LEVEL_KEY: None,
@@ -608,6 +611,7 @@ async def admin_home(cb: CallbackQuery, state: FSMContext):
     except Exception:
         pass
     await cb.answer()
+    await state.update_data(**{ADMIN_TOPIC_FLOW_KEY: False})
     return await start_adding_topic(cb.message, state)
 
 
