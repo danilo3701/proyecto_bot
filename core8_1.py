@@ -509,6 +509,19 @@ class LoggingMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
 
 
+        # 💬 общий входящий лог для всех message updates (до роутинга)
+        try:
+            if isinstance(event, Message):
+                logging.info(
+                    "[in.message] user_id=%s chat_id=%s text=%r",
+                    getattr(getattr(event, "from_user", None), "id", None),
+                    getattr(getattr(event, "chat", None), "id", None),
+                    event.text,
+                )
+        except Exception:
+            logging.exception("LoggingMiddleware: inbound message log failed")
+
+
         # 💬 аналитика: фиксируем активность (first/last/clicks) на каждый апдейт
         try:
             if getattr(event, "from_user", None):
@@ -13707,27 +13720,6 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
 
     # 7) всё прочее — домой
     return await lesson_menu_handler(cb.message, state)
-
-
-@dp.message(StateFilter("*"), F.text.in_(["📚 Лексика", "Лексика", "Учиться"]))
-@track_handler
-async def debug_unhandled_lex_tap(message: Message, state: FSMContext):
-    data = await state.get_data()
-    logging.warning(
-        "[addtopic.lex.debug] handled_by=core8_1:debug_unhandled_lex_tap user_id=%s text=%r state=%s keys=%s | likely no previous handler consumed this text",
-        getattr(getattr(message, "from_user", None), "id", None),
-        message.text,
-        await state.get_state(),
-        sorted(list((data or {}).keys())),
-    )
-    return
-
-
-
-
-
-
-
 
 
 #================================================================================

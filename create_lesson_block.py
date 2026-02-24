@@ -520,6 +520,11 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 
     # 💬 вход в режим редактирования тем = сначала фильтр (категория -> уровень)
     if text == "✏️ Редактировать темы":
+        logging.info(
+            "[addtopic.lex.debug] handled_by=create_lesson_block:get_category_or_ads branch=edit_topics user_id=%s state=%s",
+            getattr(getattr(message, "from_user", None), "id", None),
+            await state.get_state(),
+        )
         await state.clear()
         await state.update_data(**{ADMIN_EDIT_MODE_KEY: True})
 
@@ -538,6 +543,11 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 
 
     if text == "ADD":
+        logging.info(
+            "[addtopic.lex.debug] handled_by=create_lesson_block:get_category_or_ads branch=add_ads user_id=%s state=%s",
+            getattr(getattr(message, "from_user", None), "id", None),
+            await state.get_state(),
+        )
         keyboard = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Добавить рекламу"), KeyboardButton(text="🗑 Удалить по индексу")],
@@ -550,6 +560,11 @@ async def get_category_or_ads(message: Message, state: FSMContext):
 
 
     if text == "CHANALS":
+        logging.info(
+            "[addtopic.lex.debug] handled_by=create_lesson_block:get_category_or_ads branch=channels user_id=%s state=%s",
+            getattr(getattr(message, "from_user", None), "id", None),
+            await state.get_state(),
+        )
         await message.answer(
             "Введи ссылку (https://t.me/username) или имя канала (@username).\n"
             "Если несколько — раздели через запятую."
@@ -562,6 +577,12 @@ async def get_category_or_ads(message: Message, state: FSMContext):
     if not is_lex_pick:
         await message.answer("❗ Выбери одну из кнопок.")
         return
+
+    logging.info(
+        "[addtopic.lex.debug] handled_by=create_lesson_block:get_category_or_ads branch=lex_category user_id=%s state=%s",
+        getattr(getattr(message, "from_user", None), "id", None),
+        await state.get_state(),
+    )
 
     category = "lex"
 
