@@ -273,6 +273,8 @@ from grammar_future1 import (
     admin_entry as grammar_admin_entry
 )
 
+logging.info("grammar router import source: grammar_future1.py")
+
 # ——— Сценарии для учеников ——————————————————————————————————————
 from scenarios_estiloso8_1 import (                     # Вся диалоговая логика “сценариев”
 
@@ -372,6 +374,7 @@ if not getattr(bot, "_bcid_fix_installed", False):
 
 # ——— Подключаем админские роутеры ————————————————————————————————
 dp.include_router(grammar_router)   # 💬 подключаем НОВУЮ грамматику (чтобы /grammar_admin и callbacks не были unhandled)
+logging.info("router include: grammar_router")
 
 dp.include_router(battle_router)    # 💬 подключаем хендлеры "Битвы"
 dp.include_router(bonuses_router)   # 💬 подключаем хендлеры «Бонусы»
@@ -383,12 +386,18 @@ dp.include_router(podcasts_router)  # 💬 подключаем модуль "П
 if legacy_topics_router is not None:
     dp.include_router(legacy_topics_router)
     msg = "legacy_topics_router enabled: /addtopic handlers are registered"
+    reason = "import create_lesson_block succeeded"
     print(f"ℹ️ {msg}", flush=True)
-    logging.info(msg)
+    logging.info("%s | reason=%s", msg, reason)
 else:
     msg = "legacy_topics_router disabled: /addtopic handlers are NOT registered"
+    reason = "import create_lesson_block failed (see logging.exception above)"
     print(f"⚠️ {msg}", flush=True)
-    logging.warning(msg)
+    logging.warning("%s | reason=%s", msg, reason)
+
+logging.info(
+    "router include order: grammar_router -> battle_router -> bonuses_router -> referral_router -> podcasts_router -> legacy_topics_router(if enabled)"
+)
 
 # ——— Загружаем уроки (ТОЛЬКО /data/topics) ———————————————————————
 topics = load_topics_from_volume()  # 💬 стартовая загрузка тем из Railway Volume
@@ -498,6 +507,19 @@ ADMIN_CHAT_ID = 930240763  # ваш Chat ID
 class LoggingMiddleware(BaseMiddleware):
     # 💬 Глобальный перехват голосовых + логирование ошибок для всех апдейтов
     async def __call__(self, handler, event, data):
+
+
+        # 💬 общий входящий лог для всех message updates (до роутинга)
+        try:
+            if isinstance(event, Message):
+                logging.info(
+                    "[in.message] user_id=%s chat_id=%s text=%r",
+                    getattr(getattr(event, "from_user", None), "id", None),
+                    getattr(getattr(event, "chat", None), "id", None),
+                    event.text,
+                )
+        except Exception:
+            logging.exception("LoggingMiddleware: inbound message log failed")
 
 
         # 💬 аналитика: фиксируем активность (first/last/clicks) на каждый апдейт
@@ -13698,13 +13720,6 @@ async def cb_scenario_vocab(cb: CallbackQuery, state: FSMContext):
 
     # 7) всё прочее — домой
     return await lesson_menu_handler(cb.message, state)
-
-
-
-
-
-
-
 
 
 #================================================================================
