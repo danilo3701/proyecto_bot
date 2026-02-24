@@ -398,6 +398,7 @@ else:
 logging.info(
     "router include order: grammar_router -> battle_router -> bonuses_router -> referral_router -> podcasts_router -> legacy_topics_router(if enabled)"
 )
+logging.info("router include order (focus): grammar_router -> legacy_topics_router")
 
 # ——— Загружаем уроки (ТОЛЬКО /data/topics) ———————————————————————
 topics = load_topics_from_volume()  # 💬 стартовая загрузка тем из Railway Volume
