@@ -832,15 +832,14 @@ def _adm_vocab_packs(topic_data: dict) -> list[tuple[str, list[str]]]:
     for idx, pack in enumerate(raw, start=1):
         pack_name = f"Пак {idx}"
         words: list[str] = []
+        items = []
+        blocks = []
 
         if isinstance(pack, dict):
             pack_name = str(pack.get("phase_name") or pack.get("name") or pack_name).strip() or pack_name
             items = pack.get("vocab") or pack.get("phrases") or pack.get("words") or []
             blocks = pack.get("blocks") or []
-        else:
-            items = pack
-            blocks = []
-        else:
+        if not isinstance(pack, dict):
             items = pack
 
         if isinstance(items, dict):
