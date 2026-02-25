@@ -822,44 +822,145 @@ async def admin_topic_view_menu(cb: CallbackQuery, state: FSMContext):
     await _admin_show_topic_view_menu(cb, state, tid)
 
 
+def _adm_vocab_packs(topic_data: dict) -> list[tuple[str, list[str]]]:
+    raw = topic_data.get("vocab") if isinstance(topic_data, dict) else []
+    packs: list[tuple[str, list[str]]] = []
+
+    if not isinstance(raw, list):
+        return packs
+
+    for idx, pack in enumerate(raw, start=1):
+        pack_name = f"Пак {idx}"
+        words: list[str] = []
+
+        if isinstance(pack, dict):
+            pack_name = str(pack.get("phase_name") or pack.get("name") or pack_name).strip() or pack_name
+            items = pack.get("vocab") or pack.get("phrases") or pack.get("words") or []
+            blocks = pack.get("blocks") or []
+        else:
+            items = pack
+            blocks = []
+
+        if isinstance(items, dict):
+            items = [items]
+        if not isinstance(items, list):
+            items = [items]
+
+        for item in items:
+            line = ""
+            if isinstance(item, dict):
+                src = str(item.get("word") or item.get("text") or item.get("phrase") or "").strip()
+                dst = str(item.get("translate") or item.get("translation") or item.get("ru") or item.get("meaning") or "").strip()
+                if src and dst:
+                    line = f"{src} — {dst}"
+                else:
+                    line = src or dst
+            else:
+                line = str(item).strip()
+
+            if line:
+                words.append(line)
+
+        if isinstance(blocks, dict):
+            blocks = [blocks]
+        if isinstance(blocks, list):
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                src = str(
+                    block.get("es")
+                    or block.get("word")
+                    or block.get("text")
+                    or block.get("phrase")
+                    or ""
+                ).strip()
+                dst = str(
+                    block.get("ru")
+                    or block.get("translate")
+                    or block.get("translation")
+                    or block.get("meaning")
+                    or ""
+                ).strip()
+                if src and dst:
+                    words.append(f"{src} — {dst}")
+                elif src or dst:
+                    words.append(src or dst)
+
+        packs.append((pack_name, words))
+
+    return packs
+
+
 @router.callback_query(F.data.startswith("adm:topic_view:vocab:"))
 async def admin_topic_view_vocab(cb: CallbackQuery, state: FSMContext):
-    topic_data, _ = await _admin_load_topic_from_disk(state)
-    if not topic_data:
-        await cb.answer("Тема не загружена", show_alert=True)
-        return
-    tid = (cb.data or "").split("adm:topic_view:vocab:", 1)[1].strip()
+    try:
+        st = await state.get_state()
+        logging.info(
+            "[addtopic.lex.debug] topic_view_vocab user_id=%s cb_data=%r state=%s",
+            getattr(getattr(cb, "from_user", None), "id", None),
+            cb.data,
+            st,
+        )
+        topic_data, _ = await _admin_load_topic_from_disk(state)
+        if not topic_data:
+            await cb.answer("Сначала открой карточку темы", show_alert=False)
+            return
 
-    kb = _ikb([
-        [("⬅️ Назад", f"adm:topic_view:back:{tid}")],
-        [("🏠 В меню /addtopic", "adm:home")],
-        [("⬅️ Закрыть", "adm:close")],
-    ])
-    await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "topic_view_vocab"})
-    await _inline_replace(cb, state, _admin_render_topic_view_section(topic_data, "vocab"), kb)
-    await cb.answer()
+        packs = _adm_vocab_packs(topic_data)
+        body: list[str] = []
+        for idx, (pack_name, words) in enumerate(packs, start=1):
+            if body:
+                body.append("")
+            body.append(f"Пак {idx}: {pack_name}")
+            body.append("")
+            body.extend(words or ["пока нет слов"])
+
+        if not body:
+            body = ["Словарь пуст"]
+
+        await _adm_topic_view_render(cb, state, "📚 Словарь", body)
+        logging.info("[addtopic.lex.debug] topic_view_vocab handled ok user_id=%s", getattr(getattr(cb, "from_user", None), "id", None))
+    except Exception as e:
+        logging.exception("[addtopic.lex.debug] topic_view_vocab failed: %s", e)
+        await cb.answer("Не удалось открыть словарь. Попробуй ещё раз.", show_alert=False)
 
 
 @router.callback_query(F.data.startswith("adm:topic_view:videos:"))
 async def admin_topic_view_videos(cb: CallbackQuery, state: FSMContext):
-    topic_data, _ = await _admin_load_topic_from_disk(state)
-    if not topic_data:
-        await cb.answer("Тема не загружена", show_alert=True)
-        return
-    tid = (cb.data or "").split("adm:topic_view:videos:", 1)[1].strip()
+    try:
+        st = await state.get_state()
+        logging.info(
+            "[addtopic.lex.debug] topic_view_videos user_id=%s cb_data=%r state=%s",
+            getattr(getattr(cb, "from_user", None), "id", None),
+            cb.data,
+            st,
+        )
+        topic_data, _ = await _admin_load_topic_from_disk(state)
+        if not topic_data:
+            await cb.answer("Сначала открой карточку темы", show_alert=False)
+            return
 
-    kb = _ikb([
-        [("📚 Словарь", "adm:topic_view:vocab"), ("🎥 Видео", "adm:topic_view:videos")],
-        [("📖 Читать", "adm:topic_view:read")],
-        [("⬅️ Назад", "adm:topic_card"), ("✏️ Редактировать", "adm:topic_edit")],
-        [("⬅️ К списку тем", "adm:topics")],
-        [("🏠 В меню /addtopic", "adm:home")],
-        [("⬅️ Закрыть", "adm:close")],
-    ])
+        videos = topic_data.get("videos") if isinstance(topic_data, dict) else []
+        body: list[str] = []
+        if isinstance(videos, list):
+            for video in videos:
+                if isinstance(video, dict):
+                    link = str(video.get("link") or video.get("url") or "").strip()
+                    if link:
+                        body.append(link)
+                else:
+                    txt = str(video).strip()
+                    if txt:
+                        body.append(txt)
 
-    await state.update_data(**{ADMIN_EDIT_VIEW_KEY: "topic_preview"})
-    await _inline_replace(cb, state, text_preview, kb)
-    await cb.answer()
+        if not body:
+            body = ["Видео пока нет"]
+
+        await _adm_topic_view_render(cb, state, "🎥 Видео", body)
+        logging.info("[addtopic.lex.debug] topic_view_videos handled ok user_id=%s", getattr(getattr(cb, "from_user", None), "id", None))
+    except Exception as e:
+        logging.exception("[addtopic.lex.debug] topic_view_videos failed: %s", e)
+        await cb.answer("Не удалось открыть видео. Попробуй ещё раз.", show_alert=False)
 
 
 def _adm_reading_items(topic_data: dict) -> list:
@@ -896,11 +997,41 @@ def _adm_reading_pack_to_lines(pack, idx: int) -> list[str]:
     fragments = pack.get("fragments")
     if isinstance(fragments, list):
         for frag in fragments:
-            frag_txt = str(frag).strip()
-            if frag_txt:
-                lines.append(frag_txt)
+            if isinstance(frag, dict):
+                es = str(frag.get("es") or frag.get("text") or "").strip()
+                ru = str(frag.get("ru") or frag.get("translate") or frag.get("translation") or "").strip()
+                if es and ru:
+                    lines.append(es)
+                    lines.append(ru)
+                    lines.append("")
+                elif es or ru:
+                    lines.append(es or ru)
+            else:
+                frag_txt = str(frag).strip()
+                if frag_txt:
+                    lines.append(frag_txt)
     elif isinstance(fragments, str) and fragments.strip():
         lines.append(fragments.strip())
+
+    dialogs = pack.get("dialogs")
+    if isinstance(dialogs, list):
+        for row in dialogs:
+            if not isinstance(row, dict):
+                txt = str(row).strip()
+                if txt:
+                    lines.append(txt)
+                continue
+            es = str(row.get("es") or row.get("text") or "").strip()
+            ru = str(row.get("ru") or row.get("translate") or row.get("translation") or "").strip()
+            if es:
+                lines.append(es)
+            if ru:
+                lines.append(ru)
+            if es or ru:
+                lines.append("")
+
+    while lines and not lines[-1].strip():
+        lines.pop()
 
     if len(lines) == 1:
         lines.append("пока нет")
@@ -984,6 +1115,37 @@ async def admin_topic_view_read(cb: CallbackQuery, state: FSMContext):
         body = ["пока нет"]
 
     await _adm_topic_view_render(cb, state, "📖 Читать", body)
+
+
+@router.callback_query(F.data.startswith("adm:topic_view:read:"))
+async def admin_topic_view_read_tid(cb: CallbackQuery, state: FSMContext):
+    try:
+        st = await state.get_state()
+        logging.info(
+            "[addtopic.lex.debug] topic_view_read user_id=%s cb_data=%r state=%s",
+            getattr(getattr(cb, "from_user", None), "id", None),
+            cb.data,
+            st,
+        )
+        topic_data, _ = await _admin_load_topic_from_disk(state)
+        if not topic_data:
+            await cb.answer("Сначала открой карточку темы", show_alert=False)
+            return
+
+        body = []
+        for idx, pack in enumerate(_adm_reading_items(topic_data if isinstance(topic_data, dict) else {}), start=1):
+            if body:
+                body.append("")
+            body.extend(_adm_reading_pack_to_lines(pack, idx))
+
+        if not body:
+            body = ["Читать пока нечего"]
+
+        await _adm_topic_view_render(cb, state, "📖 Читать", body)
+        logging.info("[addtopic.lex.debug] topic_view_read handled ok user_id=%s", getattr(getattr(cb, "from_user", None), "id", None))
+    except Exception as e:
+        logging.exception("[addtopic.lex.debug] topic_view_read failed: %s", e)
+        await cb.answer("Не удалось открыть раздел «Читать». Попробуй ещё раз.", show_alert=False)
 
 
 @router.callback_query(F.data.startswith("adm:topic_view:back:"))
@@ -1646,16 +1808,29 @@ def _admin_render_preview_text(topic_data: dict) -> str:
     exercises = topic_data.get("exercises") or []
     videos = topic_data.get("videos") or []
     reading = topic_data.get("reading") or []
+    is_lex = str(category).strip().lower() in {"lex", "lexics", "lexic", "vocab", "лексика"}
+
     lines = [
         f"👁 <b>{_preview_text(str(title), 90)}</b>",
         f"Категория: <b>{_preview_text(str(category), 30)}</b>",
         f"Уровень: <b>{_preview_text(str(level), 12)}</b>",
         "",
-        f"📖 Теория (фазы): <b>{len(phases)}</b>",
-        f"📝 Практика (блоки): <b>{len(exercises)}</b>",
-        f"🎥 Видео (ссылки): <b>{len(videos)}</b>",
-        f"📚 Читать (паки): <b>{len(reading)}</b>",
     ]
+
+    if is_lex:
+        lines += [
+            f"📘 Словарь (паков): <b>{len(phases)}</b>",
+            f"🎥 Видео (ссылки): <b>{len(videos)}</b>",
+            f"📚 Читать (паки): <b>{len(reading)}</b>",
+        ]
+    else:
+        lines += [
+            f"📖 Теория (фазы): <b>{len(phases)}</b>",
+            f"📝 Практика (блоки): <b>{len(exercises)}</b>",
+            f"🎥 Видео (ссылки): <b>{len(videos)}</b>",
+            f"📚 Читать (паки): <b>{len(reading)}</b>",
+        ]
+
     return "\n".join(lines)
 
 
