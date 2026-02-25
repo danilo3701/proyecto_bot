@@ -2527,7 +2527,10 @@ async def handle_main_menu(message: Message, state: FSMContext):
         )
 
         kb = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="↩️ Назад")]],
+            keyboard=[
+                [KeyboardButton(text="↩️ Назад")],
+                [KeyboardButton(text="🆕 Новая тема")],
+            ],
             resize_keyboard=True
         )
 
@@ -3782,6 +3785,17 @@ def _parse_allin_block(text: str):
 async def import_vocab_allin_bulk(message: Message, state: FSMContext):
     # 💬 авто-режим: вставил блок = сохранили = остаёмся в ожидании следующей вставки
     text = (message.text or "").strip()
+    if text == "🆕 Новая тема":
+        data = await state.get_data()
+        topic_data = data.get("topic")
+        topic_path = data.get("topic_path")
+
+        if isinstance(topic_data, dict) and topic_path:
+            atomic_save_json(topic_path, topic_data)  # 💬 сохраняем черновик темы перед возвратом в старт
+
+        await state.clear()
+        return await start_adding_topic(message, state)
+
     if text == "↩️ Назад":
         # 💬 возвращаемся в меню фазы
         await send_post_menu(message, state)
@@ -3873,7 +3887,10 @@ async def import_vocab_allin_bulk(message: Message, state: FSMContext):
 
 
     kb = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="↩️ Назад")]],
+        keyboard=[
+            [KeyboardButton(text="↩️ Назад")],
+            [KeyboardButton(text="🆕 Новая тема")],
+        ],
         resize_keyboard=True
     )
 
