@@ -836,6 +836,10 @@ def _adm_vocab_packs(topic_data: dict) -> list[tuple[str, list[str]]]:
         if isinstance(pack, dict):
             pack_name = str(pack.get("phase_name") or pack.get("name") or pack_name).strip() or pack_name
             items = pack.get("vocab") or pack.get("phrases") or pack.get("words") or []
+            blocks = pack.get("blocks") or []
+        else:
+            items = pack
+            blocks = []
         else:
             items = pack
 
@@ -858,6 +862,31 @@ def _adm_vocab_packs(topic_data: dict) -> list[tuple[str, list[str]]]:
 
             if line:
                 words.append(line)
+
+        if isinstance(blocks, dict):
+            blocks = [blocks]
+        if isinstance(blocks, list):
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                src = str(
+                    block.get("es")
+                    or block.get("word")
+                    or block.get("text")
+                    or block.get("phrase")
+                    or ""
+                ).strip()
+                dst = str(
+                    block.get("ru")
+                    or block.get("translate")
+                    or block.get("translation")
+                    or block.get("meaning")
+                    or ""
+                ).strip()
+                if src and dst:
+                    words.append(f"{src} — {dst}")
+                elif src or dst:
+                    words.append(src or dst)
 
         packs.append((pack_name, words))
 
@@ -970,11 +999,41 @@ def _adm_reading_pack_to_lines(pack, idx: int) -> list[str]:
     fragments = pack.get("fragments")
     if isinstance(fragments, list):
         for frag in fragments:
-            frag_txt = str(frag).strip()
-            if frag_txt:
-                lines.append(frag_txt)
+            if isinstance(frag, dict):
+                es = str(frag.get("es") or frag.get("text") or "").strip()
+                ru = str(frag.get("ru") or frag.get("translate") or frag.get("translation") or "").strip()
+                if es and ru:
+                    lines.append(es)
+                    lines.append(ru)
+                    lines.append("")
+                elif es or ru:
+                    lines.append(es or ru)
+            else:
+                frag_txt = str(frag).strip()
+                if frag_txt:
+                    lines.append(frag_txt)
     elif isinstance(fragments, str) and fragments.strip():
         lines.append(fragments.strip())
+
+    dialogs = pack.get("dialogs")
+    if isinstance(dialogs, list):
+        for row in dialogs:
+            if not isinstance(row, dict):
+                txt = str(row).strip()
+                if txt:
+                    lines.append(txt)
+                continue
+            es = str(row.get("es") or row.get("text") or "").strip()
+            ru = str(row.get("ru") or row.get("translate") or row.get("translation") or "").strip()
+            if es:
+                lines.append(es)
+            if ru:
+                lines.append(ru)
+            if es or ru:
+                lines.append("")
+
+    while lines and not lines[-1].strip():
+        lines.pop()
 
     if len(lines) == 1:
         lines.append("пока нет")
@@ -1058,6 +1117,37 @@ async def admin_topic_view_read(cb: CallbackQuery, state: FSMContext):
         body = ["пока нет"]
 
     await _adm_topic_view_render(cb, state, "📖 Читать", body)
+
+
+@router.callback_query(F.data.startswith("adm:topic_view:read:"))
+async def admin_topic_view_read_tid(cb: CallbackQuery, state: FSMContext):
+    try:
+        st = await state.get_state()
+        logging.info(
+            "[addtopic.lex.debug] topic_view_read user_id=%s cb_data=%r state=%s",
+            getattr(getattr(cb, "from_user", None), "id", None),
+            cb.data,
+            st,
+        )
+        topic_data, _ = await _admin_load_topic_from_disk(state)
+        if not topic_data:
+            await cb.answer("Сначала открой карточку темы", show_alert=False)
+            return
+
+        body = []
+        for idx, pack in enumerate(_adm_reading_items(topic_data if isinstance(topic_data, dict) else {}), start=1):
+            if body:
+                body.append("")
+            body.extend(_adm_reading_pack_to_lines(pack, idx))
+
+        if not body:
+            body = ["Читать пока нечего"]
+
+        await _adm_topic_view_render(cb, state, "📖 Читать", body)
+        logging.info("[addtopic.lex.debug] topic_view_read handled ok user_id=%s", getattr(getattr(cb, "from_user", None), "id", None))
+    except Exception as e:
+        logging.exception("[addtopic.lex.debug] topic_view_read failed: %s", e)
+        await cb.answer("Не удалось открыть раздел «Читать». Попробуй ещё раз.", show_alert=False)
 
 
 @router.callback_query(F.data.startswith("adm:topic_view:back:"))
