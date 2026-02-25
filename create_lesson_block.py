@@ -184,32 +184,33 @@ LEVEL_FROM_BUTTON = {
 }
 
 
-VOCAB_ALLIN_LEVELS = [
-    ("A1", "A1", "A1-A2"),
-    ("A2", "A2", "A1-A2"),
-    ("B1", "B1", "B1-B2"),
-    ("B2", "B2", "B1-B2"),
-    ("C1", "C1", "C1"),
-    ("NOVICE", "Новичку", "A0"),
+VOCAB_SEGMENTS = [
+    ("NOVICE", "🙂 Новичку", "A0"),
+    ("A1_A2", "🌱 A1–A2", "A1-A2"),
+    ("B1_B2", "🔥 B1–B2", "B1-B2"),
+    ("C1", "🧠 C1", "C1"),
 ]
-VOCAB_ALLIN_LEVEL_MAP = {k: lvl for k, _label, lvl in VOCAB_ALLIN_LEVELS}
+VOCAB_SEGMENT_LEVEL_MAP = {seg: lvl for seg, _label, lvl in VOCAB_SEGMENTS}
 
 
 def _build_vocab_allin_kb(done_levels: set[str] | None = None, current_level: str | None = None) -> InlineKeyboardMarkup:
-    done = set(done_levels or set())
+    done = {
+        seg for seg in (_normalize_vocab_segment(lvl) for lvl in (done_levels or set())) if seg
+    }
+
+    current_segment = _normalize_vocab_segment(current_level)
 
     def _lvl_label(key: str, label: str) -> str:
         base = f"✅ {label}" if key in done else label
-        if current_level and key == current_level:
+        if current_segment and key == current_segment:
             return f"• {base}"
         return base
 
     rows = [
         [("⬅️ Назад", "vocab_allin:back"), ("🆕 Новая тема", "vocab_allin:new_topic")],
-        [(_lvl_label("A1", "A1"), "vocab_lvl:A1"), (_lvl_label("A2", "A2"), "vocab_lvl:A2")],
-        [(_lvl_label("B1", "B1"), "vocab_lvl:B1"), (_lvl_label("B2", "B2"), "vocab_lvl:B2")],
-        [(_lvl_label("C1", "C1"), "vocab_lvl:C1"), (_lvl_label("NOVICE", "Новичку"), "vocab_lvl:NOVICE")],
-        [("✅ Готово", "vocab_allin:done")],
+        [(_lvl_label("NOVICE", "🙂 Новичку"), "vocab_seg:NOVICE"), (_lvl_label("A1_A2", "🌱 A1–A2"), "vocab_seg:A1_A2")],
+        [(_lvl_label("B1_B2", "🔥 B1–B2"), "vocab_seg:B1_B2"), (_lvl_label("C1", "🧠 C1"), "vocab_seg:C1")],
+        [("✅ Готово", "vocab_mark_done")],
     ]
     return _ikb(rows)
 
@@ -224,17 +225,28 @@ def _build_vocab_topic_template(topic: dict | None) -> dict:
     }
 
 
-def _quick_key_by_level(level: str | None) -> str | None:
-    if not level:
-        return None
-    for k, _label, canonical in VOCAB_ALLIN_LEVELS:
-        if canonical == level:
-            return k
+def _normalize_vocab_segment(level: str | None) -> str | None:
+    raw = (level or "").strip().upper().replace("—", "-")
+    if raw in {"NOVICE", "НОВИЧКУ", "A0"}:
+        return "NOVICE"
+    if raw in {"A1", "A2", "A1-A2", "A1_A2"}:
+        return "A1_A2"
+    if raw in {"B1", "B2", "B1-B2", "B1_B2"}:
+        return "B1_B2"
+    if raw == "C1":
+        return "C1"
     return None
 
 
+def _normalized_done_segments(levels: list[str] | set[str] | None) -> set[str]:
+    return {
+        seg for seg in (_normalize_vocab_segment(lvl) for lvl in (levels or [])) if seg
+    }
+
+
 def _build_level_topic_from_template(template: dict, level_key: str) -> tuple[dict, str] | tuple[None, None]:
-    canonical_level = VOCAB_ALLIN_LEVEL_MAP.get(level_key)
+    segment_key = _normalize_vocab_segment(level_key)
+    canonical_level = VOCAB_SEGMENT_LEVEL_MAP.get(segment_key)
     category = (template or {}).get("category")
     base_title = ((template or {}).get("title") or "").strip()
     visible_title = ((template or {}).get("visible_title") or base_title).strip()
@@ -243,7 +255,7 @@ def _build_level_topic_from_template(template: dict, level_key: str) -> tuple[di
         return None, None
 
     topics_dir = get_topics_dir()
-    filename = topics_dir / f"{base_title}_{level_key.lower()}.json"
+    filename = topics_dir / f"{base_title}_{segment_key.lower()}.json"
 
     topic_obj = None
     if filename.exists():
@@ -2618,8 +2630,8 @@ async def handle_main_menu(message: Message, state: FSMContext):
             allin_force_new_phase=True  # 💬 каждый вход в словарь = готовим новую фазу под ближайший ALL IN
         )
 
-        done_levels = set(data.get("vocab_done_levels") or [])
-        current_level = data.get("vocab_current_quick_level") or _quick_key_by_level(data.get("topic_level"))
+        done_levels = _normalized_done_segments(data.get("vocab_done_levels"))
+        current_level = data.get("vocab_current_level") or _normalize_vocab_segment(data.get("topic_level"))
         template = _build_vocab_topic_template(tp if isinstance(tp, dict) else data.get("topic"))
         await state.update_data(topic_template=template)
 
@@ -3975,13 +3987,13 @@ async def import_vocab_allin_bulk(message: Message, state: FSMContext):
         await state.update_data(allin_force_new_phase=True)
 
 
-    done_levels = set(data.get("vocab_done_levels") or [])
-    current_quick = data.get("vocab_current_quick_level") or _quick_key_by_level(data.get("topic_level"))
-    if current_quick:
-        done_levels.add(current_quick)
-        await state.update_data(vocab_done_levels=sorted(done_levels))
+    done_levels = _normalized_done_segments(data.get("vocab_done_levels"))
+    current_seg = data.get("vocab_current_level") or _normalize_vocab_segment(data.get("topic_level"))
+    if current_seg:
+        done_levels.add(current_seg)
+    await state.update_data(vocab_done_levels=sorted(done_levels), vocab_current_level=current_seg)
 
-    kb = _build_vocab_allin_kb(done_levels, current_quick)
+    kb = _build_vocab_allin_kb(done_levels, current_seg)
 
     msg_lines = [
         "✅ ALL IN сохранено",
@@ -4025,19 +4037,29 @@ async def vocab_allin_new_topic(cb: CallbackQuery, state: FSMContext):
     return await start_adding_topic(cb.message, state)
 
 
-@router.callback_query(F.data == "vocab_allin:done")
+@router.callback_query(F.data == "vocab_mark_done")
 async def vocab_allin_done(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
-    await state.clear()
-    return await start_adding_topic(cb.message, state)
+    data = await state.get_data()
+    current_seg = data.get("vocab_current_level") or _normalize_vocab_segment(data.get("topic_level"))
+    done_levels = _normalized_done_segments(data.get("vocab_done_levels"))
+    if current_seg:
+        done_levels.add(current_seg)
+
+    await state.update_data(vocab_done_levels=sorted(done_levels), vocab_current_level=current_seg)
+    kb = _build_vocab_allin_kb(done_levels, current_seg)
+    try:
+        await cb.message.edit_reply_markup(reply_markup=kb)
+    except Exception:
+        await cb.message.answer("✅ Отметил текущий сегмент как готовый.", reply_markup=kb)
 
 
-@router.callback_query(F.data.startswith("vocab_lvl:"))
+@router.callback_query(F.data.startswith("vocab_seg:"))
 async def vocab_allin_switch_level(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
-    level_key = (cb.data or "").split(":", 1)[1].strip().upper()
-    if level_key not in VOCAB_ALLIN_LEVEL_MAP:
+    segment_key = _normalize_vocab_segment((cb.data or "").split(":", 1)[1].strip().upper())
+    if not segment_key:
         return await start_adding_topic(cb.message, state)
 
     data = await state.get_data()
@@ -4049,18 +4071,18 @@ async def vocab_allin_switch_level(cb: CallbackQuery, state: FSMContext):
         await state.clear()
         return await start_adding_topic(cb.message, state)
 
-    topic_obj, topic_path = _build_level_topic_from_template(template, level_key)
+    topic_obj, topic_path = _build_level_topic_from_template(template, segment_key)
     if not isinstance(topic_obj, dict) or not topic_path:
         await state.clear()
         return await start_adding_topic(cb.message, state)
 
-    done_levels = set(data.get("vocab_done_levels") or [])
+    done_levels = _normalized_done_segments(data.get("vocab_done_levels"))
 
     await state.update_data(
         topic=topic_obj,
         topic_path=topic_path,
-        topic_level=VOCAB_ALLIN_LEVEL_MAP[level_key],
-        vocab_current_quick_level=level_key,
+        topic_level=VOCAB_SEGMENT_LEVEL_MAP[segment_key],
+        vocab_current_level=segment_key,
         topic_template=template,
         last_block="vocab",
         allin_force_new_phase=True,
@@ -4082,7 +4104,7 @@ async def vocab_allin_switch_level(cb: CallbackQuery, state: FSMContext):
         "[TEXT]\n"
         "...\n"
         "[/PHRASE]",
-        reply_markup=_build_vocab_allin_kb(done_levels, level_key)
+        reply_markup=_build_vocab_allin_kb(done_levels, segment_key)
     )
 
 
