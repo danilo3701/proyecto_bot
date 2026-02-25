@@ -183,6 +183,102 @@ LEVEL_FROM_BUTTON = {
     "🧠 C1":     "C1",
 }
 
+
+VOCAB_ALLIN_SEGMENTS = [
+    ("NOVICE", "🙂 Новичку", "A0"),
+    ("A1_A2", "🌱 A1–A2", "A1-A2"),
+    ("B1_B2", "🔥 B1–B2", "B1-B2"),
+    ("C1", "🧠 C1", "C1"),
+]
+VOCAB_SEGMENT_TO_LEVEL = {k: lvl for k, _label, lvl in VOCAB_ALLIN_SEGMENTS}
+
+
+def _normalize_vocab_segment(level: str | None) -> str | None:
+    raw = (level or "").strip().upper().replace("–", "-").replace("_", "-")
+    if not raw:
+        return None
+    if raw in {"A0", "NOVICE", "НОВИЧКУ", "НОВИЧОК"}:
+        return "NOVICE"
+    if raw in {"A1", "A2", "A1-A2"}:
+        return "A1_A2"
+    if raw in {"B1", "B2", "B1-B2"}:
+        return "B1_B2"
+    if raw == "C1":
+        return "C1"
+    return None
+
+
+def _build_vocab_allin_kb(done_levels: set[str] | None = None, current_level: str | None = None) -> InlineKeyboardMarkup:
+    done = set(done_levels or set())
+    current = _normalize_vocab_segment(current_level)
+
+    def _seg_label(seg: str, label: str) -> str:
+        base = f"✅ {label}" if seg in done else label
+        if current and seg == current:
+            return f"• {base}"
+        return base
+
+    rows = [
+        [("⬅️ Назад", "vocab_allin:back"), ("🆕 Новая тема", "vocab_allin:new_topic")],
+        [(_seg_label("NOVICE", "🙂 Новичку"), "vocab_seg:NOVICE"), (_seg_label("A1_A2", "🌱 A1–A2"), "vocab_seg:A1_A2")],
+        [(_seg_label("B1_B2", "🔥 B1–B2"), "vocab_seg:B1_B2"), (_seg_label("C1", "🧠 C1"), "vocab_seg:C1")],
+        [("✅ Готово", "vocab_mark_done")],
+    ]
+    return _ikb(rows)
+
+
+def _build_vocab_topic_template(topic: dict | None) -> dict:
+    t = topic or {}
+    return {
+        "title": t.get("title") or "",
+        "visible_title": t.get("visible_title") or t.get("title") or "",
+        "description": t.get("description") or "",
+        "category": t.get("category") or "",
+    }
+
+
+def _build_level_topic_from_template(template: dict, segment_key: str) -> tuple[dict, str] | tuple[None, None]:
+    canonical_level = VOCAB_SEGMENT_TO_LEVEL.get(segment_key)
+    category = (template or {}).get("category")
+    base_title = ((template or {}).get("title") or "").strip()
+    visible_title = ((template or {}).get("visible_title") or base_title).strip()
+
+    if not canonical_level or not category or not base_title:
+        return None, None
+
+    topics_dir = get_topics_dir()
+    filename = topics_dir / f"{base_title}_{segment_key.lower()}.json"
+
+    topic_obj = None
+    if filename.exists():
+        try:
+            with open(filename, "r", encoding="utf-8") as f:
+                topic_obj = json.load(f) or {}
+        except Exception:
+            topic_obj = None
+
+    if not isinstance(topic_obj, dict):
+        topic_obj = {
+            "title": f"{base_title}_{segment_key.lower()}",
+            "visible_title": visible_title,
+            "description": (template or {}).get("description") or "",
+            "category": category,
+            "level": canonical_level,
+            "vocab": [],
+            "exercises": [],
+            "videos": [],
+            "dialogs": [],
+            "reading": [],
+            "translate": [],
+        }
+    else:
+        topic_obj["level"] = canonical_level
+        topic_obj.setdefault("category", category)
+        topic_obj.setdefault("visible_title", visible_title)
+
+    atomic_save_json(filename, topic_obj)
+    return topic_obj, str(filename)
+
 #from core8_1 import load_ads_data, save_ads_data
 
 ADS_DATA_PATH = "/data/ads_data.json"  # 💬 хранение в Railway Volume (не теряется при redeploy)
@@ -2526,9 +2622,15 @@ async def handle_main_menu(message: Message, state: FSMContext):
             allin_force_new_phase=True  # 💬 каждый вход в словарь = готовим новую фазу под ближайший ALL IN
         )
 
-        kb = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="↩️ Назад")]],
-            resize_keyboard=True
+        done_levels = {
+            seg for seg in (_normalize_vocab_segment(x) for x in (data.get("vocab_done_levels") or [])) if seg
+        }
+        current_level = data.get("vocab_current_level") or _normalize_vocab_segment(data.get("topic_level"))
+        template = _build_vocab_topic_template(tp if isinstance(tp, dict) else data.get("topic"))
+        await state.update_data(
+            topic_template=template,
+            vocab_done_levels=sorted(done_levels),
+            vocab_current_level=current_level,
         )
 
         await message.answer(
@@ -2545,7 +2647,7 @@ async def handle_main_menu(message: Message, state: FSMContext):
             "[TEXT]\n"
             "...\n"
             "[/PHRASE]",
-            reply_markup=kb
+            reply_markup=_build_vocab_allin_kb(done_levels, current_level)
         )  # 💬 сразу уходим в bulk-вставку, без VOC
         await state.set_state(NewTopicStates.waiting_vocab_allin_bulk)
         return
@@ -3782,6 +3884,17 @@ def _parse_allin_block(text: str):
 async def import_vocab_allin_bulk(message: Message, state: FSMContext):
     # 💬 авто-режим: вставил блок = сохранили = остаёмся в ожидании следующей вставки
     text = (message.text or "").strip()
+    if text == "🆕 Новая тема":
+        data = await state.get_data()
+        topic_data = data.get("topic")
+        topic_path = data.get("topic_path")
+
+        if isinstance(topic_data, dict) and topic_path:
+            atomic_save_json(topic_path, topic_data)  # 💬 сохраняем черновик темы перед возвратом в старт
+
+        await state.clear()
+        return await start_adding_topic(message, state)
+
     if text == "↩️ Назад":
         # 💬 возвращаемся в меню фазы
         await send_post_menu(message, state)
@@ -3872,10 +3985,15 @@ async def import_vocab_allin_bulk(message: Message, state: FSMContext):
         await state.update_data(allin_force_new_phase=True)
 
 
-    kb = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="↩️ Назад")]],
-        resize_keyboard=True
-    )
+    done_levels = {
+        seg for seg in (_normalize_vocab_segment(x) for x in (data.get("vocab_done_levels") or [])) if seg
+    }
+    current_seg = data.get("vocab_current_level") or _normalize_vocab_segment(data.get("topic_level"))
+    if current_seg:
+        done_levels.add(current_seg)
+        await state.update_data(vocab_done_levels=sorted(done_levels), vocab_current_level=current_seg)
+
+    kb = _build_vocab_allin_kb(done_levels, current_seg)
 
     msg_lines = [
         "✅ ALL IN сохранено",
@@ -3897,6 +4015,103 @@ async def import_vocab_allin_bulk(message: Message, state: FSMContext):
     # 💬 остаёмся в режиме приёма следующего блока
     await state.set_state(NewTopicStates.waiting_vocab_allin_bulk)
 
+
+
+@router.callback_query(F.data == "vocab_allin:back")
+async def vocab_allin_back(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    await send_post_menu(cb.message, state)
+
+
+@router.callback_query(F.data == "vocab_allin:new_topic")
+async def vocab_allin_new_topic(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    data = await state.get_data()
+    topic_data = data.get("topic")
+    topic_path = data.get("topic_path")
+
+    if isinstance(topic_data, dict) and topic_path:
+        atomic_save_json(topic_path, topic_data)  # 💬 сохраняем черновик темы перед возвратом в старт
+
+    await state.clear()
+    return await start_adding_topic(cb.message, state)
+
+
+@router.callback_query(F.data == "vocab_mark_done")
+async def vocab_allin_mark_done(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+    data = await state.get_data()
+
+    done_levels = {
+        seg for seg in (_normalize_vocab_segment(x) for x in (data.get("vocab_done_levels") or [])) if seg
+    }
+    current_seg = data.get("vocab_current_level") or _normalize_vocab_segment(data.get("topic_level"))
+    if current_seg:
+        done_levels.add(current_seg)
+
+    await state.update_data(vocab_done_levels=sorted(done_levels), vocab_current_level=current_seg)
+
+    kb = _build_vocab_allin_kb(done_levels, current_seg)
+    try:
+        await cb.message.edit_reply_markup(reply_markup=kb)
+    except Exception:
+        await cb.message.answer("✅ Сегмент отмечен как готовый.", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("vocab_seg:"))
+async def vocab_allin_switch_level(cb: CallbackQuery, state: FSMContext):
+    await cb.answer()
+
+    level_key = (cb.data or "").split(":", 1)[1].strip().upper()
+    if level_key not in VOCAB_SEGMENT_TO_LEVEL:
+        return await start_adding_topic(cb.message, state)
+
+    data = await state.get_data()
+    template = data.get("topic_template")
+    if not isinstance(template, dict) or not template.get("title") or not template.get("category"):
+        template = _build_vocab_topic_template(data.get("topic") if isinstance(data.get("topic"), dict) else {})
+
+    if not template.get("title") or not template.get("category"):
+        await state.clear()
+        return await start_adding_topic(cb.message, state)
+
+    topic_obj, topic_path = _build_level_topic_from_template(template, level_key)
+    if not isinstance(topic_obj, dict) or not topic_path:
+        await state.clear()
+        return await start_adding_topic(cb.message, state)
+
+    done_levels = {
+        seg for seg in (_normalize_vocab_segment(x) for x in (data.get("vocab_done_levels") or [])) if seg
+    }
+
+    await state.update_data(
+        topic=topic_obj,
+        topic_path=topic_path,
+        topic_level=VOCAB_SEGMENT_TO_LEVEL[level_key],
+        vocab_current_level=level_key,
+        topic_template=template,
+        last_block="vocab",
+        allin_force_new_phase=True,
+        **{ADMIN_TOPIC_FLOW_KEY: True},
+    )
+    await state.set_state(NewTopicStates.waiting_vocab_allin_bulk)
+
+    await cb.message.answer(
+        "Вставь ALL IN блок одним сообщением.\n"
+        "Пустые строки игнорируются.\n\n"
+        "[PHRASE]\n"
+        "ES: pagar con tarjeta\n"
+        "RU: платить картой\n"
+        "[POLL]\n"
+        "...\n"
+        "...\n"
+        "...\n"
+        "...\n"
+        "[TEXT]\n"
+        "...\n"
+        "[/PHRASE]",
+        reply_markup=_build_vocab_allin_kb(done_levels, level_key)
+    )
 
 
 @router.message(NewTopicStates.waiting_vocab_quiz_bulk)
