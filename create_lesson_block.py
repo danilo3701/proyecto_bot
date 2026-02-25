@@ -3789,13 +3789,24 @@ async def import_vocab_allin_bulk(message: Message, state: FSMContext):
         data = await state.get_data()
         topic_data = data.get("topic")
         topic_path = data.get("topic_path")
+        category = (topic_data or {}).get("category")
+        level = data.get("topic_level")
 
         if isinstance(topic_data, dict) and topic_path:
-            atomic_save_json(topic_path, topic_data)  # 💬 сохраняем черновик темы перед сбросом состояния
+            atomic_save_json(topic_path, topic_data)  # 💬 сохраняем черновик темы перед переходом
 
-        await state.clear()
-        await state.set_state(NewTopicStates.waiting_topic_name)
-        await message.answer("Введите название темы", reply_markup=ReplyKeyboardRemove())
+        if category and level:
+            await state.set_data({
+                "topic": {"category": category},
+                "topic_level": level,
+                ADMIN_TOPIC_FLOW_KEY: True,
+            })
+            await state.set_state(NewTopicStates.waiting_topic_name)
+            await message.answer("Введите название темы", reply_markup=ReplyKeyboardRemove())
+            return
+
+        # 💬 если обязательных данных нет — возвращаемся в стандартный старт /addtopic
+        await start_adding_topic(message, state)
         return
 
     if text == "↩️ Назад":
