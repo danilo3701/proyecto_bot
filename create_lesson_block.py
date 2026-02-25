@@ -840,6 +840,8 @@ def _adm_vocab_packs(topic_data: dict) -> list[tuple[str, list[str]]]:
         else:
             items = pack
             blocks = []
+        else:
+            items = pack
 
         if isinstance(items, dict):
             items = [items]
