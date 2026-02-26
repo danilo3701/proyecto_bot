@@ -3925,7 +3925,13 @@ async def premium_check_settings(query: CallbackQuery, state: FSMContext):
     if premium_active:
         text_msg = await query.message.answer("✅ Premium активен\n🔓 Замки сняты автоматически")
     else:
-        text_msg = await query.message.answer("❌ Premium не найден\nЕсли оплатил(а) только что = подожди 1–2 минуты и проверь ещё раз")
+        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✍️ Напиши админу", url="https://t.me/Drancherrro")]
+        ])
+        text_msg = await query.message.answer(
+            "❌ Premium не найден\nЕсли оплатил(а) только что = подожди 1–2 минуты и проверь ещё раз",
+            reply_markup=admin_kb,
+        )
 
     await asyncio.sleep(3)
     for msg in (sticker_msg, text_msg):
