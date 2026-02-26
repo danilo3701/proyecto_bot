@@ -5726,6 +5726,33 @@ def mywords_build_categories_kb(categories: list, cb_prefix: str, back_cb: str) 
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+async def _parse_mywords_callback_index(
+    callback: CallbackQuery,
+    state: FSMContext,
+    categories: list,
+    *,
+    fallback_to_categories_mode: str | None = None,
+) -> int | None:
+    try:
+        idx = int(callback.data.split(":")[-1])
+    except (ValueError, IndexError):
+        await callback.answer("Некорректные данные", show_alert=False)
+        if fallback_to_categories_mode:
+            await mywords_show_categories(callback.message, state, mode=fallback_to_categories_mode)
+        else:
+            await mywords_menu(callback.message, state)
+        return None
+
+    if idx < 0 or idx >= len(categories):
+        await callback.answer("Некорректные данные", show_alert=False)
+        if fallback_to_categories_mode:
+            await mywords_show_categories(callback.message, state, mode=fallback_to_categories_mode)
+        else:
+            await mywords_menu(callback.message, state)
+        return None
+
+    return idx
+
 def mywords_get_user_block(user_id: str) -> tuple[dict, dict]:
     # 💬 загружаем хранилище и блок пользователя
     store = load_my_words_data()
@@ -6180,10 +6207,9 @@ async def mywords_add_choose_cat_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     data = await state.get_data()
     categories = data.get("mywords_categories", [])
-    idx = int(callback.data.split(":")[-1])
-
-    if idx < 0 or idx >= len(categories):
-        return await mywords_menu(callback.message, state)
+    idx = await _parse_mywords_callback_index(callback, state, categories)
+    if idx is None:
+        return
 
     category = categories[idx]
     await state.update_data(mywords_category=category)
@@ -6363,9 +6389,14 @@ async def mywords_choose_cat_new_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     data = await state.get_data()
     categories = data.get("mywords_categories", [])
-    idx = int(callback.data.split(":")[-1])
-    if idx < 0 or idx >= len(categories):
-        return await mywords_menu(callback.message, state)
+    idx = await _parse_mywords_callback_index(
+        callback,
+        state,
+        categories,
+        fallback_to_categories_mode="new",
+    )
+    if idx is None:
+        return
 
     category = categories[idx]
     user_id = str(callback.message.chat.id)
@@ -6410,9 +6441,14 @@ async def mywords_choose_cat_repeat_cb(callback: CallbackQuery, state: FSMContex
     await callback.answer()
     data = await state.get_data()
     categories = data.get("mywords_categories", [])
-    idx = int(callback.data.split(":")[-1])
-    if idx < 0 or idx >= len(categories):
-        return await mywords_menu(callback.message, state)
+    idx = await _parse_mywords_callback_index(
+        callback,
+        state,
+        categories,
+        fallback_to_categories_mode="repeat",
+    )
+    if idx is None:
+        return
 
     category = categories[idx]
     user_id = str(callback.message.chat.id)
@@ -6758,9 +6794,9 @@ async def mywords_edit_choose_cat_cb(callback: CallbackQuery, state: FSMContext)
     await callback.answer()
     data = await state.get_data()
     categories = data.get("mywords_categories", [])
-    idx = int(callback.data.split(":")[-1])
-    if idx < 0 or idx >= len(categories):
-        return await mywords_menu(callback.message, state)
+    idx = await _parse_mywords_callback_index(callback, state, categories)
+    if idx is None:
+        return
 
     return await mywords_open_edit_category_menu(callback.message, state, categories[idx])
 
