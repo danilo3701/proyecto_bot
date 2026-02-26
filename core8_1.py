@@ -5843,9 +5843,30 @@ async def _mywords_edit_ui(message: Message, state: FSMContext, text: str, *, re
                 parse_mode=parse_mode
             )
         except Exception:
-            pass
+            # 💬 fallback: если parse_mode сломал отправку, повторяем plain-text без parse_mode
+            if parse_mode:
+                try:
+                    return await bot.edit_message_text(
+                        chat_id=message.chat.id,
+                        message_id=int(ui_msg_id),
+                        text=text,
+                        reply_markup=reply_markup,
+                    )
+                except Exception:
+                    pass
 
-    ui_message = await smart_reply(message, text, reply_markup=reply_markup, parse_mode=parse_mode)
+    try:
+        ui_message = await smart_reply(message, text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception:
+        ui_message = None
+
+    # 💬 fallback: если parse_mode сломал отправку, повторяем plain-text без parse_mode
+    if (ui_message is None) and parse_mode:
+        try:
+            ui_message = await smart_reply(message, text, reply_markup=reply_markup)
+        except Exception:
+            ui_message = None
+
     if ui_message:
         await _mywords_touch_ui_msg_id(state, ui_message)
     return ui_message
@@ -6188,20 +6209,21 @@ async def mywords_add_choose_cat_cb(callback: CallbackQuery, state: FSMContext):
     category = categories[idx]
     await state.update_data(mywords_category=category)
 
+    safe_category = html.escape(category)
     txt = (
         f"➕ Добавить слово\n\n"
-        f"Категория: *{category}*\n\n"
+        f"Категория: <b>{safe_category}</b>\n\n"
         f"Отправь вот так: ES - RU\n"
-        f"Пример: *Comer - Кушать*"
+        f"Пример: <b>Comer - Кушать</b>"
     )  # 💬 показываем пример формата ввода
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
 
     ui_message = None
     try:
-        ui_message = await callback.message.edit_text(txt, reply_markup=kb, parse_mode="Markdown")
+        ui_message = await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
     except Exception:
-        ui_message = await smart_reply(callback.message, txt, reply_markup=kb, parse_mode="Markdown")
+        ui_message = await smart_reply(callback.message, txt, reply_markup=kb, parse_mode="HTML")
 
     if ui_message:
         await _mywords_touch_ui_msg_id(state, ui_message)
@@ -6274,15 +6296,16 @@ async def mywords_add_newcat_name(message: Message, state: FSMContext):
 
     await state.update_data(mywords_category=name)
 
+    safe_name = html.escape(name)
     txt = (
         f"➕ Добавить слово\n\n"
-        f"Категория: *{name}*\n\n"
+        f"Категория: <b>{safe_name}</b>\n\n"
         f"Отправь вот так: ES - RU\n"
-        f"Пример: *Comer - Кушать*"
+        f"Пример: <b>Comer - Кушать</b>"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
 
-    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="Markdown")
+    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="HTML")
     await state.set_state(LessonStates.mywords_add_input_pair)
 
 
@@ -6299,13 +6322,15 @@ async def mywords_add_input_pair(message: Message, state: FSMContext):
 
     await state.update_data(mywords_pending_pair={"es": es, "ru": ru})
 
-    txt = f"Проверь:\n\nES: *{es}*\nRU: *{ru}*\n\nСохранить?"
+    safe_es = html.escape(es)
+    safe_ru = html.escape(ru)
+    txt = f"Проверь:\n\nES: <b>{safe_es}</b>\nRU: <b>{safe_ru}</b>\n\nСохранить?"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Сохранить", callback_data="mywords:add_save")],
         [InlineKeyboardButton(text="🗑 Отмена", callback_data="mywords:menu")]
     ])
 
-    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="Markdown")
+    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="HTML")
     await state.set_state(LessonStates.mywords_add_confirm)
 
 
@@ -6733,8 +6758,9 @@ async def mywords_open_edit_category_menu(message: Message, state: FSMContext, c
         [InlineKeyboardButton(text="🗂 Переименовать категорию", callback_data="mywords:edit_rename")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:edit_open")]
     ])
-    txt = f"✏️ Категория: *{category}*\n\nВыбери действие:"
-    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="Markdown")
+    safe_category = html.escape(category)
+    txt = f"✏️ Категория: <b>{safe_category}</b>\n\nВыбери действие:"
+    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="HTML")
     await state.set_state(LessonStates.mywords_edit_menu)
 
 
