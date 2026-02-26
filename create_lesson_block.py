@@ -113,6 +113,7 @@ ADMIN_PENDING_INSERT_KIND_KEY = "adm_insert_kind"          # 💬 text | photo |
 ADMIN_PENDING_INSERT_PAYLOAD_KEY = "adm_insert_payload"    # 💬 dict | list для вставки
 ADMIN_PENDING_MOVE_FROM_KEY = "adm_move_from"              # 💬 from index для перемещения
 ADMIN_PAGE_SIZE = 6  # 💬 сколько элементов показываем на одной странице в админ-листах
+ADMIN_TOPICS_PAGE_SIZE = 5  # 💬 сколько тем показываем в списке выбора темы
 
 
 def _ikb(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
@@ -2323,20 +2324,36 @@ async def _admin_show_sections(cb: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "adm:topics")
 async def admin_topics_list(cb: CallbackQuery, state: FSMContext):
-    # 💬 возвращаемся к списку тем в том же сообщении (с учётом фильтра, если он есть)
-    st = await state.get_data()
+    await _admin_render_topics_list(cb, state)
+    await cb.answer()
 
+
+def _sort_topic_names_by_newest(topic_names: list[str], topics_dir: Path) -> list[str]:
+    # 💬 сортируем темы по дате изменения файла (новые сверху)
+    def _mtime(name: str) -> float:
+        try:
+            return (topics_dir / f"{name}.json").stat().st_mtime
+        except Exception:
+            return 0.0
+
+    return sorted(topic_names, key=_mtime, reverse=True)
+
+
+async def _admin_collect_topics_for_view(state: FSMContext) -> tuple[list[str], dict[str, str], str | None, str | None, str]:
+    # 💬 собираем темы и подписи для списка редактирования (с учётом фильтров)
+    st = await state.get_data()
     category = st.get(ADMIN_EDIT_CATEGORY_KEY) or ((st.get("topic") or {}).get("category"))
     level = st.get(ADMIN_EDIT_LEVEL_KEY) or st.get("topic_level") or ((st.get("topic") or {}).get("level"))
 
-    topic_map_all, files = _load_topics_index()
+    topics_dir = get_topics_dir()
+    _topic_map_all, files = _load_topics_index()
+    files = _sort_topic_names_by_newest(files, topics_dir)
+
     show_files = files
-    titles = {}
+    titles: dict[str, str] = {}
 
     if category and level:
-        topics_dir = get_topics_dir()
         filtered = []
-
         for name in files:
             path = topics_dir / f"{name}.json"
             try:
@@ -2354,33 +2371,14 @@ async def admin_topics_list(cb: CallbackQuery, state: FSMContext):
             titles[name] = topic_data.get("visible_title") or topic_data.get("name") or name
 
         show_files = filtered
-        topic_map = {_make_tid(n): n for n in filtered}
-        await state.update_data(**{
-            ADMIN_EDIT_MODE_KEY: True,
-            ADMIN_EDIT_CATEGORY_KEY: category,
-            ADMIN_EDIT_LEVEL_KEY: level,
-            ADMIN_TOPIC_MAP_KEY: topic_map
-        })
-    else:
-        await state.update_data(**{ADMIN_TOPIC_MAP_KEY: topic_map_all})
 
-    if not show_files:
-        kb = _ikb([
-            [("🏠 В меню /addtopic", "adm:home")],
-            [("⬅️ Закрыть", "adm:close")]
-        ])
-        await _inline_replace(cb, state, "⚠️ Нет тем для выбранной категории или уровня.", kb)
-        await cb.answer()
-        return
-
-    rows = []
-    for name in show_files[:30]:
-        tid = _make_tid(name)
-        label = titles.get(name) or name
-        rows.append([(label, f"adm:topic:{tid}")])
-
-    rows.append([("🏠 В меню /addtopic", "adm:home")])
-    rows.append([("⬅️ Закрыть", "adm:close")])
+    topic_map = {_make_tid(n): n for n in show_files}
+    await state.update_data(**{
+        ADMIN_EDIT_MODE_KEY: True,
+        ADMIN_EDIT_CATEGORY_KEY: category,
+        ADMIN_EDIT_LEVEL_KEY: level,
+        ADMIN_TOPIC_MAP_KEY: topic_map,
+    })
 
     cat_label = ""
     if category:
@@ -2390,8 +2388,72 @@ async def admin_topics_list(cb: CallbackQuery, state: FSMContext):
     if category and level and cat_label:
         header = f"✏️ <b>Редактировать темы</b>\nКатегория: {cat_label} | Уровень: {level}\nВыбери тему:"
 
-    kb = _ikb(rows)
+    return show_files, titles, category, level, header
+
+
+def _admin_build_topics_list_kb(show_files: list[str], titles: dict[str, str], page: int) -> InlineKeyboardMarkup:
+    # 💬 клавиатура списка тем: 5 тем на страницу + листалка + Add topic / Закрыть
+    total = len(show_files)
+    max_page = max(0, (total - 1) // ADMIN_TOPICS_PAGE_SIZE)
+    page = max(0, min(page, max_page))
+
+    start = page * ADMIN_TOPICS_PAGE_SIZE
+    end = start + ADMIN_TOPICS_PAGE_SIZE
+
+    rows = []
+    for name in show_files[start:end]:
+        tid = _make_tid(name)
+        label = titles.get(name) or name
+        rows.append([(label, f"adm:topic:{tid}")])
+
+    if total > 0:
+        left_page = max(page - 1, 0)
+        right_page = min(page + 1, max_page)
+        rows.append([
+            ("⬅️", f"adm:topics_page:{left_page}"),
+            (f"{page + 1} из {max_page + 1}", "adm:topics_page_info"),
+            ("➡️", f"adm:topics_page:{right_page}"),
+        ])
+
+    rows.append([("➕ Add topic", "adm:home"), ("⬅️ Закрыть", "adm:close")])
+    return _ikb(rows)
+
+
+async def _admin_render_topics_list(cb: CallbackQuery, state: FSMContext, force_page: int | None = None):
+    show_files, titles, _category, _level, header = await _admin_collect_topics_for_view(state)
+    if not show_files:
+        kb = _ikb([
+            [("➕ Add topic", "adm:home"), ("⬅️ Закрыть", "adm:close")],
+        ])
+        await _inline_replace(cb, state, "⚠️ Нет тем для выбранной категории или уровня.", kb)
+        return
+
+    st = await state.get_data()
+    current_page = st.get(ADMIN_EDIT_PAGE_KEY, 0)
+    if force_page is not None:
+        current_page = force_page
+
+    max_page = max(0, (len(show_files) - 1) // ADMIN_TOPICS_PAGE_SIZE)
+    current_page = max(0, min(int(current_page), max_page))
+    await state.update_data(**{ADMIN_EDIT_PAGE_KEY: current_page})
+
+    kb = _admin_build_topics_list_kb(show_files, titles, current_page)
     await _inline_replace(cb, state, header, kb)
+
+
+@router.callback_query(F.data.startswith("adm:topics_page:"))
+async def admin_topics_switch_page(cb: CallbackQuery, state: FSMContext):
+    raw = (cb.data or "").split("adm:topics_page:", 1)[1].strip()
+    try:
+        page = int(raw)
+    except Exception:
+        page = 0
+    await _admin_render_topics_list(cb, state, force_page=page)
+    await cb.answer()
+
+
+@router.callback_query(F.data == "adm:topics_page_info")
+async def admin_topics_page_info(cb: CallbackQuery):
     await cb.answer()
 
 @router.callback_query(F.data.startswith("adm:topic_del:"))
@@ -2454,35 +2516,20 @@ async def admin_delete_topic_do(cb: CallbackQuery, state: FSMContext):
         await cb.answer("Не смог удалить файл", show_alert=True)
         return
 
-    # 💬 после удаления сразу обновляем индекс и показываем список тем
-    topic_map, files = _load_topics_index()
-    await state.clear()
-    await state.update_data(
-        **{ADMIN_TOPIC_MAP_KEY: topic_map},
-        **{ADMIN_INLINE_MSG_ID_KEY: cb.message.message_id},
-    )
-
-    if not files:
+    # 💬 после удаления сразу обновляем список тем
+    await state.update_data(**{ADMIN_INLINE_MSG_ID_KEY: cb.message.message_id, ADMIN_EDIT_PAGE_KEY: 0})
+    show_files, _titles, _category, _level, _header = await _admin_collect_topics_for_view(state)
+    if not show_files:
         kb = _ikb([
-            [("🏠 В меню /addtopic", "adm:home")],  # 💬 выход из админки
-            [("⬅️ Закрыть", "adm:close")]
+            [("✅ Тема удалена", "adm:topics_page_info")],
+            [("➕ Add topic", "adm:home"), ("⬅️ Закрыть", "adm:close")],
         ])
-
         await _inline_replace(cb, state, "✅ Тема удалена.\nТем больше нет.", kb)
         await cb.answer()
         return
 
-    rows = []
-    for nm in files[:30]:
-        t = _make_tid(nm)
-        rows.append([(nm, f"adm:topic:{t}")])
-        
-    rows.append([("🏠 В меню /addtopic", "adm:home")])
-    rows.append([("⬅️ Закрыть", "adm:close")])
-
-    kb = _ikb(rows)
-    await _inline_replace(cb, state, "✅ Тема удалена.\nВыбери следующую тему:", kb)
-    await cb.answer()
+    await _admin_render_topics_list(cb, state, force_page=0)
+    await cb.answer("✅ Тема удалена")
 
 
 
@@ -2587,58 +2634,21 @@ async def get_level_for_topic(message: Message, state: FSMContext):
     st = await state.get_data()
     if st.get(ADMIN_EDIT_MODE_KEY):
         category = (st.get("topic") or {}).get("category") or st.get(ADMIN_EDIT_CATEGORY_KEY)
-        await state.update_data(**{ADMIN_EDIT_CATEGORY_KEY: category, ADMIN_EDIT_LEVEL_KEY: level})  # 💬 фильтр списка тем
+        await state.update_data(**{
+            ADMIN_EDIT_CATEGORY_KEY: category,
+            ADMIN_EDIT_LEVEL_KEY: level,
+            ADMIN_EDIT_PAGE_KEY: 0,
+        })  # 💬 фильтр списка тем + старт с первой страницы
 
-        topic_map_all, files = _load_topics_index()
-        topics_dir = get_topics_dir()
-
-        filtered = []
-        titles = {}
-
-        for name in files:
-            path = topics_dir / f"{name}.json"
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    topic_data = json.load(f) or {}
-            except Exception:
-                continue
-
-            if topic_data.get("category") != category:
-                continue
-            if topic_data.get("level") != level:
-                continue
-
-            filtered.append(name)
-            titles[name] = topic_data.get("visible_title") or topic_data.get("name") or name  # 💬 показываем человеко-читаемый тайтл
-
-        topic_map = {_make_tid(n): n for n in filtered}
-        await state.update_data(**{ADMIN_TOPIC_MAP_KEY: topic_map})
-
-        if not filtered:
+        show_files, titles, _category, _level, header = await _admin_collect_topics_for_view(state)
+        if not show_files:
             await message.answer("⚠️ Нет тем для редактирования в выбранном уровне.\nНажми ⬅️ Назад и выбери другой уровень.")  # 💬 защита от пустого фильтра
             return
 
-        cat_label = "Лексика" if category == "lex" else "Грамматика"
-
-        rows = []
-        for name in filtered[:30]:
-            tid = _make_tid(name)
-            label = titles.get(name) or name
-            rows.append([(label, f"adm:topic:{tid}")])
-
-        rows.append([("🏠 В меню /addtopic", "adm:home")])  # 💬 быстрый выход без тупиков
-        rows.append([("⬅️ Закрыть", "adm:close")])
-
-        kb = _ikb(rows)
-        await _inline_open(
-            message,
-            state,
-            f"✏️ <b>Редактировать темы</b>\nКатегория: {cat_label} | Уровень: {level}\nВыбери тему:",
-            kb
-        )
+        kb = _admin_build_topics_list_kb(show_files, titles, page=0)
+        await _inline_open(message, state, header, kb)
         await state.set_state(NewTopicStates.waiting_edit_topic_choice)  # 💬 фиксируем режим редактирования
         return
-
     await message.answer("Уровень выбран. Теперь введи НАЗВАНИЕ новой темы:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(NewTopicStates.waiting_topic_name)
     # 💬 После выбора уровня переходим к вводу названия темы.
