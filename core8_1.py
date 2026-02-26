@@ -4697,17 +4697,19 @@ async def show_leaderboard(message: Message, state: FSMContext):
             for u in shown_rows
         )
 
-        def _line(pos: int, user: dict) -> str:
+        def _line(pos: int, user: dict, period_stars: int | None = None) -> str:
             rank_cell = f"{pos})".ljust(rank_col)
             medal_cell = place_icons.get(pos, " ")
             name_cell = _name_display(user.get("name", "")).ljust(name_col)
             cookies = int(user.get(period_key, 0) or 0)
-            stars = int(user.get("stars_total", 0) or 0)
+            stars = cookies // 5 if period_stars is not None else int(user.get("stars_total", 0) or 0)
             cookie_cell = f"🍪{cookies}".ljust(cookie_metric_col)
             return f"{rank_cell}{medal_cell}{name_cell} {cookie_cell} | ⭐{stars}"
 
         for idx, user in enumerate(top5, 1):
-            line = _line(idx, user)
+            period_words = int(user.get(period_key, 0) or 0)
+            period_stars = period_words // 5  # 1 звезда за каждые 5 выученных слов (только визуал топ-5 рейтинга)
+            line = _line(idx, user, period_stars)
             if str(user.get("uid", "")) == current_uid:
                 line = f"<b>{line}</b>"
             res.append(line)
