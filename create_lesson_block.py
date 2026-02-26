@@ -1525,12 +1525,47 @@ async def admin_edit_scope(cb: CallbackQuery, state: FSMContext):
         max_idx_user = len(items)
         await state.set_state(AdminInlineEditStates.waiting_delete_index)
 
-        text = (
-            f"🗑 Удаление: <b>{label}</b>\n"
-            f"Тема: <b>{topic_data.get('name', '')}</b>\n\n"
-            f"Введите индекс (1..{max_idx_user})\n"
-            f"или напиши Отмена"
-        )
+        if scope == "vocab":
+            phases = topic_data.get("vocab", [])
+            phase_lines = []
+            for idx, phase in enumerate(phases, start=1):
+                phase_name = str((phase or {}).get("phase_name") or "").strip() or f"Фаза {idx}"
+                phase_lines.append(f"{idx}) {phase_name}")
+
+                phrases = (phase or {}).get("phrases")
+                if not isinstance(phrases, list) or not phrases:
+                    phrases = (phase or {}).get("vocab")
+                if not isinstance(phrases, list):
+                    phrases = []
+
+                shown = 0
+                for pair in phrases:
+                    if not isinstance(pair, dict):
+                        continue
+                    es = str(pair.get("es") or "").strip()
+                    ru = str(pair.get("ru") or "").strip()
+                    if not es and not ru:
+                        continue
+                    phase_lines.append(f"   - {es or '…'} — {ru or '…'}")
+                    shown += 1
+                    if shown >= 3:
+                        break
+
+            phases_text = "\n".join(phase_lines)
+            text = (
+                f"🗑 Удаление: <b>{label}</b>\n"
+                f"Тема: <b>{topic_data.get('name', '')}</b>\n\n"
+                f"{phases_text}\n\n"
+                f"Введите индекс для удаления (1..{max_idx_user})\n"
+                f"или напиши Отмена"
+            )
+        else:
+            text = (
+                f"🗑 Удаление: <b>{label}</b>\n"
+                f"Тема: <b>{topic_data.get('name', '')}</b>\n\n"
+                f"Введите индекс (1..{max_idx_user})\n"
+                f"или напиши Отмена"
+            )
         await _inline_replace(cb, state, text, nav_kb)
         await cb.answer()
         return
@@ -1766,6 +1801,7 @@ async def admin_edit_waiting_delete_index(message: Message, state: FSMContext):
         await _inline_edit_by_id(message, state, f"❌ Индекс должен быть 1..{max_idx_user}", nav_kb)
         return
 
+    removed = items[idx_user - 1]
     items.pop(idx_user - 1)
 
     if scope == "vocab":
@@ -1785,10 +1821,15 @@ async def admin_edit_waiting_delete_index(message: Message, state: FSMContext):
 
     section_label = data.get("admin_selected_label") or "Раздел"
     total_now = len(items)
+    removed_name = str((removed or {}).get("phase_name") or "").strip()
+    if not removed_name and scope == "vocab":
+        removed_name = f"Фаза {idx_user}"
 
+    removed_line = f"Удалённая фаза: {removed_name}\n" if removed_name else ""
     note_text = (
         f"✅ Сохранено: <b>{section_label}</b>\n"
         f"Удалено: 1\n"
+        f"{removed_line}"
         f"Индекс: {idx_user}\n"
         f"Всего в разделе: {total_now}\n"
         f"Пропущено: 0"
