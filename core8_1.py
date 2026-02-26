@@ -36,6 +36,9 @@ import sys
 import traceback
 import re  # 💬 нужен для конвертации [[...]] → ||...||
 from urllib.parse import quote  # 💬 кодируем text/url для t.me/share/url
+from zoneinfo import ZoneInfo
+
+from notify_scheduler import should_send_daily_notification
 
 # ——— Aiogram core ————————————————————————————————————————————————
 from aiogram import Bot, Dispatcher, F                   # Bot/DP и фильтр F  
@@ -123,6 +126,8 @@ def get_lex_level_state(user_id: int) -> dict:
 
 # 💬 минимальная задержка между удалением старого и показом нового квиза
 QUIZ_NEXT_DELAY = 0.35  # секунды; можно уменьшать до 0.25, но ниже 0.2 риск флуд-лимитов
+
+MADRID_TZ = ZoneInfo("Europe/Madrid")
 
 
 def check_subscription_kb(topic_key: str, channels: list[str]) -> InlineKeyboardMarkup:
@@ -1755,6 +1760,46 @@ def save_user_data(data):
     # 💬 сохраняем атомарно + backup
     _atomic_json_dump(USER_DATA_PATH, data)
     _atomic_json_dump(USER_DATA_BACKUP_PATH, data)
+
+
+async def daily_notifications_loop() -> None:
+    """
+    Раз в минуту проверяем user_data.settings.notify_time и шлём 1 напоминание в день.
+    notify_time пустой => уведомления выключены.
+    """
+    while True:
+        try:
+            now = datetime.datetime.now(MADRID_TZ)
+            user_data = load_user_data()
+            changed = False
+
+            for user_id, user in list(user_data.items()):
+                settings = (user or {}).setdefault("settings", {})
+                decision = should_send_daily_notification(settings=settings, now=now)
+                if not decision.due:
+                    continue
+
+                try:
+                    await bot.send_message(
+                        int(user_id),
+                        (
+                            "⏰ Напоминание\n\n"
+                            "Пора вернуться к испанскому сегодня 🇪🇸\n"
+                            "Открой меню и продолжай уроки 💪"
+                        ),
+                    )
+                    settings["last_notify_date"] = now.date().isoformat()
+                    changed = True
+                except Exception:
+                    logging.exception("daily_notifications_loop: send failed user_id=%s", user_id)
+
+            if changed:
+                save_user_data(user_data)
+
+        except Exception:
+            logging.exception("daily_notifications_loop: tick failed")
+
+        await asyncio.sleep(60)
 
 
 
@@ -13757,9 +13802,15 @@ if __name__ == '__main__':
 
         print("🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀 Бот запущен!")
         runner = await start_http_server()
+        notify_task = asyncio.create_task(daily_notifications_loop())
         try:
             await dp.start_polling(bot)
         finally:
+            notify_task.cancel()
+            try:
+                await notify_task
+            except asyncio.CancelledError:
+                pass
             if runner:
                 try:
                     await runner.cleanup()
