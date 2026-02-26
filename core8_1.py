@@ -5930,11 +5930,8 @@ async def mywords_send_next_quiz(message: Message, state: FSMContext):
     word_id = queue.pop(0)
     word = next((w for w in pool if w.get("id") == word_id), None)
     if not word:
+        logging.warning("mywords quiz desync: word_id=%s not found in pool, skipping", word_id)
         await state.update_data(mywords_quiz_queue=queue)
-        asyncio.create_task(_mywords_quiz_timeout_handler(
-            poll_msg.poll.id, message.chat.id, state, delay=int(QUIZ_TIMEOUT_TASK_S)
-        ))  # 💬 watchdog таймаут как в vocab, но без XP
-
         return await mywords_send_next_quiz(message, state)
 
     user_id = str(message.chat.id)
@@ -5955,6 +5952,10 @@ async def mywords_send_next_quiz(message: Message, state: FSMContext):
         is_anonymous=False               # 💬 чтобы поведение было как в vocab
     )
 
+
+    asyncio.create_task(_mywords_quiz_timeout_handler(
+        poll_msg.poll.id, message.chat.id, state, delay=int(QUIZ_TIMEOUT_TASK_S)
+    ))  # 💬 watchdog таймаут как в vocab, но без XP
 
     await state.update_data(
         mywords_quiz_queue=queue,
