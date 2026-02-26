@@ -546,6 +546,7 @@ class AdminInlineEditStates(StatesGroup):
     waiting_move_to = State()           # 💬 куда перемещаем
     waiting_insert_payload = State()    # 💬 ждём контент для вставки
     waiting_insert_index = State()      # 💬 ждём индекс вставки
+    waiting_vocab_allin_bulk = State()  # 💬 inline-режим: ждём ALL IN блок для выбранной фазы
 
 
 
@@ -1516,6 +1517,30 @@ async def admin_edit_scope(cb: CallbackQuery, state: FSMContext):
 
     nav_kb = _adm_nav_kb("adm:edit_sections")
 
+    if action == "insert" and scope == "vocab":
+        await state.update_data(adm_vocab_insert_mode="menu")
+        await state.set_state(AdminInlineEditStates.waiting_insert_payload)
+        menu_kb = _ikb(
+            [
+                [("1) Создать новую фазу", "adm:vocab_insert:mode:new")],
+                [("2) Выбрать существующую фазу", "adm:vocab_insert:mode:existing")],
+                [("3) Назад", "adm:edit_sections")],
+            ]
+        )
+        await _inline_replace(
+            cb,
+            state,
+            "➕ Добавление: <b>📚 Словарь</b>\n"
+            f"Тема: <b>{topic_data.get('name', '')}</b>\n\n"
+            "Выбери действие:\n"
+            "1) Создать новую фазу\n"
+            "2) Выбрать существующую фазу\n"
+            "3) Назад",
+            menu_kb,
+        )
+        await cb.answer()
+        return
+
     if action == "delete":
         items = topic_data.get(scope) or []
         if not isinstance(items, list) or not items:
@@ -1556,6 +1581,129 @@ async def admin_edit_scope(cb: CallbackQuery, state: FSMContext):
     await _inline_replace(cb, state, text, nav_kb)
     await cb.answer()
 
+
+def _admin_inline_vocab_allin_kb() -> InlineKeyboardMarkup:
+    return _ikb(
+        [
+            [("➕ Следующая фаза", "adm:vocab_insert:next_phase")],
+            [("⬅️ К разделам", "adm:edit_sections")],
+            [("🏠 В меню редактирования", "adm:edit_actions")],
+        ]
+    )
+
+
+async def _admin_inline_start_vocab_allin(message: Message, state: FSMContext, note: str = ""):
+    text = (
+        f"{note}\n" if note else ""
+    ) + (
+        "Вставь ALL IN блок одним сообщением...\n\n"
+        "[PHRASE]\n"
+        "ES: pagar con tarjeta\n"
+        "RU: платить картой\n"
+        "[POLL]\n"
+        "...\n"
+        "[TEXT]\n"
+        "...\n"
+        "[/PHRASE]"
+    )
+    await _inline_edit_by_id(message, state, text, _admin_inline_vocab_allin_kb())
+
+
+async def _admin_inline_create_vocab_phase(state: FSMContext, raw_name: str) -> dict:
+    topic_data, topic_path = await _admin_load_topic_from_disk(state)
+    if not topic_data or not topic_path:
+        return {}
+
+    phases = topic_data.setdefault("vocab", [])
+    if not isinstance(phases, list):
+        phases = []
+        topic_data["vocab"] = phases
+
+    phase_id = len(phases) + 1
+    phase_name = (raw_name or "").strip()
+    if not phase_name or phase_name == "-":
+        phase_name = f"📦 Пак слов {phase_id}"
+
+    new_phase = {
+        "phase_id": phase_id,
+        "phase_name": phase_name,
+        "phrases": [],
+        "vocab": [],
+        "blocks": [],
+    }
+    phases.append(new_phase)
+    atomic_save_json(topic_path, topic_data)
+
+    await state.update_data(topic=topic_data, topic_path=topic_path, current_phase_id=phase_id, adm_vocab_insert_mode="allin")
+    return new_phase
+
+
+@router.callback_query(F.data.startswith("adm:vocab_insert:mode:"))
+async def admin_vocab_insert_mode(cb: CallbackQuery, state: FSMContext):
+    mode = (cb.data or "").split("adm:vocab_insert:mode:", 1)[1].strip()
+    nav_kb = _adm_nav_kb("adm:edit_sections")
+
+    if mode == "new":
+        await state.update_data(adm_vocab_insert_mode="create_phase_name")
+        await state.set_state(AdminInlineEditStates.waiting_insert_payload)
+        await _inline_replace(cb, state, "Пришли название фазы (или '-' для авто).", nav_kb)
+        await cb.answer()
+        return
+
+    if mode == "existing":
+        topic_data, _ = await _admin_load_topic_from_disk(state)
+        phases = (topic_data or {}).get("vocab") or []
+        if not isinstance(phases, list) or not phases:
+            await cb.answer("Нет фаз. Сначала создай новую.", show_alert=True)
+            return
+
+        rows = []
+        for idx, phase in enumerate(phases, start=1):
+            pid = int(phase.get("phase_id") or idx)
+            pname = (phase.get("phase_name") or f"📦 Пак слов {idx}").strip()
+            rows.append([(f"{idx}) {pname}", f"adm:vocab_insert:pick:{pid}")])
+        rows.append([("⬅️ Назад", "adm:edit_scope:vocab")])
+        await state.update_data(adm_vocab_insert_mode="choose_existing")
+        await _inline_replace(cb, state, "Выбери фазу словаря:", _ikb(rows))
+        await cb.answer()
+        return
+
+    await _inline_replace(cb, state, "❌ Неизвестный режим", nav_kb)
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("adm:vocab_insert:pick:"))
+async def admin_vocab_insert_pick_phase(cb: CallbackQuery, state: FSMContext):
+    raw = (cb.data or "").split("adm:vocab_insert:pick:", 1)[1].strip()
+    try:
+        phase_id = int(raw)
+    except Exception:
+        await cb.answer("Некорректный выбор", show_alert=True)
+        return
+
+    topic_data, topic_path = await _admin_load_topic_from_disk(state)
+    phases = (topic_data or {}).get("vocab") or []
+    phase = next((p for p in phases if int(p.get("phase_id") or 0) == phase_id), None)
+    if not phase:
+        await cb.answer("Фаза не найдена", show_alert=True)
+        return
+
+    await state.update_data(topic=topic_data, topic_path=topic_path, current_phase_id=phase_id, adm_vocab_insert_mode="allin")
+    await state.set_state(AdminInlineEditStates.waiting_vocab_allin_bulk)
+    await _inline_replace(cb, state, "✅ Фаза выбрана. Вставь ALL IN блок одним сообщением...", _admin_inline_vocab_allin_kb())
+    await cb.answer()
+
+
+@router.callback_query(F.data == "adm:vocab_insert:next_phase")
+async def admin_vocab_insert_next_phase(cb: CallbackQuery, state: FSMContext):
+    phase = await _admin_inline_create_vocab_phase(state, "-")
+    if not phase:
+        await cb.answer("Не удалось создать фазу", show_alert=True)
+        return
+    await state.set_state(AdminInlineEditStates.waiting_vocab_allin_bulk)
+    await _inline_replace(cb, state, f"✅ Создана {phase.get('phase_name')}. Вставь ALL IN блок одним сообщением...", _admin_inline_vocab_allin_kb())
+    await cb.answer()
+
 @router.message(AdminInlineEditStates.waiting_insert_payload)
 async def admin_edit_waiting_insert_payload(message: Message, state: FSMContext):
     # 💬 принимает payload, считает пропуски, затем спрашивает индекс вставки (1-based)
@@ -1567,6 +1715,20 @@ async def admin_edit_waiting_insert_payload(message: Message, state: FSMContext)
         return
 
     data = await state.get_data()
+    vocab_mode = (data.get("adm_vocab_insert_mode") or "").strip()
+
+    if vocab_mode == "create_phase_name":
+        phase = await _admin_inline_create_vocab_phase(state, payload_raw)
+        if not phase:
+            await _inline_edit_by_id(message, state, "❗ Ошибка: не найден файл темы", nav_kb)
+            return
+        await state.set_state(AdminInlineEditStates.waiting_vocab_allin_bulk)
+        await _admin_inline_start_vocab_allin(message, state, note=f"✅ Создана фаза: <b>{phase.get('phase_name')}</b>")
+        return
+    if vocab_mode in {"menu", "choose_existing"}:
+        await _inline_edit_by_id(message, state, "Выбери действие кнопками: создать или выбрать фазу.", _adm_nav_kb("adm:edit_sections"))
+        return
+
     scope = data.get(ADMIN_EDIT_SCOPE_KEY)
     kind = data.get(ADMIN_PENDING_INSERT_KIND_KEY)
 
@@ -4027,6 +4189,61 @@ async def import_vocab_allin_bulk(message: Message, state: FSMContext):
 
     # 💬 остаёмся в режиме приёма следующего блока
     await state.set_state(NewTopicStates.waiting_vocab_allin_bulk)
+
+
+@router.message(AdminInlineEditStates.waiting_vocab_allin_bulk)
+async def admin_inline_import_vocab_allin_bulk(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+    if text.lower() in {"отмена", "cancel"}:
+        await _adm_show_actions_msg(message, state)
+        return
+
+    data = await state.get_data()
+    topic_data, topic_path = await _admin_load_topic_from_disk(state)
+    cp = data.get("current_phase_id")
+
+    if not topic_data or not topic_path:
+        await _inline_edit_by_id(message, state, "❗ Ошибка: не найден файл темы", _adm_nav_kb("adm:edit_sections"))
+        return
+
+    phases = topic_data.get("vocab") or []
+    phase = next((p for p in phases if int(p.get("phase_id") or 0) == int(cp or 0)), None)
+    if not phase:
+        await _inline_edit_by_id(message, state, "❌ Фаза не найдена. Создай/выбери фазу заново.", _adm_nav_kb("adm:edit_sections"))
+        await state.set_state(AdminInlineEditStates.waiting_insert_payload)
+        await state.update_data(adm_vocab_insert_mode="menu")
+        return
+
+    phrases_objs, errors, meta = _parse_allin_block(text)
+    before_cnt = len(phase.get("phrases", []) or [])
+    phase.setdefault("phrases", []).extend(phrases_objs)
+    added_cnt = len(phase.get("phrases", []) or []) - before_cnt
+
+    atomic_save_json(topic_path, topic_data)
+    await state.update_data(topic=topic_data, topic_path=topic_path, adm_vocab_insert_mode="allin")
+
+    found = (meta or {}).get("found", 0)
+    saved = (meta or {}).get("saved", 0)
+    invalid = (meta or {}).get("invalid", 0)
+    truncated = (meta or {}).get("truncated", 0)
+
+    msg_lines = [
+        "✅ ALL IN сохранено",
+        f"📌 Найдено PHRASE: {found}",
+        f"✅ Сохранено фраз: {saved}",
+        f"✅ Добавлено в фазу: {added_cnt}",
+    ]
+    if invalid:
+        msg_lines.append(f"⚠️ Пропущено из-за ES/RU: {invalid}")
+    if truncated:
+        msg_lines.append("⚠️ Обрезанный хвост не сохранён, пришли продолжение отдельным сообщением")
+    if errors:
+        msg_lines.append("")
+        msg_lines.append("⚠️ Ошибки (первые 10):")
+        msg_lines.extend(errors[:10])
+
+    await _inline_edit_by_id(message, state, "\n".join(msg_lines), _admin_inline_vocab_allin_kb())
+    await state.set_state(AdminInlineEditStates.waiting_vocab_allin_bulk)
 
 
 
