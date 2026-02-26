@@ -547,6 +547,8 @@ class AdminInlineEditStates(StatesGroup):
     waiting_insert_payload = State()    # 💬 ждём контент для вставки
     waiting_insert_index = State()      # 💬 ждём индекс вставки
     waiting_vocab_allin_bulk = State()  # 💬 inline-режим: ждём ALL IN блок для выбранной фазы
+    waiting_topic_title = State()      # 💬 ждём новое название темы
+    waiting_topic_description = State() # 💬 ждём новое описание темы
 
 
 
@@ -1313,6 +1315,7 @@ async def admin_topic_edit(cb: CallbackQuery, state: FSMContext):
         [
             [("➕ Добавить", "adm:edit_action:insert"), ("🗑 Удалить", "adm:edit_action:delete")],
             [("👁 Просмотр", "adm:topic_preview")],
+            [("🏷 Название", "adm:edit_topic_title"), ("📝 Описание", "adm:edit_topic_description")],
             [("⬅️ К карточке темы", "adm:topic_card")],
             [("⬅️ К списку тем", "adm:topics"), ("⬅️ Закрыть", "adm:close")],
         ]
@@ -1414,6 +1417,7 @@ async def _adm_show_actions_msg(message: Message, state: FSMContext, note_text: 
         [
             [("➕ Добавить", "adm:edit_action:insert"), ("🗑 Удалить", "adm:edit_action:delete")],
             [("👁 Просмотр", "adm:topic_preview")],
+            [("🏷 Название", "adm:edit_topic_title"), ("📝 Описание", "adm:edit_topic_description")],
             [("⬅️ К карточке темы", "adm:topic_card")],
             [("⬅️ К списку тем", "adm:topics"), ("⬅️ Закрыть", "adm:close")],
         ]
@@ -1479,6 +1483,32 @@ async def admin_edit_action_delete(cb: CallbackQuery, state: FSMContext):
     await state.update_data(**{ADMIN_PENDING_ACTION_KEY: "delete"})
     await _adm_show_sections_cb(cb, state)
 
+
+
+@router.callback_query(F.data == "adm:edit_topic_title")
+async def admin_edit_topic_title(cb: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminInlineEditStates.waiting_topic_title)
+    await _inline_replace(
+        cb,
+        state,
+        "🏷 Введите новое название темы\n\n"
+        "Или напишите Отмена, чтобы вернуться назад.",
+        _adm_nav_kb("adm:edit_actions"),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data == "adm:edit_topic_description")
+async def admin_edit_topic_description(cb: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminInlineEditStates.waiting_topic_description)
+    await _inline_replace(
+        cb,
+        state,
+        "📝 Введите новое описание темы\n\n"
+        "Или напишите Отмена, чтобы вернуться назад.",
+        _adm_nav_kb("adm:edit_actions"),
+    )
+    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("adm:edit_scope:"))  # 💬 используем общий router, чтобы не падало на импорте
@@ -1927,6 +1957,51 @@ async def admin_edit_waiting_insert_index(message: Message, state: FSMContext):
     )
     await _adm_show_actions_msg(message, state, note_text=note_text)
 
+
+
+@router.message(AdminInlineEditStates.waiting_topic_title)
+async def admin_edit_waiting_topic_title(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+    if text.lower() in {"отмена", "cancel"}:
+        await _adm_show_actions_msg(message, state)
+        return
+    if not text:
+        await _inline_edit_by_id(message, state, "❌ Название не может быть пустым", _adm_nav_kb("adm:edit_actions"))
+        return
+
+    topic_data, topic_path = await _admin_load_topic_from_disk(state)
+    if not topic_data or not topic_path:
+        await _inline_edit_by_id(message, state, "❗ Ошибка: не найден файл темы", _adm_nav_kb("adm:edit_actions"))
+        return
+
+    topic_data["visible_title"] = text
+    if str(topic_data.get("name") or "").strip():
+        topic_data["name"] = text
+
+    atomic_save_json(topic_path, topic_data)
+    await state.update_data(topic=topic_data, topic_path=topic_path)
+    await _adm_show_actions_msg(message, state, note_text=f"✅ Название обновлено: <b>{_preview_text(text, 80)}</b>")
+
+
+@router.message(AdminInlineEditStates.waiting_topic_description)
+async def admin_edit_waiting_topic_description(message: Message, state: FSMContext):
+    text = (message.text or "").strip()
+    if text.lower() in {"отмена", "cancel"}:
+        await _adm_show_actions_msg(message, state)
+        return
+    if not text:
+        await _inline_edit_by_id(message, state, "❌ Описание не может быть пустым", _adm_nav_kb("adm:edit_actions"))
+        return
+
+    topic_data, topic_path = await _admin_load_topic_from_disk(state)
+    if not topic_data or not topic_path:
+        await _inline_edit_by_id(message, state, "❗ Ошибка: не найден файл темы", _adm_nav_kb("adm:edit_actions"))
+        return
+
+    topic_data["description"] = text
+    atomic_save_json(topic_path, topic_data)
+    await state.update_data(topic=topic_data, topic_path=topic_path)
+    await _adm_show_actions_msg(message, state, note_text="✅ Описание обновлено")
 
 
 @router.message(AdminInlineEditStates.waiting_delete_index)
