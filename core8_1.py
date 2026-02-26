@@ -39,6 +39,7 @@ from urllib.parse import quote  # 💬 кодируем text/url для t.me/sha
 from zoneinfo import ZoneInfo
 
 from notify_scheduler import should_send_daily_notification
+from mywords_repository import MyWordsRepository
 
 # ——— Aiogram core ————————————————————————————————————————————————
 from aiogram import Bot, Dispatcher, F                   # Bot/DP и фильтр F  
@@ -1659,53 +1660,19 @@ FREE_MYWORDS_WORDS_PER_CAT_LIMIT = int(os.getenv("FREE_MYWORDS_WORDS_PER_CAT_LIM
 MYWORDS_HARD_WORDS_PER_CAT_LIMIT = int(os.getenv("MYWORDS_HARD_WORDS_PER_CAT_LIMIT", "30"))
 
 
-def load_my_words_data() -> dict:
-    # 💬 грузим my_words; если файла нет или он битый = создаём пустой или восстанавливаем из backup
-    if not os.path.exists(MY_WORDS_PATH):
-        if os.path.exists(MY_WORDS_BACKUP_PATH):
-            try:
-                with open(MY_WORDS_BACKUP_PATH, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                _atomic_json_dump(MY_WORDS_PATH, data)
-                return data
-            except Exception:
-                pass
-        data = {"users": {}}
-        _atomic_json_dump(MY_WORDS_PATH, data)
-        _atomic_json_dump(MY_WORDS_BACKUP_PATH, data)
-        return data
+MYWORDS_REPOSITORY = MyWordsRepository(MY_WORDS_PATH, MY_WORDS_BACKUP_PATH)
 
-    try:
-        with open(MY_WORDS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        # 💬 если основной файл битый = пробуем восстановить из backup
-        if os.path.exists(MY_WORDS_BACKUP_PATH):
-            try:
-                with open(MY_WORDS_BACKUP_PATH, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                _atomic_json_dump(MY_WORDS_PATH, data)
-                return data
-            except Exception:
-                pass
-        data = {"users": {}}
-        _atomic_json_dump(MY_WORDS_PATH, data)
-        _atomic_json_dump(MY_WORDS_BACKUP_PATH, data)
-        return data
 
-def save_my_words_data(data: dict) -> None:
-    # 💬 сохраняем атомарно + backup
-    _atomic_json_dump(MY_WORDS_PATH, data)
-    _atomic_json_dump(MY_WORDS_BACKUP_PATH, data)
+async def load_my_words_data() -> dict:
+    return await MYWORDS_REPOSITORY.load_copy()
+
+
+async def save_my_words_data(data: dict) -> None:
+    await MYWORDS_REPOSITORY.save(data)
+
 
 def ensure_my_words_user(data: dict, user_id: str) -> dict:
-    # 💬 создаём структуру пользователя, если её ещё нет
-    users = data.setdefault("users", {})
-    u = users.setdefault(user_id, {})
-    is_first_start = ("first_join" not in u)  # 💬 важно для рефералки: учитываем только первый /start
-    u.setdefault("settings", {"session_words": 5})
-    u.setdefault("categories", {})
-    return u
+    return MYWORDS_REPOSITORY.ensure_user(data, user_id)
 
 def parse_es_ru_pair(raw: str):
     # 💬 парсим строку формата ES - RU / ES = RU (принимаем разные тире и '=')
@@ -5739,51 +5706,28 @@ def mywords_build_categories_kb(categories: list, cb_prefix: str, back_cb: str) 
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-async def _parse_mywords_callback_index(
-    callback: CallbackQuery,
-    state: FSMContext,
-    categories: list,
-    *,
-    fallback_to_categories_mode: str | None = None,
-) -> int | None:
-    try:
-        idx = int(callback.data.split(":")[-1])
-    except (ValueError, IndexError):
-        await callback.answer("Некорректные данные", show_alert=False)
-        if fallback_to_categories_mode:
-            await mywords_show_categories(callback.message, state, mode=fallback_to_categories_mode)
-        else:
-            await mywords_menu(callback.message, state)
-        return None
-
-    if idx < 0 or idx >= len(categories):
-        await callback.answer("Некорректные данные", show_alert=False)
-        if fallback_to_categories_mode:
-            await mywords_show_categories(callback.message, state, mode=fallback_to_categories_mode)
-        else:
-            await mywords_menu(callback.message, state)
-        return None
-
-    return idx
-
-def mywords_get_user_block(user_id: str) -> tuple[dict, dict]:
+async def mywords_get_user_block(user_id: str) -> tuple[dict, dict]:
     # 💬 загружаем хранилище и блок пользователя
-    store = load_my_words_data()
+    store = await load_my_words_data()
     u = ensure_my_words_user(store, user_id)
     return store, u
 
-def mywords_get_categories(user_id: str) -> list:
+async def mywords_get_categories(user_id: str) -> list:
     # 💬 список категорий в стабильном порядке
-    _, u = mywords_get_user_block(user_id)
-    cats = list(u.get("categories", {}).keys())
-    cats.sort(key=lambda x: x.lower())
-    return cats
+    def _reader(data: dict):
+        user = ensure_my_words_user(data, user_id)
+        cats = list(user.get("categories", {}).keys())
+        cats.sort(key=lambda x: x.lower())
+        return cats
+    return await MYWORDS_REPOSITORY.read(_reader)
 
-def mywords_get_session_words(user_id: str) -> int:
+async def mywords_get_session_words(user_id: str) -> int:
     # 💬 читаем session_words из настроек
-    _, u = mywords_get_user_block(user_id)
-    n = int(u.get("settings", {}).get("session_words", 5) or 5)
-    return max(1, min(n, 30))
+    def _reader(data: dict):
+        user = ensure_my_words_user(data, user_id)
+        n = int(user.get("settings", {}).get("session_words", 5) or 5)
+        return max(1, min(n, 30))
+    return await MYWORDS_REPOSITORY.read(_reader)
 
 def mywords_words_for_mode(u: dict, category: str, mode: str) -> list:
     # 💬 new = learned False, repeat = learned True
@@ -5811,6 +5755,39 @@ def mywords_build_quiz_options(correct_es: str, all_es: list) -> tuple[list, int
 
     random.shuffle(options)
     return options, options.index(correct_es)
+
+
+
+def _mywords_delete_word_at_index(data: dict, user_id: str, category: str, idx: int) -> bool:
+    user = ensure_my_words_user(data, user_id)
+    words = user.get("categories", {}).get(category, [])
+    if 1 <= idx <= len(words):
+        words.pop(idx - 1)
+        return True
+    return False
+
+
+def _mywords_update_word_at_index(data: dict, user_id: str, category: str, idx: int, pair: dict) -> bool:
+    user = ensure_my_words_user(data, user_id)
+    words = user.get("categories", {}).get(category, [])
+    if 1 <= idx <= len(words):
+        words[idx - 1]["es"] = pair.get("es", "")
+        words[idx - 1]["ru"] = pair.get("ru", "")
+        return True
+    return False
+
+
+def _mywords_rename_category(data: dict, user_id: str, old_name: str, new_name: str) -> str:
+    user = ensure_my_words_user(data, user_id)
+    cats = user.get("categories", {})
+
+    if not old_name or old_name not in cats:
+        return "missing"
+    if new_name in cats:
+        return "exists"
+
+    cats[new_name] = cats.pop(old_name, [])
+    return "renamed"
 
 async def mywords_show_main_menu(message: Message, state: FSMContext):
     # 💬 возвращаемся в главное инлайн-меню без /start
@@ -5937,8 +5914,8 @@ async def _mywords_temp_note(
 async def mywords_menu(message: Message, state: FSMContext):
     # 💬 показываем меню «Мои слова» (всегда через редактирование "якоря")
     user_id = str(message.chat.id)
-    store, _ = mywords_get_user_block(user_id)
-    save_my_words_data(store)  # 💬 гарантируем файл в Volume
+    # 💬 read() создаст/восстановит файл при необходимости, но без лишней перезаписи на каждый вход
+    await MYWORDS_REPOSITORY.read(lambda data: ensure_my_words_user(data, user_id))
 
     txt = "🧩 *Мои слова*\n\nВыбирай действие:"
     kb = build_mywords_menu_kb()
@@ -5949,7 +5926,7 @@ async def mywords_menu(message: Message, state: FSMContext):
 async def mywords_show_categories(message: Message, state: FSMContext, mode: str):
     # 💬 список категорий для режима обучения (всегда через якорное редактирование)
     user_id = str(message.chat.id)
-    categories = mywords_get_categories(user_id)
+    categories = await mywords_get_categories(user_id)
 
     await state.update_data(mywords_mode=mode, mywords_categories=categories)
 
@@ -5971,13 +5948,14 @@ async def mywords_show_categories(message: Message, state: FSMContext, mode: str
 
 async def mywords_mark_learned(user_id: str, category: str, word_id: str):
     # 💬 отмечаем слово как выученное (learned=true)
-    store, u = mywords_get_user_block(user_id)
-    words = u.get("categories", {}).get(category, [])
-    for w in words:
-        if w.get("id") == word_id:
-            w["learned"] = True
-            break
-    save_my_words_data(store)
+    def _mutator(data: dict):
+        user = ensure_my_words_user(data, user_id)
+        words = user.get("categories", {}).get(category, [])
+        for w in words:
+            if w.get("id") == word_id:
+                w["learned"] = True
+                break
+    await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
 
 async def mywords_send_next_quiz(message: Message, state: FSMContext):
     # 💬 следующий quiz RU=>ES, пока очередь не опустеет
@@ -5996,9 +5974,10 @@ async def mywords_send_next_quiz(message: Message, state: FSMContext):
         return await mywords_send_next_quiz(message, state)
 
     user_id = str(message.chat.id)
-    _, u = mywords_get_user_block(user_id)
     category = data.get("mywords_category", "")
-    all_es = mywords_all_es_in_category(u, category)
+    all_es = await MYWORDS_REPOSITORY.read(
+        lambda loaded: mywords_all_es_in_category(ensure_my_words_user(loaded, user_id), category)
+    )
 
     options, correct_id = mywords_build_quiz_options(word.get("es", ""), all_es)
     question = f"Как по-испански: {word.get('ru','')}?"
@@ -6170,7 +6149,7 @@ async def mywords_learn_repeat_any_cb(callback: CallbackQuery, state: FSMContext
 async def mywords_settings_any_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     user_id = str(callback.message.chat.id)
-    current = mywords_get_session_words(user_id)
+    current = await mywords_get_session_words(user_id)
 
     txt = (
         "⚙️ Настройки\n\n"
@@ -6199,9 +6178,11 @@ async def mywords_settings_wait_number(message: Message, state: FSMContext):
         return
 
     n = max(1, min(int(raw), 30))
-    store, u = mywords_get_user_block(user_id)
-    u.setdefault("settings", {})["session_words"] = n
-    save_my_words_data(store)
+    def _mutator(data: dict):
+        user = ensure_my_words_user(data, user_id)
+        user.setdefault("settings", {})["session_words"] = n
+
+    await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
 
     # 💬 сразу возвращаемся в меню (без новых сообщений)
     return await mywords_menu(message, state)
@@ -6215,7 +6196,7 @@ async def mywords_settings_wait_number(message: Message, state: FSMContext):
 async def mywords_add_open_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     user_id = str(callback.message.chat.id)
-    categories = mywords_get_categories(user_id)
+    categories = await mywords_get_categories(user_id)
     await state.update_data(mywords_categories=categories)
 
     kb_rows = [[InlineKeyboardButton(text=name, callback_data=f"mywords:addcat:{i}")] for i, name in enumerate(categories)]
@@ -6274,10 +6255,11 @@ async def mywords_add_newcat_cb(callback: CallbackQuery, state: FSMContext):
 
     # 💬 FREE лимит на категории: 3 категории без Premium
     user_id = str(callback.message.chat.id)
-    store, u = mywords_get_user_block(user_id)
-    cats = u.setdefault("categories", {})
+    cats_count = await MYWORDS_REPOSITORY.read(
+        lambda data: len(ensure_my_words_user(data, user_id).setdefault("categories", {}))
+    )
 
-    if (not is_premium_active(callback.from_user.id)) and (len(cats) >= FREE_MYWORDS_CATEGORIES_LIMIT):
+    if (not is_premium_active(callback.from_user.id)) and (cats_count >= FREE_MYWORDS_CATEGORIES_LIMIT):
         await callback.message.answer(
             _premium_paywall_text(callback.from_user.id),
             reply_markup=_premium_paywall_kb("mywords:menu"),
@@ -6313,20 +6295,25 @@ async def mywords_add_newcat_name(message: Message, state: FSMContext):
         return
 
     # 💬 Подстраховка: если state выставили вручную, всё равно режем >3 категории без Premium
-    store, u = mywords_get_user_block(user_id)
-    cats = u.setdefault("categories", {})
+    def _mutator(data: dict):
+        u = ensure_my_words_user(data, user_id)
+        cats = u.setdefault("categories", {})
+        is_new_category = name not in cats
+        if is_new_category and (not is_premium_active(message.from_user.id)) and (len(cats) >= FREE_MYWORDS_CATEGORIES_LIMIT):
+            return False
+        if is_new_category:
+            category_created = True
+        cats.setdefault(name, [])
+        return True
 
-    is_new_category = name not in cats
-    if is_new_category and (not is_premium_active(message.from_user.id)) and (len(cats) >= FREE_MYWORDS_CATEGORIES_LIMIT):
+    ok = await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
+    if not ok:
         await message.answer(
             _premium_paywall_text(message.from_user.id),
             reply_markup=_premium_paywall_kb("mywords:menu"),
             parse_mode="HTML"
         )
         return
-
-    cats.setdefault(name, [])
-    save_my_words_data(store)
 
     await state.update_data(mywords_category=name)
 
@@ -6408,12 +6395,30 @@ async def mywords_add_save_cb(callback: CallbackQuery, state: FSMContext):
     category = data.get("mywords_category", "")
     pair = data.get("mywords_pending_pair") or {}
 
-    store, u = mywords_get_user_block(user_id)
-    cats = u.setdefault("categories", {})
-    words = cats.setdefault(category, [])
+    def _mutator(data_store: dict):
+        u = ensure_my_words_user(data_store, user_id)
+        cats = u.setdefault("categories", {})
+        words = cats.setdefault(category, [])
 
-    # 💬 FREE лимит: 10 слов в категории без Premium
-    if (not is_premium_active(callback.from_user.id)) and (len(words) >= FREE_MYWORDS_WORDS_PER_CAT_LIMIT):
+        # 💬 FREE лимит: 10 слов в категории без Premium
+        if (not is_premium_active(callback.from_user.id)) and (len(words) >= FREE_MYWORDS_WORDS_PER_CAT_LIMIT):
+            return "free_limit"
+
+        # 💬 жёсткий защитный лимит (даже с Premium)
+        if len(words) >= MYWORDS_HARD_WORDS_PER_CAT_LIMIT:
+            return "hard_limit"
+
+        words.append({
+            "id": gen_my_word_id(),
+            "es": pair.get("es", ""),
+            "ru": pair.get("ru", ""),
+            "learned": False
+        })
+        return "saved"
+
+    result = await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
+
+    if result == "free_limit":
         await callback.message.answer(
             _premium_paywall_text(callback.from_user.id),
             reply_markup=_premium_paywall_kb("mywords:menu"),
@@ -6421,23 +6426,13 @@ async def mywords_add_save_cb(callback: CallbackQuery, state: FSMContext):
         )
         return await mywords_menu(callback.message, state)
 
-    # 💬 жёсткий защитный лимит (даже с Premium)
-    if len(words) >= MYWORDS_HARD_WORDS_PER_CAT_LIMIT:
+    if result == "hard_limit":
         await _mywords_temp_note(
             callback.message,
             f"В категории уже {MYWORDS_HARD_WORDS_PER_CAT_LIMIT} слов. Создай новую категорию.",
             delay_sec=3
         )  # 💬 исчезнет через 3 сек
         return await mywords_menu(callback.message, state)
-
-
-    words.append({
-        "id": gen_my_word_id(),
-        "es": pair.get("es", ""),
-        "ru": pair.get("ru", ""),
-        "learned": False
-    })
-    save_my_words_data(store)
 
     await _mywords_temp_note(callback.message, "✅ Сохранено!", delay_sec=3)  # 💬 исчезнет через 3 сек
     return await mywords_menu(callback.message, state)
@@ -6465,19 +6460,23 @@ async def mywords_choose_cat_new_cb(callback: CallbackQuery, state: FSMContext):
     category = categories[idx]
     user_id = str(callback.message.chat.id)
 
-    store, u = mywords_get_user_block(user_id)
-    pool_words = mywords_words_for_mode(u, category, mode="new")
-    if not pool_words:
+    def _mutator(data_store: dict):
+        u = ensure_my_words_user(data_store, user_id)
+        pool_words = mywords_words_for_mode(u, category, mode="new")
+        if not pool_words:
+            return []
+
+        pool = []
+        for w in pool_words:
+            if not w.get("id"):
+                w["id"] = gen_my_word_id()  # 💬 id нужен при дубликатах ES
+            pool.append({"id": w["id"], "es": w.get("es",""), "ru": w.get("ru","")})
+        return pool
+
+    pool = await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
+    if not pool:
         await _mywords_temp_note(callback.message, "В этой категории нет новых слов. Возвращаю к категориям.", delay_sec=3)
         return await mywords_show_categories(callback.message, state, mode="new")
-
-
-    pool = []
-    for w in pool_words:
-        if not w.get("id"):
-            w["id"] = gen_my_word_id()  # 💬 id нужен при дубликатах ES
-        pool.append({"id": w["id"], "es": w.get("es",""), "ru": w.get("ru","")})
-    save_my_words_data(store)
 
     quiz_queue = [w["id"] for w in pool]
     random.shuffle(quiz_queue)
@@ -6517,19 +6516,23 @@ async def mywords_choose_cat_repeat_cb(callback: CallbackQuery, state: FSMContex
     category = categories[idx]
     user_id = str(callback.message.chat.id)
 
-    store, u = mywords_get_user_block(user_id)
-    pool_words = mywords_words_for_mode(u, category, mode="repeat")
-    if not pool_words:
+    def _mutator(data_store: dict):
+        u = ensure_my_words_user(data_store, user_id)
+        pool_words = mywords_words_for_mode(u, category, mode="repeat")
+        if not pool_words:
+            return []
+
+        pool = []
+        for w in pool_words:
+            if not w.get("id"):
+                w["id"] = gen_my_word_id()
+            pool.append({"id": w["id"], "es": w.get("es",""), "ru": w.get("ru","")})
+        return pool
+
+    pool = await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
+    if not pool:
         await _mywords_temp_note(callback.message, "В этой категории нет выученных слов. Возвращаю к категориям.", delay_sec=3)
         return await mywords_show_categories(callback.message, state, mode="repeat")
-
-
-    pool = []
-    for w in pool_words:
-        if not w.get("id"):
-            w["id"] = gen_my_word_id()
-        pool.append({"id": w["id"], "es": w.get("es",""), "ru": w.get("ru","")})
-    save_my_words_data(store)
 
     await state.update_data(
         mywords_category=category,
@@ -6702,7 +6705,7 @@ async def mywords_text_answer(message: Message, state: FSMContext):
             except TelegramBadRequest:
                 pass  # 💬 если уже удалено/нельзя удалить
 
-        session_words = mywords_get_session_words(user_id)
+        session_words = await mywords_get_session_words(user_id)
         if passed >= session_words and queue:
             await state.update_data(mywords_text_queue=queue, mywords_current_word_id=None)
             # 💬 убрать ReplyKeyboard (Стоп), и не оставлять мусор в чате
@@ -6807,8 +6810,9 @@ def mywords_words_nav_kb(page: int, total_words: int, back_cb: str) -> InlineKey
 
 async def mywords_render_words_page(user_id: str, category: str, page: int) -> tuple[str, int]:
     # 💬 возвращает текст страницы и общее кол-во слов
-    _, u = mywords_get_user_block(user_id)
-    words = list(u.get("categories", {}).get(category, []))
+    words = await MYWORDS_REPOSITORY.read(
+        lambda data: list(ensure_my_words_user(data, user_id).get("categories", {}).get(category, []))
+    )
     total = len(words)
 
     if not words:
@@ -6844,7 +6848,7 @@ async def mywords_open_edit_category_menu(message: Message, state: FSMContext, c
 async def mywords_edit_open_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     user_id = str(callback.message.chat.id)
-    categories = mywords_get_categories(user_id)
+    categories = await mywords_get_categories(user_id)
     await state.update_data(mywords_categories=categories)
 
     kb = mywords_build_categories_kb(categories, cb_prefix="mywords:editcat", back_cb="mywords:menu")
@@ -6928,8 +6932,9 @@ async def mywords_delete_wait_index(message: Message, state: FSMContext):
     category = data.get("mywords_category", "")
     user_id = str(message.chat.id)
 
-    _, u = mywords_get_user_block(user_id)
-    words = list(u.get("categories", {}).get(category, []))
+    words = await MYWORDS_REPOSITORY.read(
+        lambda data: list(ensure_my_words_user(data, user_id).get("categories", {}).get(category, []))
+    )
     if idx < 1 or idx > len(words):
         await _mywords_edit_ui(message, state, "Такого номера нет.")
         return
@@ -6955,11 +6960,10 @@ async def mywords_delete_confirm_cb(callback: CallbackQuery, state: FSMContext):
     category = data.get("mywords_category", "")
     user_id = str(callback.message.chat.id)
 
-    store, u = mywords_get_user_block(user_id)
-    words = u.get("categories", {}).get(category, [])
-    if 1 <= idx <= len(words):
-        words.pop(idx - 1)
-        save_my_words_data(store)
+    await MYWORDS_REPOSITORY.mutate(
+        lambda data: _mywords_delete_word_at_index(data, user_id, category, idx),
+        save=True,
+    )
 
     await _mywords_temp_note(callback.message, "✅ Удалено!") 
     return await mywords_open_edit_category_menu(callback.message, state, category)
@@ -7002,8 +7006,9 @@ async def mywords_edit_wait_index(message: Message, state: FSMContext):
     category = data.get("mywords_category", "")
     user_id = str(message.chat.id)
 
-    _, u = mywords_get_user_block(user_id)
-    words = list(u.get("categories", {}).get(category, []))
+    words = await MYWORDS_REPOSITORY.read(
+        lambda data: list(ensure_my_words_user(data, user_id).get("categories", {}).get(category, []))
+    )
     if idx < 1 or idx > len(words):
         await _mywords_edit_ui(message, state, "Такого номера нет.")
         return
@@ -7053,12 +7058,10 @@ async def mywords_edit_save_cb(callback: CallbackQuery, state: FSMContext):
     idx = int(data.get("mywords_pending_index", 0) or 0)
     pair = data.get("mywords_pending_pair") or {}
 
-    store, u = mywords_get_user_block(user_id)
-    words = u.get("categories", {}).get(category, [])
-    if 1 <= idx <= len(words):
-        words[idx - 1]["es"] = pair.get("es", "")
-        words[idx - 1]["ru"] = pair.get("ru", "")
-        save_my_words_data(store)
+    await MYWORDS_REPOSITORY.mutate(
+        lambda data: _mywords_update_word_at_index(data, user_id, category, idx, pair),
+        save=True,
+    )
 
     await _mywords_temp_note(callback.message, "✅ Изменено!")  # 💬 удалится через 3 сек
     return await mywords_open_edit_category_menu(callback.message, state, category)
@@ -7089,19 +7092,18 @@ async def mywords_rename_wait(message: Message, state: FSMContext):
     data = await state.get_data()
     old_name = data.get("mywords_category", "")
 
-    store, u = mywords_get_user_block(user_id)
-    cats = u.get("categories", {})
+    rename_result = await MYWORDS_REPOSITORY.mutate(
+        lambda data: _mywords_rename_category(data, user_id, old_name, new_name),
+        save=True,
+    )
 
-    if not old_name or old_name not in cats:
+    if rename_result == "missing":
         await _mywords_temp_note(message, "Категория не найдена. Возвращаю в меню.", delay_sec=3)
         return await mywords_menu(message, state)
 
-    if new_name in cats:
+    if rename_result == "exists":
         await _mywords_edit_ui(message, state, "Такая категория уже есть. Напиши другое название.")
         return
-
-    cats[new_name] = cats.pop(old_name, [])
-    save_my_words_data(store)
 
     # 💬 обновляем текущую категорию, чтобы вернуться в правильное меню
     await state.update_data(mywords_category=new_name)
