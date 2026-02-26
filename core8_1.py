@@ -1675,15 +1675,22 @@ def ensure_my_words_user(data: dict, user_id: str) -> dict:
     return MYWORDS_REPOSITORY.ensure_user(data, user_id)
 
 def parse_es_ru_pair(raw: str):
-    # 💬 парсим строку формата ES - RU (делим по первому дефису, принимаем разные тире)
+    # 💬 парсим строку формата ES - RU / ES = RU (принимаем разные тире и '=')
     if not raw:
         return None, None
 
     raw = raw.replace("—", "-").replace("–", "-").replace("−", "-")  # 💬 нормализуем тире
-    if "-" not in raw:
+
+    sep = None
+    for candidate in (" - ", " = ", "-", "="):
+        if candidate in raw:
+            sep = candidate
+            break
+
+    if sep is None:
         return None, None
 
-    left, right = raw.split("-", 1)  # 💬 делим по первому "-"
+    left, right = raw.split(sep, 1)  # 💬 делим по первому разделителю
     es = left.strip()
     ru = right.strip()
     if not es or not ru:
@@ -3892,7 +3899,13 @@ async def premium_check_settings(query: CallbackQuery, state: FSMContext):
     if premium_active:
         text_msg = await query.message.answer("✅ Premium активен\n🔓 Замки сняты автоматически")
     else:
-        text_msg = await query.message.answer("❌ Premium не найден\nЕсли оплатил(а) только что = подожди 1–2 минуты и проверь ещё раз")
+        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✍️ Напиши админу", url="https://t.me/Drancherrro")]
+        ])
+        text_msg = await query.message.answer(
+            "❌ Premium не найден\nЕсли оплатил(а) только что = подожди 1–2 минуты и проверь ещё раз",
+            reply_markup=admin_kb,
+        )
 
     await asyncio.sleep(3)
     for msg in (sticker_msg, text_msg):
@@ -5847,9 +5860,30 @@ async def _mywords_edit_ui(message: Message, state: FSMContext, text: str, *, re
                 parse_mode=parse_mode
             )
         except Exception:
-            pass
+            # 💬 fallback: если parse_mode сломал отправку, повторяем plain-text без parse_mode
+            if parse_mode:
+                try:
+                    return await bot.edit_message_text(
+                        chat_id=message.chat.id,
+                        message_id=int(ui_msg_id),
+                        text=text,
+                        reply_markup=reply_markup,
+                    )
+                except Exception:
+                    pass
 
-    ui_message = await smart_reply(message, text, reply_markup=reply_markup, parse_mode=parse_mode)
+    try:
+        ui_message = await smart_reply(message, text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception:
+        ui_message = None
+
+    # 💬 fallback: если parse_mode сломал отправку, повторяем plain-text без parse_mode
+    if (ui_message is None) and parse_mode:
+        try:
+            ui_message = await smart_reply(message, text, reply_markup=reply_markup)
+        except Exception:
+            ui_message = None
+
     if ui_message:
         await _mywords_touch_ui_msg_id(state, ui_message)
     return ui_message
@@ -5935,6 +5969,7 @@ async def mywords_send_next_quiz(message: Message, state: FSMContext):
     word_id = queue.pop(0)
     word = next((w for w in pool if w.get("id") == word_id), None)
     if not word:
+        logging.warning("mywords quiz desync: word_id=%s not found in pool, skipping", word_id)
         await state.update_data(mywords_quiz_queue=queue)
         return await mywords_send_next_quiz(message, state)
 
@@ -5957,6 +5992,10 @@ async def mywords_send_next_quiz(message: Message, state: FSMContext):
         is_anonymous=False               # 💬 чтобы поведение было как в vocab
     )
 
+
+    asyncio.create_task(_mywords_quiz_timeout_handler(
+        poll_msg.poll.id, message.chat.id, state, delay=int(QUIZ_TIMEOUT_TASK_S)
+    ))  # 💬 watchdog таймаут как в vocab, но без XP
 
     await state.update_data(
         mywords_quiz_queue=queue,
@@ -6184,28 +6223,22 @@ async def mywords_add_choose_cat_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     data = await state.get_data()
     categories = data.get("mywords_categories", [])
-    idx = int(callback.data.split(":")[-1])
-
-    if idx < 0 or idx >= len(categories):
-        return await mywords_menu(callback.message, state)
+    idx = await _parse_mywords_callback_index(callback, state, categories)
+    if idx is None:
+        return
 
     category = categories[idx]
     await state.update_data(mywords_category=category)
 
-    txt = (
-        f"➕ Добавить слово\n\n"
-        f"Категория: *{category}*\n\n"
-        f"Отправь вот так: ES - RU\n"
-        f"Пример: *Comer - Кушать*"
-    )  # 💬 показываем пример формата ввода
+    txt = _mywords_add_pair_prompt(category)
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
 
     ui_message = None
     try:
-        ui_message = await callback.message.edit_text(txt, reply_markup=kb, parse_mode="Markdown")
+        ui_message = await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
     except Exception:
-        ui_message = await smart_reply(callback.message, txt, reply_markup=kb, parse_mode="Markdown")
+        ui_message = await smart_reply(callback.message, txt, reply_markup=kb, parse_mode="HTML")
 
     if ui_message:
         await _mywords_touch_ui_msg_id(state, ui_message)
@@ -6284,15 +6317,10 @@ async def mywords_add_newcat_name(message: Message, state: FSMContext):
 
     await state.update_data(mywords_category=name)
 
-    txt = (
-        f"➕ Добавить слово\n\n"
-        f"Категория: *{name}*\n\n"
-        f"Отправь вот так: ES - RU\n"
-        f"Пример: *Comer - Кушать*"
-    )
+    txt = _mywords_add_pair_prompt(name)
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
 
-    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="Markdown")
+    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="HTML")
     await state.set_state(LessonStates.mywords_add_input_pair)
 
 
@@ -6304,19 +6332,58 @@ async def mywords_add_input_pair(message: Message, state: FSMContext):
     await _mywords_try_delete_user_message(message)  # 💬 чистим чат
 
     if not es or not ru:
-        await _mywords_edit_ui(message, state, "Формат такой: ES - RU")
+        data = await state.get_data()
+        category = data.get("mywords_category", "")
+
+        await _mywords_temp_note(
+            message,
+            (
+                "⚠️ Не понял формат.\n"
+                "Попробуй так:\n"
+                "• Casa - Дом\n"
+                "• Casa — Дом\n"
+                "• Casa = Дом"
+            ),
+            delay_sec=5,
+            parse_mode="HTML"
+        )
+
+        await _mywords_edit_ui(
+            message,
+            state,
+            _mywords_add_pair_prompt(str(category)),
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]]
+            ),
+            parse_mode="HTML"
+        )
         return
 
     await state.update_data(mywords_pending_pair={"es": es, "ru": ru})
 
-    txt = f"Проверь:\n\nES: *{es}*\nRU: *{ru}*\n\nСохранить?"
+    safe_es = html.escape(es)
+    safe_ru = html.escape(ru)
+    txt = f"Проверь:\n\nES: <b>{safe_es}</b>\nRU: <b>{safe_ru}</b>\n\nСохранить?"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Сохранить", callback_data="mywords:add_save")],
         [InlineKeyboardButton(text="🗑 Отмена", callback_data="mywords:menu")]
     ])
 
-    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="Markdown")
+    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="HTML")
     await state.set_state(LessonStates.mywords_add_confirm)
+
+
+def _mywords_add_pair_prompt(category: str) -> str:
+    # 💬 единый красивый шаблон подсказки для ввода пары слов
+    safe_category = html.escape(category or "—")
+    return (
+        "➕ Добавить слово\n\n"
+        f"Категория: <b>{safe_category}</b>\n\n"
+        "Отправь в одном из форматов:\n"
+        "• <b>Casa - Дом</b>\n"
+        "• <b>Casa — Дом</b>\n"
+        "• <b>Casa = Дом</b>"
+    )
 
 
 @dp.callback_query(StateFilter(LessonStates.mywords_add_confirm), F.data == "mywords:add_save")
@@ -6381,9 +6448,14 @@ async def mywords_choose_cat_new_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     data = await state.get_data()
     categories = data.get("mywords_categories", [])
-    idx = int(callback.data.split(":")[-1])
-    if idx < 0 or idx >= len(categories):
-        return await mywords_menu(callback.message, state)
+    idx = await _parse_mywords_callback_index(
+        callback,
+        state,
+        categories,
+        fallback_to_categories_mode="new",
+    )
+    if idx is None:
+        return
 
     category = categories[idx]
     user_id = str(callback.message.chat.id)
@@ -6432,9 +6504,14 @@ async def mywords_choose_cat_repeat_cb(callback: CallbackQuery, state: FSMContex
     await callback.answer()
     data = await state.get_data()
     categories = data.get("mywords_categories", [])
-    idx = int(callback.data.split(":")[-1])
-    if idx < 0 or idx >= len(categories):
-        return await mywords_menu(callback.message, state)
+    idx = await _parse_mywords_callback_index(
+        callback,
+        state,
+        categories,
+        fallback_to_categories_mode="repeat",
+    )
+    if idx is None:
+        return
 
     category = categories[idx]
     user_id = str(callback.message.chat.id)
@@ -6760,8 +6837,9 @@ async def mywords_open_edit_category_menu(message: Message, state: FSMContext, c
         [InlineKeyboardButton(text="🗂 Переименовать категорию", callback_data="mywords:edit_rename")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:edit_open")]
     ])
-    txt = f"✏️ Категория: *{category}*\n\nВыбери действие:"
-    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="Markdown")
+    safe_category = html.escape(category)
+    txt = f"✏️ Категория: <b>{safe_category}</b>\n\nВыбери действие:"
+    await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="HTML")
     await state.set_state(LessonStates.mywords_edit_menu)
 
 
@@ -6785,9 +6863,9 @@ async def mywords_edit_choose_cat_cb(callback: CallbackQuery, state: FSMContext)
     await callback.answer()
     data = await state.get_data()
     categories = data.get("mywords_categories", [])
-    idx = int(callback.data.split(":")[-1])
-    if idx < 0 or idx >= len(categories):
-        return await mywords_menu(callback.message, state)
+    idx = await _parse_mywords_callback_index(callback, state, categories)
+    if idx is None:
+        return
 
     return await mywords_open_edit_category_menu(callback.message, state, categories[idx])
 
