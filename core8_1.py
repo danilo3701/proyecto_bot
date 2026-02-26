@@ -1708,15 +1708,22 @@ def ensure_my_words_user(data: dict, user_id: str) -> dict:
     return u
 
 def parse_es_ru_pair(raw: str):
-    # 💬 парсим строку формата ES - RU (делим по первому дефису, принимаем разные тире)
+    # 💬 парсим строку формата ES - RU / ES = RU (принимаем разные тире и '=')
     if not raw:
         return None, None
 
     raw = raw.replace("—", "-").replace("–", "-").replace("−", "-")  # 💬 нормализуем тире
-    if "-" not in raw:
+
+    sep = None
+    for candidate in (" - ", " = ", "-", "="):
+        if candidate in raw:
+            sep = candidate
+            break
+
+    if sep is None:
         return None, None
 
-    left, right = raw.split("-", 1)  # 💬 делим по первому "-"
+    left, right = raw.split(sep, 1)  # 💬 делим по первому разделителю
     es = left.strip()
     ru = right.strip()
     if not es or not ru:
@@ -6242,13 +6249,7 @@ async def mywords_add_choose_cat_cb(callback: CallbackQuery, state: FSMContext):
     category = categories[idx]
     await state.update_data(mywords_category=category)
 
-    safe_category = html.escape(category)
-    txt = (
-        f"➕ Добавить слово\n\n"
-        f"Категория: <b>{safe_category}</b>\n\n"
-        f"Отправь вот так: ES - RU\n"
-        f"Пример: <b>Comer - Кушать</b>"
-    )  # 💬 показываем пример формата ввода
+    txt = _mywords_add_pair_prompt(category)
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
 
@@ -6329,13 +6330,7 @@ async def mywords_add_newcat_name(message: Message, state: FSMContext):
 
     await state.update_data(mywords_category=name)
 
-    safe_name = html.escape(name)
-    txt = (
-        f"➕ Добавить слово\n\n"
-        f"Категория: <b>{safe_name}</b>\n\n"
-        f"Отправь вот так: ES - RU\n"
-        f"Пример: <b>Comer - Кушать</b>"
-    )
+    txt = _mywords_add_pair_prompt(name)
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]])
 
     await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="HTML")
@@ -6350,7 +6345,31 @@ async def mywords_add_input_pair(message: Message, state: FSMContext):
     await _mywords_try_delete_user_message(message)  # 💬 чистим чат
 
     if not es or not ru:
-        await _mywords_edit_ui(message, state, "Формат такой: ES - RU")
+        data = await state.get_data()
+        category = data.get("mywords_category", "")
+
+        await _mywords_temp_note(
+            message,
+            (
+                "⚠️ Не понял формат.\n"
+                "Попробуй так:\n"
+                "• Casa - Дом\n"
+                "• Casa — Дом\n"
+                "• Casa = Дом"
+            ),
+            delay_sec=5,
+            parse_mode="HTML"
+        )
+
+        await _mywords_edit_ui(
+            message,
+            state,
+            _mywords_add_pair_prompt(str(category)),
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:add_open")]]
+            ),
+            parse_mode="HTML"
+        )
         return
 
     await state.update_data(mywords_pending_pair={"es": es, "ru": ru})
@@ -6365,6 +6384,19 @@ async def mywords_add_input_pair(message: Message, state: FSMContext):
 
     await _mywords_edit_ui(message, state, txt, reply_markup=kb, parse_mode="HTML")
     await state.set_state(LessonStates.mywords_add_confirm)
+
+
+def _mywords_add_pair_prompt(category: str) -> str:
+    # 💬 единый красивый шаблон подсказки для ввода пары слов
+    safe_category = html.escape(category or "—")
+    return (
+        "➕ Добавить слово\n\n"
+        f"Категория: <b>{safe_category}</b>\n\n"
+        "Отправь в одном из форматов:\n"
+        "• <b>Casa - Дом</b>\n"
+        "• <b>Casa — Дом</b>\n"
+        "• <b>Casa = Дом</b>"
+    )
 
 
 @dp.callback_query(StateFilter(LessonStates.mywords_add_confirm), F.data == "mywords:add_save")
