@@ -163,6 +163,19 @@ def _make_tid(name: str) -> str:
     # 💬 короткий id для callback_data (лимит длины в Telegram)
     return hashlib.sha1((name or "").encode("utf-8")).hexdigest()[:10]
 
+
+def _adm_topic_title(topic_data: dict | None, fallback: str = "") -> str:
+    # 💬 единый заголовок темы для карточки/просмотра/редактирования
+    if not isinstance(topic_data, dict):
+        return (fallback or "").strip()
+
+    return str(
+        topic_data.get("visible_title")
+        or topic_data.get("title")
+        or topic_data.get("name")
+        or fallback
+    ).strip()
+
 def _load_topics_index() -> tuple[dict, list[str]]:
     # 💬 собираем индекс тем из /data/topics
     topics_dir = get_topics_dir()
@@ -865,7 +878,7 @@ async def admin_topic_card(cb: CallbackQuery, state: FSMContext):
     st = await state.get_data()
     tid = st.get(ADMIN_CURRENT_TID_KEY) or ""
 
-    title = str(topic_data.get("visible_title") or topic_data.get("name") or tid).strip()
+    title = _adm_topic_title(topic_data, tid)
 
     kb = _admin_topic_card_kb(tid)
 
@@ -885,7 +898,7 @@ async def _admin_show_topic_view_menu(cb: CallbackQuery, state: FSMContext, tid:
         await cb.answer("Тема не загружена", show_alert=True)
         return
 
-    title = str(topic_data.get("visible_title") or topic_data.get("name") or tid).strip()
+    title = _adm_topic_title(topic_data, tid)
     text_preview = _admin_render_preview_text(topic_data)
 
     kb = _ikb([
@@ -1293,7 +1306,7 @@ async def admin_topic_edit(cb: CallbackQuery, state: FSMContext):
 
     st = await state.get_data()
     tid = st.get(ADMIN_CURRENT_TID_KEY) or ""
-    title = str(topic_data.get("visible_title") or topic_data.get("name") or tid).strip()
+    title = _adm_topic_title(topic_data, tid)
 
     kb = _ikb(
         [
@@ -1358,7 +1371,7 @@ async def _adm_show_sections_cb(cb: CallbackQuery, state: FSMContext):
 
     st = await state.get_data()
     tid = st.get(ADMIN_CURRENT_TID_KEY) or ""
-    title = str(topic_data.get("visible_title") or topic_data.get("name") or tid).strip()
+    title = _adm_topic_title(topic_data, tid)
 
     header = "➕ Добавление" if action == "insert" else "🗑 Удаление"
 
@@ -1390,7 +1403,7 @@ async def _adm_show_actions_msg(message: Message, state: FSMContext, note_text: 
 
     st = await state.get_data()
     tid = st.get(ADMIN_CURRENT_TID_KEY) or ""
-    title = str(topic_data.get("visible_title") or topic_data.get("name") or tid).strip()
+    title = _adm_topic_title(topic_data, tid)
 
     text = f"✏️ Редактирование: <b>{_preview_text(title, 80)}</b>\n\nЧто сделать?"
     if note_text:
@@ -1421,7 +1434,7 @@ async def _adm_show_sections_msg(message: Message, state: FSMContext):
 
     st = await state.get_data()
     tid = st.get(ADMIN_CURRENT_TID_KEY) or ""
-    title = str(topic_data.get("visible_title") or topic_data.get("name") or tid).strip()
+    title = _adm_topic_title(topic_data, tid)
 
     header = "➕ Добавление" if action == "insert" else "🗑 Удаление"
 
