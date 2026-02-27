@@ -1320,10 +1320,14 @@ async def premium_stars_successful_payment_handler(message: Message, state: FSMC
     if str(getattr(sp, "currency", "") or "") != "XTR":
         return
 
+    invoice_payload = str(getattr(sp, "invoice_payload", "") or "")
+    if not invoice_payload.startswith("premium_stars_month:"):
+        return
+
     result = _apply_stars_successful_payment(
         user_id=message.from_user.id,
         stars_amount=int(getattr(sp, "total_amount", 0) or 0),
-        invoice_payload=str(getattr(sp, "invoice_payload", "") or ""),
+        invoice_payload=invoice_payload,
         subscription_expiration_date=getattr(sp, "subscription_expiration_date", None),
         telegram_payment_charge_id=str(getattr(sp, "telegram_payment_charge_id", "") or ""),
         is_recurring=bool(getattr(sp, "is_recurring", False)),
@@ -4239,17 +4243,46 @@ async def premium_buy_card_cb(query: CallbackQuery):
 
 @dp.callback_query(F.data == "premium:stars_month")
 async def premium_stars_month_handler(query: CallbackQuery, state: FSMContext):
+    await query.answer()
+
     if not query.message:
-        await query.answer()
         return
 
     try:
         await start_stars_checkout(query.from_user.id, query.message.chat.id, query.bot)
-        await query.answer("⭐ Открываю оплату Stars")
-    except TelegramForbiddenError:
-        await query.answer("⚠️ Не могу отправить счёт: бот заблокирован.", show_alert=True)
-    except Exception:
-        await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй позже.", show_alert=True)
+    except TelegramBadRequest as e:
+        err_desc = str(getattr(e, "message", "") or getattr(e, "description", "") or "")
+        logging.exception("Stars invoice failed: TelegramBadRequest user_id=%s", query.from_user.id)
+        try:
+            await query.bot.send_message(
+                ADMIN_CHAT_ID,
+                f"❌ Stars invoice failed\nuser_id={query.from_user.id}\nerr={e}\ndesc={err_desc}",
+            )
+        except Exception:
+            logging.exception("Stars invoice failed: unable to notify admin")
+        await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.", show_alert=True)
+    except TelegramForbiddenError as e:
+        err_desc = str(getattr(e, "message", "") or getattr(e, "description", "") or "")
+        logging.exception("Stars invoice failed: TelegramForbiddenError user_id=%s", query.from_user.id)
+        try:
+            await query.bot.send_message(
+                ADMIN_CHAT_ID,
+                f"❌ Stars invoice failed\nuser_id={query.from_user.id}\nerr={e}\ndesc={err_desc}",
+            )
+        except Exception:
+            logging.exception("Stars invoice failed: unable to notify admin")
+        await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.", show_alert=True)
+    except Exception as e:
+        err_desc = str(getattr(e, "message", "") or getattr(e, "description", "") or "")
+        logging.exception("Stars invoice failed: unexpected user_id=%s", query.from_user.id)
+        try:
+            await query.bot.send_message(
+                ADMIN_CHAT_ID,
+                f"❌ Stars invoice failed\nuser_id={query.from_user.id}\nerr={e}\ndesc={err_desc}",
+            )
+        except Exception:
+            logging.exception("Stars invoice failed: unable to notify admin")
+        await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.", show_alert=True)
 
 
 @dp.callback_query(F.data == "mywords:premium_stars_month")
@@ -5298,6 +5331,19 @@ async def premium_debug_handler(message: Message, state: FSMContext):
 
     await message.answer(txt, parse_mode=None)  # 💬 фикс: отключаем HTML/Markdown парсинг, чтобы "<=5):" не ломал сообщение
 
+
+@dp.message(Command("stars_test_invoice"))
+@track_handler
+async def stars_test_invoice_handler(message: Message, state: FSMContext):
+    if not _is_admin(message.from_user.id):
+        return
+
+    try:
+        await start_stars_checkout(message.from_user.id, message.chat.id, message.bot)
+        await message.answer("✅ invoice отправлен")
+    except Exception as e:
+        logging.exception("stars_test_invoice failed user_id=%s", message.from_user.id)
+        await message.answer(f"❌ ошибка: {e}")
 
 
 @dp.message(Command("stars_stats"))
