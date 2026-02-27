@@ -29,6 +29,7 @@ import random                       # Рандомизация (CTA-фразы, 
 import html                         # 💬 html.escape для безопасного HTML в Telegram
 import asyncio                      # Асинхронные паузы (smart_reply)
 import logging                      # Логирование для отладки
+import secrets
 import math
 import time
 import datetime
@@ -62,7 +63,9 @@ from aiogram.types import (
     FSInputFile,
     PollAnswer,
     BotCommand,
-    ReactionTypeEmoji  # 💬 для реакций «🎉» на сообщение-квиз
+    ReactionTypeEmoji,  # 💬 для реакций «🎉» на сообщение-квиз
+    PreCheckoutQuery,
+    LabeledPrice,
 
 )
 
@@ -1013,7 +1016,8 @@ PREMIUM_PAYLINK_YEAR = os.getenv("PREMIUM_PAYLINK_YEAR", "https://buy.stripe.com
 PREMIUM_PAYLINK_MONTH = os.getenv("PREMIUM_PAYLINK_MONTH", "https://buy.stripe.com/bJeeVe1D8ffC0Lpc73bbG0a")
 PREMIUM_STARS_MONTH = int(os.getenv("PREMIUM_STARS_MONTH", "400"))
 PREMIUM_PAYLINK_WEEK = os.getenv("PREMIUM_PAYLINK_WEEK", "https://buy.stripe.com/00wfZia9Eeby65JefbbbG0b")
-PREMIUM_STARS_MONTH = int(os.getenv("PREMIUM_STARS_MONTH", "400"))
+PREMIUM_STARS_TITLE = os.getenv("PREMIUM_STARS_TITLE", "Premium — 1 месяц")
+PREMIUM_STARS_DESC = os.getenv("PREMIUM_STARS_DESC", "Полный доступ на 30 дней")
 
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
@@ -1091,6 +1095,7 @@ def _set_premium_user(
     user_id: int,
     active_until: int,
     plan: str = "",
+    provider: str = "",
     stripe_customer_id: str = "",
     stripe_subscription_id: str = "",
 ) -> None:
@@ -1104,6 +1109,8 @@ def _set_premium_user(
     prev["active_until"] = int(active_until or 0)
     if plan:
         prev["plan"] = plan
+    if provider:
+        prev["provider"] = provider
 
     if stripe_customer_id:
         prev["stripe_customer_id"] = stripe_customer_id
@@ -1115,6 +1122,44 @@ def _set_premium_user(
 
     data[uid] = prev
     save_premium_users(data)
+
+
+@dp.message(F.successful_payment)
+@track_handler
+async def premium_stars_successful_payment_handler(message: Message, state: FSMContext):
+    sp = message.successful_payment
+    if not sp:
+        return
+
+    payload = str(getattr(sp, "invoice_payload", "") or "")
+    if sp.currency != "XTR" or not payload.startswith("premium_stars_month:"):
+        return
+
+    raw_expire = getattr(sp, "subscription_expiration_date", None)
+    try:
+        active_until = int(raw_expire) if raw_expire else int(time.time()) + 2592000
+    except Exception:
+        active_until = int(time.time()) + 2592000
+
+    _set_premium_user(
+        user_id=message.from_user.id,
+        active_until=active_until,
+        plan="stars_month",
+        provider="stars",
+    )
+
+    is_first_recurring = bool(getattr(sp, "is_first_recurring", False))
+    is_recurring = bool(getattr(sp, "is_recurring", False))
+
+    telegram_payment_charge_id = str(getattr(sp, "telegram_payment_charge_id", "") or "")
+    if telegram_payment_charge_id:
+        user_data = load_user_data()
+        uid = str(message.from_user.id)
+        user_row = user_data.setdefault(uid, {})
+        user_row["last_stars_charge_id"] = telegram_payment_charge_id
+        user_row["last_stars_is_first_recurring"] = is_first_recurring
+        user_row["last_stars_is_recurring"] = is_recurring
+        save_user_data(user_data)
 
 
 def _extract_tg_id_from_checkout_session(session_obj: dict) -> Optional[int]:
@@ -1163,10 +1208,25 @@ def _premium_paywall_kb(back_cb: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Купить Premium — €6.99 / месяц", url=PREMIUM_PAYLINK_MONTH)],
-            [InlineKeyboardButton(text=f"⭐ Купить Premium — {PREMIUM_STARS_MONTH} Stars / месяц", callback_data="premium:stars_month")],
+            [InlineKeyboardButton(text="⭐ Premium за Stars", callback_data="premium:stars_month")],
             [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)],
         ]
+    )
+
+
+async def start_stars_checkout(user_id: int, chat_id: int, bot: Bot):
+    nonce = secrets.token_hex(8)
+    payload = f"premium_stars_month:{user_id}:{nonce}"
+    await bot.send_invoice(
+        chat_id=chat_id,
+        title=PREMIUM_STARS_TITLE,
+        description=PREMIUM_STARS_DESC,
+        payload=payload,
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label=PREMIUM_STARS_TITLE, amount=PREMIUM_STARS_MONTH)],
+        subscription_period=2592000,
     )
 
 
@@ -3163,7 +3223,7 @@ async def settings_subscription_cb(callback: CallbackQuery):
     else:
         kb_rows.extend([
             [InlineKeyboardButton(text="💳 Купить Premium — €6.99 / месяц", url=PREMIUM_PAYLINK_MONTH)],
-            [InlineKeyboardButton(text=f"⭐ Купить Premium — {PREMIUM_STARS_MONTH} Stars / месяц", callback_data="premium:stars_month")],
+            [InlineKeyboardButton(text="⭐ Premium за Stars", callback_data="premium:stars_month")],
             [InlineKeyboardButton(text="🔎 Синхронизировать статус", callback_data="premium:check_settings")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")],
         ])
@@ -3982,29 +4042,69 @@ async def premium_stars_month_stub(query: CallbackQuery, state: FSMContext):
         if getattr(btn, "callback_data", None)
     ]
 
-    # 💬 Сценарий «⚙️ Настройки → 💎 Моя подписка»: переоткрываем экран тем же хендлером.
-    if "settings:back" in callback_buttons:
-        await settings_subscription_cb(query)
+
+def _parse_stars_payload(payload: str | None) -> tuple[bool, str]:
+    if not payload:
+        return False, "Отсутствует payload платежа."
+
+    payload_s = str(payload).strip()
+    if not payload_s.startswith("premium_stars_month:"):
+        return False, "Неверный payload Stars-платежа."
+
+    return True, ""
+
+
+@dp.pre_checkout_query()
+async def premium_stars_pre_checkout(query: PreCheckoutQuery):
+    payload_ok, payload_error = _parse_stars_payload(query.invoice_payload)
+    if not payload_ok:
+        await query.answer(ok=False, error_message=payload_error)
         return
 
-    # 💬 Сценарий paywall в уроках/блокировках: сохраняем текущий callback «Назад».
-    back_cb = "premium:back_topics"
-    if keyboard_rows:
-        last_row = keyboard_rows[-1]
-        if last_row and getattr(last_row[0], "callback_data", None):
-            back_cb = last_row[0].callback_data
+    if query.currency != "XTR":
+        await query.answer(ok=False, error_message="Неверная валюта для Stars-платежа.")
+        return
 
+    if int(query.total_amount or 0) != int(PREMIUM_STARS_MONTH):
+        await query.answer(ok=False, error_message="Неверная сумма Stars-платежа.")
+        return
+
+    await query.answer(ok=True)
+
+
+@dp.message(F.successful_payment)
+async def premium_stars_successful_payment(message: Message):
+    payment = message.successful_payment
+    payload_ok, _ = _parse_stars_payload(getattr(payment, "invoice_payload", None))
+    if not payload_ok:
+        return
+
+    if getattr(payment, "currency", "") != "XTR":
+        return
+
+    if int(getattr(payment, "total_amount", 0) or 0) != int(PREMIUM_STARS_MONTH):
+        return
+
+    now = int(time.time())
+    active_until = now + 30 * 24 * 60 * 60
+    _set_premium_user(
+        user_id=message.from_user.id,
+        active_until=active_until,
+        plan="stars_month",
+    )
+
+    await message.answer("✅ Premium активирован на 30 дней. Спасибо за оплату ⭐")
+
+@dp.callback_query(F.data == "premium:stars_month")
+async def premium_stars_month(query: CallbackQuery):
+    await query.answer()
+    if not query.message:
+        return
     try:
-        await query.message.edit_text(
-            _premium_paywall_text(query.from_user.id),
-            reply_markup=_premium_paywall_kb(back_cb),
-            parse_mode="HTML",
-        )
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e).lower():
-            await query.answer("✅")
-            return
-        raise
+        await start_stars_checkout(query.from_user.id, query.message.chat.id, query.bot)
+    except Exception:
+        logging.exception("Failed to start Stars checkout")
+        await query.answer("⚠️ Не удалось создать счёт. Попробуй ещё раз чуть позже.", show_alert=True)
 
 
 @dp.callback_query(LessonStates.choosing_subcategory, F.data.startswith("subcat:"))
