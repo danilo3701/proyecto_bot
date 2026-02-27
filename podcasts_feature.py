@@ -27,7 +27,7 @@ from aiogram.types import (
     KeyboardButton,
     ReplyKeyboardRemove,
 )
-from aiogram.exceptions import TelegramBadRequest  # 💬 чтобы не падать, если сообщение уже удалено
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError  # 💬 чтобы не падать, если сообщение уже удалено
 from aiogram.dispatcher.event.bases import SkipHandler  # 💬 пропускаем обработку, чтобы не блокировать админку
 
 
@@ -201,7 +201,7 @@ def _kb_premium_entry() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Купить Premium", callback_data="pod:premium_buy")],
-            [InlineKeyboardButton(text="⭐ Premium за Stars", callback_data="pod:stars_month")],
+            [InlineKeyboardButton(text="⭐ Premium за Stars", callback_data="premium:stars_month")],
             [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="pod:premium_check")],
             [InlineKeyboardButton(text="👈 Назад", callback_data="pod:premium_back")],
         ]
@@ -215,7 +215,7 @@ def _kb_premium_checkout(user_id: int) -> InlineKeyboardMarkup:
 
     if month:
         rows.append([InlineKeyboardButton(text="💳 Оплатить картой (Stripe)", url=month)])
-    rows.append([InlineKeyboardButton(text="⭐ Оплатить Stars", callback_data="pod:stars_month")])
+    rows.append([InlineKeyboardButton(text="⭐ Оплатить Stars", callback_data="premium:stars_month")])
     rows.append([InlineKeyboardButton(text="✅ Проверить Premium", callback_data="pod:premium_check")])
     rows.append([InlineKeyboardButton(text="👈 Назад", callback_data="pod:premium_entry")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -1349,11 +1349,15 @@ async def pod_episode_locked(cb: CallbackQuery, state: FSMContext) -> None:
         await _safe_delete_message(cb.bot, cb.message.chat.id, int(old_id))  # 💬 удаляем старое предупреждение
         await state.update_data(pod_premium_msg_id=None)
 
-    msg = await cb.message.answer(
-        "🔒 Это Premium эпизод.\nОформи Premium на 1 месяц, чтобы снять замки.",
-        reply_markup=_kb_premium_entry(),
-        disable_web_page_preview=True,
-    )
+    try:
+        msg = await cb.message.answer(
+            "🔒 Это Premium эпизод.\nОформи Premium на 1 месяц, чтобы снять замки.",
+            reply_markup=_kb_premium_entry(),
+            disable_web_page_preview=True,
+        )
+    except TelegramForbiddenError:
+        await cb.answer("⚠️ Не могу отправить сообщение. Разблокируй бота и попробуй снова.", show_alert=True)
+        return
 
     await state.update_data(pod_premium_msg_id=msg.message_id)
     await cb.answer()
@@ -1371,27 +1375,28 @@ async def pod_premium_back(cb: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "pod:premium_buy")
 async def pod_premium_buy(cb: CallbackQuery) -> None:
-    await cb.message.edit_text(
-        _premium_paywall_text(cb.from_user.id),
-        reply_markup=_kb_premium_checkout(cb.from_user.id),
-        disable_web_page_preview=True,
-    )
+    try:
+        await cb.message.edit_text(
+            _premium_paywall_text(cb.from_user.id),
+            reply_markup=_kb_premium_checkout(cb.from_user.id),
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        pass
     await cb.answer()
 
 
 @router.callback_query(F.data == "pod:premium_entry")
 async def pod_premium_entry(cb: CallbackQuery) -> None:
-    await cb.message.edit_text(
-        "🔒 Это Premium эпизод.\nОформи Premium на 1 месяц, чтобы снять замки.",
-        reply_markup=_kb_premium_entry(),
-        disable_web_page_preview=True,
-    )
+    try:
+        await cb.message.edit_text(
+            "🔒 Это Premium эпизод.\nОформи Premium на 1 месяц, чтобы снять замки.",
+            reply_markup=_kb_premium_entry(),
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        pass
     await cb.answer()
-
-
-@router.callback_query(F.data == "pod:stars_month")
-async def pod_stars_month(cb: CallbackQuery) -> None:
-    await cb.answer("⭐ Оплата Stars скоро будет доступна. (в разработке)", show_alert=True)
 
 @router.callback_query(F.data == "pod:premium_check")
 async def pod_premium_check(cb: CallbackQuery, state: FSMContext) -> None:
