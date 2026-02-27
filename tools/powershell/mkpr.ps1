@@ -1,5 +1,5 @@
 <#
-mkpr — create/update GitHub Pull Request from PowerShell with templates.
+mkp — short command for creating/updating GitHub Pull Request from PowerShell with templates.
 
 Super-short commands (no long text needed):
   prsame                 # update/create regular PR from current branch
@@ -9,7 +9,31 @@ Super-short commands (no long text needed):
 
 Full command (optional):
   mkpr -Title "Fix callback race" -Type fix -UseCurrentBranch
+
+Recommended short command:
+  mkp "fix callback race"
 #>
+
+function Sync-BranchWithMain {
+  param(
+    [string]$Base = 'main'
+  )
+
+  git fetch origin $Base 2>$null | Out-Null
+  if ($LASTEXITCODE -eq 0) {
+    git rebase "origin/$Base"
+    if ($LASTEXITCODE -ne 0) { throw "Failed to rebase current branch onto origin/$Base" }
+    return
+  }
+
+  git rev-parse --verify $Base | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Base branch '$Base' was not found locally or on origin."
+  }
+
+  git rebase $Base
+  if ($LASTEXITCODE -ne 0) { throw "Failed to rebase current branch onto $Base" }
+}
 
 function mkpr {
   [CmdletBinding()]
@@ -78,6 +102,8 @@ function mkpr {
     $Title = "$kind: $branch"
   }
 
+  Sync-BranchWithMain -Base $Base
+
   if ($hasLocalChanges) {
     git add -A
     git commit -m $Title | Out-Null
@@ -126,4 +152,8 @@ function prsame([string]$Title = '') {
 
 function prdraft([string]$Title = '') {
   mkpr -Title $Title -Type feature -UseCurrentBranch -Draft
+}
+
+function mkp([string]$Title = '') {
+  mkpr -Title $Title -Type fix -UseCurrentBranch
 }
