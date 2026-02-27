@@ -1240,6 +1240,34 @@ def _premium_paywall_kb(back_cb: str) -> InlineKeyboardMarkup:
     )
 
 
+def _mywords_premium_entry_text() -> str:
+    return (
+        "🔒 <b>Лимит Free-тарифа в MyWords</b>\n\n"
+        "С Premium ты снимешь лимиты на категории и слова в «Мои слова»."
+    )
+
+
+def _mywords_premium_entry_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Купить Premium", callback_data="mywords:premium_buy_card")],
+            [InlineKeyboardButton(text=f"⭐ Купить за {PREMIUM_STARS_MONTH} Stars", callback_data="mywords:premium_stars_month")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:premium_back")],
+        ]
+    )
+
+
+def _mywords_premium_checkout_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оплатить картой", url=PREMIUM_PAYLINK_MONTH)],
+            [InlineKeyboardButton(text=f"⭐ Оплатить {PREMIUM_STARS_MONTH} Stars", callback_data="mywords:premium_stars_month")],
+            [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="mywords:premium_check")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:premium_entry")],
+        ]
+    )
+
+
 async def start_stars_checkout(user_id: int, chat_id: int, bot: Bot):
     nonce = secrets.token_hex(8)
     payload = f"premium_stars_month:{user_id}:{nonce}"
@@ -4091,6 +4119,11 @@ async def premium_stars_month_stub(query: CallbackQuery, state: FSMContext):
         )
 
 
+@dp.callback_query(F.data == "mywords:premium_stars_month")
+async def mywords_premium_stars_month_delegate(query: CallbackQuery, state: FSMContext):
+    await premium_stars_month_stub(query, state)
+
+
 @dp.callback_query(LessonStates.choosing_subcategory, F.data.startswith("subcat:"))
 @track_handler
 async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
@@ -6477,6 +6510,71 @@ async def mywords_menu_any_cb(callback: CallbackQuery, state: FSMContext):
     return await mywords_menu(callback.message, state)  # 💬 открыть меню «Мои слова»
 
 
+@dp.callback_query(F.data == "mywords:premium_entry")
+@track_handler
+async def mywords_premium_entry_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    if not callback.message:
+        return
+
+    try:
+        await callback.message.edit_text(
+            _mywords_premium_entry_text(),
+            reply_markup=_mywords_premium_entry_kb(),
+            parse_mode="HTML",
+        )
+    except Exception:
+        await callback.message.answer(
+            _mywords_premium_entry_text(),
+            reply_markup=_mywords_premium_entry_kb(),
+            parse_mode="HTML",
+        )
+
+
+@dp.callback_query(F.data == "mywords:premium_buy_card")
+@track_handler
+async def mywords_premium_buy_card_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    if not callback.message:
+        return
+
+    try:
+        await callback.message.edit_text(
+            _premium_paywall_text(callback.from_user.id),
+            reply_markup=_mywords_premium_checkout_kb(),
+            parse_mode="HTML",
+        )
+    except Exception:
+        await callback.message.answer(
+            _premium_paywall_text(callback.from_user.id),
+            reply_markup=_mywords_premium_checkout_kb(),
+            parse_mode="HTML",
+        )
+
+
+@dp.callback_query(F.data == "mywords:premium_back")
+@track_handler
+async def mywords_premium_back_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    return await mywords_menu(callback.message, state)
+
+
+@dp.callback_query(F.data == "mywords:premium_check")
+@track_handler
+async def mywords_premium_check_cb(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    premium_active = is_premium_active(callback.from_user.id)
+
+    if premium_active:
+        await callback.message.answer("✅ Premium активен. Лимиты в MyWords сняты.")
+    else:
+        await callback.message.answer(
+            "❌ Premium пока не найден. Если только что оплатил(а), подожди 1–2 минуты и проверь снова."
+        )
+
+    return await mywords_menu(callback.message, state)
+
+
 @dp.callback_query(F.data == "mywords:back_main")
 @track_handler
 async def mywords_back_main_any_cb(callback: CallbackQuery, state: FSMContext):
@@ -6612,8 +6710,8 @@ async def mywords_add_newcat_cb(callback: CallbackQuery, state: FSMContext):
 
     if (not is_premium_active(callback.from_user.id)) and (cats_count >= FREE_MYWORDS_CATEGORIES_LIMIT):
         await callback.message.answer(
-            _premium_paywall_text(callback.from_user.id),
-            reply_markup=_premium_paywall_kb("mywords:menu"),
+            _mywords_premium_entry_text(),
+            reply_markup=_mywords_premium_entry_kb(),
             parse_mode="HTML"
         )
         return  # 💬 не переводим в state ввода названия
@@ -6660,8 +6758,8 @@ async def mywords_add_newcat_name(message: Message, state: FSMContext):
     ok = await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
     if not ok:
         await message.answer(
-            _premium_paywall_text(message.from_user.id),
-            reply_markup=_premium_paywall_kb("mywords:menu"),
+            _mywords_premium_entry_text(),
+            reply_markup=_mywords_premium_entry_kb(),
             parse_mode="HTML"
         )
         return
@@ -6771,11 +6869,11 @@ async def mywords_add_save_cb(callback: CallbackQuery, state: FSMContext):
 
     if result == "free_limit":
         await callback.message.answer(
-            _premium_paywall_text(callback.from_user.id),
-            reply_markup=_premium_paywall_kb("mywords:menu"),
+            _mywords_premium_entry_text(),
+            reply_markup=_mywords_premium_entry_kb(),
             parse_mode="HTML"
         )
-        return await mywords_menu(callback.message, state)
+        return
 
     if result == "hard_limit":
         await _mywords_temp_note(
