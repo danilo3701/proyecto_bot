@@ -64,6 +64,7 @@ from aiogram.types import (
     PollAnswer,
     BotCommand,
     ReactionTypeEmoji,  # 💬 для реакций «🎉» на сообщение-квиз
+    PreCheckoutQuery,
     LabeledPrice,
 
 )
@@ -3983,6 +3984,60 @@ async def premium_check_settings(query: CallbackQuery, state: FSMContext):
     except Exception:
         pass
 
+
+
+
+def _parse_stars_payload(payload: str | None) -> tuple[bool, str]:
+    if not payload:
+        return False, "Отсутствует payload платежа."
+
+    payload_s = str(payload).strip()
+    if not payload_s.startswith("premium_stars_month:"):
+        return False, "Неверный payload Stars-платежа."
+
+    return True, ""
+
+
+@dp.pre_checkout_query()
+async def premium_stars_pre_checkout(query: PreCheckoutQuery):
+    payload_ok, payload_error = _parse_stars_payload(query.invoice_payload)
+    if not payload_ok:
+        await query.answer(ok=False, error_message=payload_error)
+        return
+
+    if query.currency != "XTR":
+        await query.answer(ok=False, error_message="Неверная валюта для Stars-платежа.")
+        return
+
+    if int(query.total_amount or 0) != int(PREMIUM_STARS_MONTH):
+        await query.answer(ok=False, error_message="Неверная сумма Stars-платежа.")
+        return
+
+    await query.answer(ok=True)
+
+
+@dp.message(F.successful_payment)
+async def premium_stars_successful_payment(message: Message):
+    payment = message.successful_payment
+    payload_ok, _ = _parse_stars_payload(getattr(payment, "invoice_payload", None))
+    if not payload_ok:
+        return
+
+    if getattr(payment, "currency", "") != "XTR":
+        return
+
+    if int(getattr(payment, "total_amount", 0) or 0) != int(PREMIUM_STARS_MONTH):
+        return
+
+    now = int(time.time())
+    active_until = now + 30 * 24 * 60 * 60
+    _set_premium_user(
+        user_id=message.from_user.id,
+        active_until=active_until,
+        plan="stars_month",
+    )
+
+    await message.answer("✅ Premium активирован на 30 дней. Спасибо за оплату ⭐")
 
 @dp.callback_query(F.data == "premium:stars_month")
 async def premium_stars_month(query: CallbackQuery):
