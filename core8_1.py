@@ -42,7 +42,6 @@ from zoneinfo import ZoneInfo
 
 from notify_scheduler import should_send_daily_notification
 from mywords_repository import MyWordsRepository
-from premium_paywall_ui import show_entry as show_premium_entry_ui, show_checkout as show_premium_checkout_ui
 
 # ——— Aiogram core ————————————————————————————————————————————————
 from aiogram import Bot, Dispatcher, F                   # Bot/DP и фильтр F  
@@ -1359,6 +1358,67 @@ def _extract_tg_id_from_checkout_session(session_obj: dict) -> Optional[int]:
             except Exception:
                 continue
     return None
+
+def _premium_paywall_text(user_id: int) -> str:
+    # 💬 единый Premium текст + Telegram ID для Stripe custom field
+    return (
+        "🔒 <b>Premium доступ</b>\n\n"
+        "👑 <b>Premium — полный доступ на 1 месяц</b>\n"
+        f"Цена: €6.99 (карта) или ⭐ {PREMIUM_STARS_MONTH} Stars (в Telegram).\n\n"
+        "<b>Ты получаешь:</b>\n\n"
+        "✅ <b>Подкасты:</b> все эпизоды без ограничений + новые выпуски\n"
+        "✅ <b>Лексика:</b> все темы без лимитов + будущие темы\n"
+        "✅ <b>Мои слова:</b> безлимит на создание категорий\n"
+        "✅ <b>Грамматика:</b> доступ к разделу, когда он выйдет\n"
+        "✅ <b>Обновления:</b> все новые функции включены\n\n"
+        "📋 <b>Скопировать Telegram ID:</b>\n"
+        f"<pre><code>{user_id}</code></pre>\n"
+        "➡️ Укажи свой ID при оплате\n"
+        "➡️ Потом нажми «✅ Проверить Premium»\n"
+        "🔓 Замки снимутся автоматически\n\n"
+        "❌ Отменить подписку можно в разделе: \n<b>⚙️ Настройки</b> ➜ <b>💎 Моя подписка</b>"
+    )
+
+
+
+def _premium_paywall_kb(back_cb: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Купить Premium — €6.99 / месяц", url=PREMIUM_PAYLINK_MONTH)],
+            [InlineKeyboardButton(text=f"⭐ Купить Premium — {PREMIUM_STARS_MONTH} Stars / месяц", callback_data="premium:stars_month")],
+            [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)],
+        ]
+    )
+
+
+def _mywords_premium_entry_text() -> str:
+    return (
+        "🔒 <b>Лимит Free-тарифа в MyWords</b>\n\n"
+        "С Premium ты снимешь лимиты на категории и слова в «Мои слова»."
+    )
+
+
+def _mywords_premium_entry_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Купить Premium", callback_data="mywords:premium_buy_card")],
+            [InlineKeyboardButton(text=f"⭐ Купить за {PREMIUM_STARS_MONTH} Stars", callback_data="mywords:premium_stars_month")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:premium_back")],
+        ]
+    )
+
+
+def _mywords_premium_checkout_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оплатить картой", url=PREMIUM_PAYLINK_MONTH)],
+            [InlineKeyboardButton(text=f"⭐ Оплатить {PREMIUM_STARS_MONTH} Stars", callback_data="mywords:premium_stars_month")],
+            [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="mywords:premium_check")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:premium_entry")],
+        ]
+    )
+
 
 async def _safe_send_paywall_message(message: Message, text: str, reply_markup: InlineKeyboardMarkup, parse_mode: str = "HTML"):
     try:
@@ -3210,7 +3270,6 @@ async def start_handler(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "settings:subscription")
 async def settings_subscription_cb(callback: CallbackQuery):
-    await callback.answer()
     uid = callback.from_user.id
 
     data = load_premium_users()
@@ -3395,17 +3454,14 @@ async def settings_subscription_cb(callback: CallbackQuery):
 
         extra_block = ("\n\n" + "\n".join(extra_lines)) if extra_lines else ""
 
-        if extra_lines:
-            await callback.answer("ℹ️ Статус Stripe обновлён", show_alert=False)
-
-        await show_premium_entry_ui(
-            callback.message,
-            uid,
-            back_cb="settings:back",
-            check_cb="premium:check_settings",
-            parse_mode="HTML",
+        txt = (
+            "💎 <b>Моя подписка</b>\n\n"
+            "🔒 <b>Premium не активен</b>"
+            f"{extra_block}\n\n"
+            f"👑 <b>Premium — полный доступ на 1 месяц</b>\n"
+            f"Цена: €6.99 (карта) или ⭐ {PREMIUM_STARS_MONTH} Stars (в Telegram).\n\n"
+            "Оформи Premium на 1 месяц, чтобы снять замки во всех разделах"
         )
-        return
 
     # ===== Кнопки
     kb_rows = []
@@ -4050,12 +4106,9 @@ async def premium_locked_topic(query: CallbackQuery, state: FSMContext):
     chosen_category = data.get("chosen_category")
     chosen_level = data.get("chosen_level")
 
-    pay_msg = await show_premium_entry_ui(
-        query.message,
-        query.from_user.id,
-        back_cb="premium:back_topics",
-        check_cb="premium:check",
-        parse_mode="HTML",
+    pay_msg = await query.message.answer(
+        _premium_paywall_text(query.from_user.id),
+        reply_markup=_premium_paywall_kb("premium:back_topics")
     )
 
     await state.set_state(LessonStates.waiting_premium)
@@ -4086,21 +4139,6 @@ async def premium_back_topics(query: CallbackQuery, state: FSMContext):
         premium_pending_topic=None
     )
     await state.set_state(LessonStates.choosing_topic)
-
-
-@dp.callback_query(lambda c: c.data == "premium:topic_entry", StateFilter(LessonStates.waiting_premium))
-async def premium_topic_entry(query: CallbackQuery, state: FSMContext):
-    await query.answer()
-    if not query.message:
-        return
-
-    await show_premium_entry_ui(
-        query.message,
-        query.from_user.id,
-        back_cb="premium:back_topics",
-        check_cb="premium:check",
-        parse_mode="HTML",
-    )
 
 
 @dp.callback_query(StateFilter(LessonStates.waiting_premium), F.data == "premium:check")
@@ -4221,27 +4259,28 @@ async def premium_check_settings(query: CallbackQuery, state: FSMContext):
 
 
 @dp.callback_query(F.data == "premium:buy_card")
-async def premium_buy_card_cb(query: CallbackQuery, state: FSMContext):
+async def premium_buy_card_cb(query: CallbackQuery):
     await query.answer()
-    if not query.message:
-        return
 
-    current_state = await state.get_state()
-    if current_state == LessonStates.waiting_premium.state:
-        back_cb = "premium:topic_entry"
-        check_cb = "premium:check"
-    else:
-        back_cb = "settings:subscription"
-        check_cb = "premium:check_settings"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Оплатить картой (Stripe)", url=PREMIUM_PAYLINK_MONTH)],
+        [InlineKeyboardButton(text="⭐ Оплатить Stars", callback_data="premium:stars_month")],
+        [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check_settings")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:subscription")],
+    ])
 
-    await show_premium_checkout_ui(
-        query.message,
-        query.from_user.id,
-        back_cb=back_cb,
-        check_cb=check_cb,
-        stripe_url=PREMIUM_PAYLINK_MONTH,
-        parse_mode="HTML",
-    )
+    try:
+        await query.message.edit_text(
+            _premium_paywall_text(query.from_user.id),
+            reply_markup=kb,
+            parse_mode="HTML",
+        )
+    except Exception:
+        await query.message.answer(
+            _premium_paywall_text(query.from_user.id),
+            reply_markup=kb,
+            parse_mode="HTML",
+        )
 
 
 @dp.callback_query(F.data == "premium:stars_month")
@@ -4263,7 +4302,10 @@ async def premium_stars_month_handler(query: CallbackQuery, state: FSMContext):
             )
         except Exception:
             logging.exception("Stars invoice failed: unable to notify admin")
-        await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.", show_alert=True)
+        try:
+            await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.", show_alert=True)
+        except Exception:
+            await query.message.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.")
     except TelegramForbiddenError as e:
         err_desc = str(getattr(e, "message", "") or getattr(e, "description", "") or "")
         logging.exception("Stars invoice failed: TelegramForbiddenError user_id=%s", query.from_user.id)
@@ -4274,7 +4316,10 @@ async def premium_stars_month_handler(query: CallbackQuery, state: FSMContext):
             )
         except Exception:
             logging.exception("Stars invoice failed: unable to notify admin")
-        await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.", show_alert=True)
+        try:
+            await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.", show_alert=True)
+        except Exception:
+            await query.message.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.")
     except Exception as e:
         err_desc = str(getattr(e, "message", "") or getattr(e, "description", "") or "")
         logging.exception("Stars invoice failed: unexpected user_id=%s", query.from_user.id)
@@ -4285,7 +4330,10 @@ async def premium_stars_month_handler(query: CallbackQuery, state: FSMContext):
             )
         except Exception:
             logging.exception("Stars invoice failed: unable to notify admin")
-        await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.", show_alert=True)
+        try:
+            await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.", show_alert=True)
+        except Exception:
+            await query.message.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.")
 
 
 @dp.callback_query(F.data == "mywords:premium_stars_month")
@@ -6843,15 +6891,19 @@ async def mywords_premium_entry_cb(callback: CallbackQuery, state: FSMContext):
     if not callback.message:
         return
 
-    await show_premium_entry_ui(
-        callback.message,
-        callback.from_user.id,
-        back_cb="mywords:premium_back",
-        check_cb="mywords:premium_check",
-        buy_card_cb="mywords:premium_buy_card",
-        stars_cb="mywords:premium_stars_month",
-        parse_mode="HTML",
-    )
+    try:
+        await callback.message.edit_text(
+            _mywords_premium_entry_text(),
+            reply_markup=_mywords_premium_entry_kb(),
+            parse_mode="HTML",
+        )
+    except Exception:
+        await _safe_send_paywall_message(
+            callback.message,
+            _mywords_premium_entry_text(),
+            _mywords_premium_entry_kb(),
+            parse_mode="HTML",
+        )
 
 
 @dp.callback_query(F.data == "mywords:premium_buy_card")
@@ -6861,15 +6913,19 @@ async def mywords_premium_buy_card_cb(callback: CallbackQuery, state: FSMContext
     if not callback.message:
         return
 
-    await show_premium_checkout_ui(
-        callback.message,
-        callback.from_user.id,
-        back_cb="mywords:premium_entry",
-        check_cb="mywords:premium_check",
-        stripe_url=PREMIUM_PAYLINK_MONTH,
-        stars_cb="mywords:premium_stars_month",
-        parse_mode="HTML",
-    )
+    try:
+        await callback.message.edit_text(
+            _premium_paywall_text(callback.from_user.id),
+            reply_markup=_mywords_premium_checkout_kb(),
+            parse_mode="HTML",
+        )
+    except Exception:
+        await _safe_send_paywall_message(
+            callback.message,
+            _premium_paywall_text(callback.from_user.id),
+            _mywords_premium_checkout_kb(),
+            parse_mode="HTML",
+        )
 
 
 @dp.callback_query(F.data == "mywords:premium_back")
@@ -7029,13 +7085,10 @@ async def mywords_add_newcat_cb(callback: CallbackQuery, state: FSMContext):
     )
 
     if (not is_premium_active(callback.from_user.id)) and (cats_count >= FREE_MYWORDS_CATEGORIES_LIMIT):
-        await show_premium_entry_ui(
+        await _safe_send_paywall_message(
             callback.message,
-            callback.from_user.id,
-            back_cb="mywords:premium_back",
-            check_cb="mywords:premium_check",
-            buy_card_cb="mywords:premium_buy_card",
-            stars_cb="mywords:premium_stars_month",
+            _mywords_premium_entry_text(),
+            _mywords_premium_entry_kb(),
             parse_mode="HTML"
         )
         return  # 💬 не переводим в state ввода названия
@@ -7081,13 +7134,10 @@ async def mywords_add_newcat_name(message: Message, state: FSMContext):
 
     ok = await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
     if not ok:
-        await show_premium_entry_ui(
+        await _safe_send_paywall_message(
             message,
-            message.from_user.id,
-            back_cb="mywords:premium_back",
-            check_cb="mywords:premium_check",
-            buy_card_cb="mywords:premium_buy_card",
-            stars_cb="mywords:premium_stars_month",
+            _mywords_premium_entry_text(),
+            _mywords_premium_entry_kb(),
             parse_mode="HTML"
         )
         return
@@ -7196,13 +7246,10 @@ async def mywords_add_save_cb(callback: CallbackQuery, state: FSMContext):
     result = await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
 
     if result == "free_limit":
-        await show_premium_entry_ui(
+        await _safe_send_paywall_message(
             callback.message,
-            callback.from_user.id,
-            back_cb="mywords:premium_back",
-            check_cb="mywords:premium_check",
-            buy_card_cb="mywords:premium_buy_card",
-            stars_cb="mywords:premium_stars_month",
+            _mywords_premium_entry_text(),
+            _mywords_premium_entry_kb(),
             parse_mode="HTML"
         )
         return
