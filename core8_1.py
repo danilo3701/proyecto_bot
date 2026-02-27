@@ -50,6 +50,7 @@ from aiogram.filters import Command # /start
 from aiogram.types import ReactionTypeEmoji  # 💬 тип реакции-эмоджи для setMessageReaction
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.exceptions import TelegramNetworkError  # 💬 ловим сетевые таймауты Telegram при отправке репортов
+from aiogram.exceptions import TelegramForbiddenError
 from aiogram.types import Chat, User
 from aiogram.types import Message
 from aiogram.types import (
@@ -1047,6 +1048,9 @@ PREMIUM_STARS_DESC = os.getenv("PREMIUM_STARS_DESC", "Полный доступ 
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STARS_PAYMENTS_PATH = os.getenv("STARS_PAYMENTS_PATH", "/data/stars_payments.jsonl")
+STARS_SUBSCRIPTIONS_PATH = os.getenv("STARS_SUBSCRIPTIONS_PATH", "/data/stars_subscriptions.json")
+QA_STATE_PATH = os.getenv("QA_STATE_PATH", "/data/qa_state.json")
+QA_PENDING_TTL_SEC = int(os.getenv("QA_PENDING_TTL_SEC", "1800"))
 
 
 def _append_stars_payment_log(entry: dict) -> None:
@@ -1061,6 +1065,143 @@ def _append_stars_payment_log(entry: dict) -> None:
             os.fsync(f.fileno())
     except Exception:
         logging.exception("failed to append stars payment log")
+
+
+def _load_stars_subscriptions() -> dict:
+    try:
+        if not os.path.exists(STARS_SUBSCRIPTIONS_PATH):
+            return {}
+        with open(STARS_SUBSCRIPTIONS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_stars_subscriptions(data: dict) -> None:
+    if not isinstance(data, dict):
+        return
+    _atomic_json_dump(STARS_SUBSCRIPTIONS_PATH, data, ensure_ascii=False, indent=2)
+
+
+def parse_stars_payload(payload: str) -> tuple[Optional[int], str]:
+    raw = str(payload or "").strip()
+    parts = raw.split(":")
+    if len(parts) != 3 or parts[0] != "premium_stars_month" or not parts[1].isdigit():
+        return None, ""
+    return int(parts[1]), parts[2]
+
+
+def _upsert_stars_subscription(user_id: int, status: str, **extra) -> None:
+    data = _load_stars_subscriptions()
+    row = data.get(str(user_id), {})
+    if not isinstance(row, dict):
+        row = {}
+    row.update({"user_id": int(user_id), "status": status, "updated_at": int(time.time())})
+    for k, v in extra.items():
+        row[k] = v
+    data[str(user_id)] = row
+    _save_stars_subscriptions(data)
+
+
+def _expire_pending_subscriptions(now_ts: Optional[int] = None) -> None:
+    now = int(now_ts or time.time())
+    data = _load_stars_subscriptions()
+    changed = False
+    for uid, row in list(data.items()):
+        if not isinstance(row, dict):
+            continue
+        if row.get("status") != "pending":
+            continue
+        created = int(row.get("created_at", 0) or 0)
+        if created and (now - created) > QA_PENDING_TTL_SEC:
+            row["status"] = "expired"
+            row["updated_at"] = now
+            changed = True
+    if changed:
+        _save_stars_subscriptions(data)
+
+
+def _apply_stars_successful_payment(
+    *,
+    user_id: int,
+    stars_amount: int,
+    invoice_payload: str,
+    subscription_expiration_date: Optional[int],
+    telegram_payment_charge_id: str,
+    is_recurring: bool,
+    is_first_recurring: bool,
+) -> dict:
+    payload_uid, _ = parse_stars_payload(invoice_payload)
+    if payload_uid is None:
+        return {"ok": False, "reason": "bad_payload"}
+    if int(payload_uid) != int(user_id):
+        return {"ok": False, "reason": "payload_uid_mismatch"}
+    if int(stars_amount) != int(PREMIUM_STARS_MONTH):
+        return {"ok": False, "reason": "bad_amount"}
+
+    try:
+        active_until = int(subscription_expiration_date) if subscription_expiration_date else int(time.time()) + 2592000
+    except Exception:
+        active_until = int(time.time()) + 2592000
+
+    _set_premium_user(
+        user_id=user_id,
+        active_until=active_until,
+        plan="stars_month",
+        provider="stars",
+    )
+
+    _upsert_stars_subscription(
+        user_id=user_id,
+        status="active",
+        active_until=active_until,
+        canceled_at_period_end=False,
+        last_charge_id=str(telegram_payment_charge_id or ""),
+        is_recurring=bool(is_recurring),
+        is_first_recurring=bool(is_first_recurring),
+    )
+
+    partner_id = get_user_partner_id(user_id)
+    _append_stars_payment_log({
+        "user_id": user_id,
+        "ts": int(time.time()),
+        "stars": int(stars_amount),
+        "telegram_payment_charge_id": str(telegram_payment_charge_id or ""),
+        "invoice_payload": str(invoice_payload or ""),
+        "is_first_recurring": bool(is_first_recurring),
+        "is_recurring": bool(is_recurring),
+        "subscription_expiration_date": int(active_until),
+        "partner_id": partner_id,
+    })
+
+    user_data = load_user_data()
+    uid = str(user_id)
+    user_row = user_data.setdefault(uid, {})
+    user_row["last_stars_charge_id"] = str(telegram_payment_charge_id or "")
+    user_row["last_stars_is_first_recurring"] = bool(is_first_recurring)
+    user_row["last_stars_is_recurring"] = bool(is_recurring)
+    save_user_data(user_data)
+
+    return {"ok": True, "active_until": active_until}
+
+
+def simulate_successful_payment(
+    user_id: int,
+    stars_amount: int,
+    expiration_ts: Optional[int],
+    is_recurring: bool,
+    is_first_recurring: bool,
+) -> dict:
+    return _apply_stars_successful_payment(
+        user_id=int(user_id),
+        stars_amount=int(stars_amount),
+        invoice_payload=f"premium_stars_month:{int(user_id)}:qa",
+        subscription_expiration_date=expiration_ts,
+        telegram_payment_charge_id=f"qa_charge_{int(time.time())}",
+        is_recurring=bool(is_recurring),
+        is_first_recurring=bool(is_first_recurring),
+    )
 STRIPE_PORTAL_RETURN_URL = os.getenv("STRIPE_PORTAL_RETURN_URL", os.getenv("PUBLIC_BASE_URL", "")).strip()  # 💬 куда возвращаться из Stripe Portal
 # 💬 Railway часто хранит домен без https://, а Stripe требует полный URL
 if STRIPE_PORTAL_RETURN_URL and not STRIPE_PORTAL_RETURN_URL.startswith(("http://", "https://")):
@@ -1149,42 +1290,48 @@ def _set_premium_user(
     save_premium_users(data)
 
 
+@dp.pre_checkout_query()
+@track_handler
+async def premium_pre_checkout_handler(query: PreCheckoutQuery):
+    payload_uid, nonce = parse_stars_payload(query.invoice_payload or "")
+    valid = bool(payload_uid and nonce and int(payload_uid) == int(query.from_user.id))
+    valid = valid and str(query.currency or "") == "XTR" and int(query.total_amount or 0) == int(PREMIUM_STARS_MONTH)
+
+    if valid:
+        _upsert_stars_subscription(
+            user_id=query.from_user.id,
+            status="pending",
+            created_at=int(time.time()),
+            payload=str(query.invoice_payload or ""),
+            amount=int(query.total_amount or 0),
+        )
+        await query.answer(ok=True)
+    else:
+        await query.answer(ok=False, error_message="Некорректный счёт Stars. Попробуй ещё раз.")
+
+
 @dp.message(F.successful_payment)
 @track_handler
 async def premium_stars_successful_payment_handler(message: Message, state: FSMContext):
     sp = message.successful_payment
-    if not sp:
+    if not sp or not message.from_user:
         return
 
-    payload = str(getattr(sp, "invoice_payload", "") or "")
-    if sp.currency != "XTR" or not payload.startswith("premium_stars_month:"):
+    if str(getattr(sp, "currency", "") or "") != "XTR":
         return
 
-    raw_expire = getattr(sp, "subscription_expiration_date", None)
-    try:
-        active_until = int(raw_expire) if raw_expire else int(time.time()) + 2592000
-    except Exception:
-        active_until = int(time.time()) + 2592000
-
-    _set_premium_user(
+    result = _apply_stars_successful_payment(
         user_id=message.from_user.id,
-        active_until=active_until,
-        plan="stars_month",
-        provider="stars",
+        stars_amount=int(getattr(sp, "total_amount", 0) or 0),
+        invoice_payload=str(getattr(sp, "invoice_payload", "") or ""),
+        subscription_expiration_date=getattr(sp, "subscription_expiration_date", None),
+        telegram_payment_charge_id=str(getattr(sp, "telegram_payment_charge_id", "") or ""),
+        is_recurring=bool(getattr(sp, "is_recurring", False)),
+        is_first_recurring=bool(getattr(sp, "is_first_recurring", False)),
     )
 
-    is_first_recurring = bool(getattr(sp, "is_first_recurring", False))
-    is_recurring = bool(getattr(sp, "is_recurring", False))
-
-    telegram_payment_charge_id = str(getattr(sp, "telegram_payment_charge_id", "") or "")
-    if telegram_payment_charge_id:
-        user_data = load_user_data()
-        uid = str(message.from_user.id)
-        user_row = user_data.setdefault(uid, {})
-        user_row["last_stars_charge_id"] = telegram_payment_charge_id
-        user_row["last_stars_is_first_recurring"] = is_first_recurring
-        user_row["last_stars_is_recurring"] = is_recurring
-        save_user_data(user_data)
+    if not result.get("ok"):
+        logging.warning("successful_payment ignored: %s", result.get("reason"))
 
 
 def _extract_tg_id_from_checkout_session(session_obj: dict) -> Optional[int]:
@@ -1266,6 +1413,15 @@ def _mywords_premium_checkout_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="mywords:premium_entry")],
         ]
     )
+
+
+async def _safe_send_paywall_message(message: Message, text: str, reply_markup: InlineKeyboardMarkup, parse_mode: str = "HTML"):
+    try:
+        return await message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except TelegramForbiddenError:
+        return None
+    except Exception:
+        return None
 
 
 async def start_stars_checkout(user_id: int, chat_id: int, bot: Bot):
@@ -4081,72 +4237,24 @@ async def premium_buy_card_cb(query: CallbackQuery):
         )
 
 
-@dp.message(F.successful_payment)
-async def successful_payment_stars_logger(message: Message):
-    payment = message.successful_payment
-    if payment is None:
-        return
-
-    sub_exp = getattr(payment, "subscription_expiration_date", None)
-    if sub_exp is not None:
-        try:
-            sub_exp = int(sub_exp)
-        except Exception:
-            sub_exp = None
-
-    user_id = int((message.from_user.id if message.from_user else 0) or 0)
-    partner_id = get_user_partner_id(user_id)
-    entry = {
-        "user_id": user_id,
-        "ts": int(time.time()),
-        "stars": int(getattr(payment, "total_amount", 0) or 0),
-        "telegram_payment_charge_id": str(getattr(payment, "telegram_payment_charge_id", "") or ""),
-        "invoice_payload": str(getattr(payment, "invoice_payload", "") or ""),
-        "is_first_recurring": bool(getattr(payment, "is_first_recurring", False)),
-        "is_recurring": bool(getattr(payment, "is_recurring", False)),
-        "subscription_expiration_date": sub_exp,
-        "partner_id": partner_id,
-    }
-    _append_stars_payment_log(entry)
-
-
 @dp.callback_query(F.data == "premium:stars_month")
-async def premium_stars_month_stub(query: CallbackQuery, state: FSMContext):
-    await query.answer("⭐ Оплата Stars скоро будет доступна. (в разработке)", show_alert=True)
-
+async def premium_stars_month_handler(query: CallbackQuery, state: FSMContext):
     if not query.message:
+        await query.answer()
         return
 
-    back_cb = "settings:back"
     try:
-        rows = query.message.reply_markup.inline_keyboard if query.message.reply_markup else []
-        for row in rows:
-            for btn in row:
-                if getattr(btn, "callback_data", None) and getattr(btn, "text", "") == "⬅️ Назад":
-                    back_cb = btn.callback_data
-                    raise StopIteration
-    except StopIteration:
-        pass
+        await start_stars_checkout(query.from_user.id, query.message.chat.id, query.bot)
+        await query.answer("⭐ Открываю оплату Stars")
+    except TelegramForbiddenError:
+        await query.answer("⚠️ Не могу отправить счёт: бот заблокирован.", show_alert=True)
     except Exception:
-        back_cb = "settings:back"
-
-    try:
-        await query.message.edit_text(
-            _premium_paywall_text(query.from_user.id),
-            reply_markup=_premium_paywall_kb(back_cb),
-            parse_mode="HTML",
-        )
-    except Exception:
-        await query.message.answer(
-            _premium_paywall_text(query.from_user.id),
-            reply_markup=_premium_paywall_kb(back_cb),
-            parse_mode="HTML",
-        )
+        await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй позже.", show_alert=True)
 
 
 @dp.callback_query(F.data == "mywords:premium_stars_month")
 async def mywords_premium_stars_month_delegate(query: CallbackQuery, state: FSMContext):
-    await premium_stars_month_stub(query, state)
+    await premium_stars_month_handler(query, state)
 
 
 @dp.callback_query(LessonStates.choosing_subcategory, F.data.startswith("subcat:"))
@@ -5308,6 +5416,150 @@ async def stars_cancel_handler(message: Message, state: FSMContext):
             f"charge_id={charge_id}\n"
             f"error={e}"
         )
+
+
+def _load_qa_state() -> dict:
+    try:
+        if not os.path.exists(QA_STATE_PATH):
+            return {}
+        with open(QA_STATE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_qa_state(data: dict) -> None:
+    if not isinstance(data, dict):
+        return
+    _atomic_json_dump(QA_STATE_PATH, data, ensure_ascii=False, indent=2)
+
+
+def _qa_users_seed() -> dict:
+    return {
+        "U1": {"user_id": 9900001},
+        "U2": {"user_id": 9900002},
+        "U3": {"user_id": 9900003},
+        "U4": {"user_id": 9900004},
+        "U5": {"user_id": 9900005},
+    }
+
+
+@dp.message(Command("qa_make_users"))
+@track_handler
+async def qa_make_users_handler(message: Message, state: FSMContext):
+    if not _is_admin(message.from_user.id):
+        return
+
+    data = _load_qa_state()
+    data["users"] = _qa_users_seed()
+    data["created_at"] = int(time.time())
+    _save_qa_state(data)
+    await message.answer("✅ QA users созданы: U1..U5")
+
+
+@dp.message(Command("qa_reset"))
+@track_handler
+async def qa_reset_handler(message: Message, state: FSMContext):
+    if not _is_admin(message.from_user.id):
+        return
+
+    for path in (QA_STATE_PATH,):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
+
+    await message.answer("🧹 QA state очищен")
+
+
+@dp.message(Command("qa_run_scenarios"))
+@track_handler
+async def qa_run_scenarios_handler(message: Message, state: FSMContext):
+    if not _is_admin(message.from_user.id):
+        return
+
+    qa = _load_qa_state()
+    users = qa.get("users") if isinstance(qa.get("users"), dict) else _qa_users_seed()
+    qa["users"] = users
+
+    now = int(time.time())
+    month = 2592000
+
+    # U1: first payment success
+    u1 = int(users["U1"]["user_id"])
+    r1 = simulate_successful_payment(u1, PREMIUM_STARS_MONTH, now + month, False, True)
+
+    # U2: success + cancel at period end
+    u2 = int(users["U2"]["user_id"])
+    r2 = simulate_successful_payment(u2, PREMIUM_STARS_MONTH, now + month, False, True)
+    _upsert_stars_subscription(u2, "canceled_at_period_end", active_until=r2.get("active_until", 0), canceled_at_period_end=True)
+
+    # U3: pending expires
+    u3 = int(users["U3"]["user_id"])
+    _upsert_stars_subscription(u3, "pending", created_at=now - QA_PENDING_TTL_SEC - 60, payload=f"premium_stars_month:{u3}:qa", amount=PREMIUM_STARS_MONTH)
+    _expire_pending_subscriptions(now_ts=now)
+
+    # U4: first + recurring
+    u4 = int(users["U4"]["user_id"])
+    first = simulate_successful_payment(u4, PREMIUM_STARS_MONTH, now + month, False, True)
+    recur = simulate_successful_payment(u4, PREMIUM_STARS_MONTH, now + (2 * month), True, False)
+
+    # U5: payment success + bot blocked path (safe try/except)
+    u5 = int(users["U5"]["user_id"])
+    r5 = simulate_successful_payment(u5, PREMIUM_STARS_MONTH, now + month, False, True)
+    blocked_caught = False
+    try:
+        raise RuntimeError("bot blocked")
+    except Exception as e:
+        blocked_caught = "blocked" in str(e).lower()
+
+    subs = _load_stars_subscriptions()
+    recent = _load_stars_payments(limit=300)
+
+    def _has_log(uid: int) -> bool:
+        for row in recent:
+            try:
+                if int(row.get("user_id", 0) or 0) == int(uid):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    report_rows = []
+    for key in ("U1", "U2", "U3", "U4", "U5"):
+        uid = int(users[key]["user_id"])
+        premium_data = load_premium_users().get(str(uid), {})
+        until_ts = int((premium_data or {}).get("active_until", 0) or 0)
+        is_active = until_ts > now
+        sub_row = subs.get(str(uid), {}) if isinstance(subs, dict) else {}
+        status = (sub_row or {}).get("status", "-")
+        report_rows.append(
+            f"{key}: active={is_active}, active_until={until_ts}, stars_status={status}, log={_has_log(uid)}"
+        )
+
+    qa["last_run_at"] = now
+    qa["last_run_report"] = report_rows
+    qa["u4_first_until"] = int(first.get("active_until", 0) or 0)
+    qa["u4_recurring_until"] = int(recur.get("active_until", 0) or 0)
+    qa["u5_blocked_caught"] = bool(blocked_caught)
+    _save_qa_state(qa)
+
+    await message.answer(
+        "\n".join([
+            "🧪 QA сценарии U1..U5",
+            f"U1 success={r1.get('ok')}",
+            f"U2 success={r2.get('ok')} + canceled_at_period_end",
+            "U3 pending -> expired",
+            f"U4 first_until={qa['u4_first_until']} recur_until={qa['u4_recurring_until']}",
+            f"U5 bot_blocked_caught={blocked_caught}",
+            "",
+            *report_rows,
+        ])
+    )
+
+
 
 
 @dp.message(Command("stats"))
@@ -6549,9 +6801,10 @@ async def mywords_premium_entry_cb(callback: CallbackQuery, state: FSMContext):
             parse_mode="HTML",
         )
     except Exception:
-        await callback.message.answer(
+        await _safe_send_paywall_message(
+            callback.message,
             _mywords_premium_entry_text(),
-            reply_markup=_mywords_premium_entry_kb(),
+            _mywords_premium_entry_kb(),
             parse_mode="HTML",
         )
 
@@ -6570,9 +6823,10 @@ async def mywords_premium_buy_card_cb(callback: CallbackQuery, state: FSMContext
             parse_mode="HTML",
         )
     except Exception:
-        await callback.message.answer(
+        await _safe_send_paywall_message(
+            callback.message,
             _premium_paywall_text(callback.from_user.id),
-            reply_markup=_mywords_premium_checkout_kb(),
+            _mywords_premium_checkout_kb(),
             parse_mode="HTML",
         )
 
@@ -6734,9 +6988,10 @@ async def mywords_add_newcat_cb(callback: CallbackQuery, state: FSMContext):
     )
 
     if (not is_premium_active(callback.from_user.id)) and (cats_count >= FREE_MYWORDS_CATEGORIES_LIMIT):
-        await callback.message.answer(
+        await _safe_send_paywall_message(
+            callback.message,
             _mywords_premium_entry_text(),
-            reply_markup=_mywords_premium_entry_kb(),
+            _mywords_premium_entry_kb(),
             parse_mode="HTML"
         )
         return  # 💬 не переводим в state ввода названия
@@ -6782,9 +7037,10 @@ async def mywords_add_newcat_name(message: Message, state: FSMContext):
 
     ok = await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
     if not ok:
-        await message.answer(
+        await _safe_send_paywall_message(
+            message,
             _mywords_premium_entry_text(),
-            reply_markup=_mywords_premium_entry_kb(),
+            _mywords_premium_entry_kb(),
             parse_mode="HTML"
         )
         return
@@ -6893,9 +7149,10 @@ async def mywords_add_save_cb(callback: CallbackQuery, state: FSMContext):
     result = await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
 
     if result == "free_limit":
-        await callback.message.answer(
+        await _safe_send_paywall_message(
+            callback.message,
             _mywords_premium_entry_text(),
-            reply_markup=_mywords_premium_entry_kb(),
+            _mywords_premium_entry_kb(),
             parse_mode="HTML"
         )
         return
