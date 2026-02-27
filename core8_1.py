@@ -1075,6 +1075,7 @@ def _set_premium_user(
     user_id: int,
     active_until: int,
     plan: str = "",
+    provider: str = "",
     stripe_customer_id: str = "",
     stripe_subscription_id: str = "",
 ) -> None:
@@ -1088,6 +1089,8 @@ def _set_premium_user(
     prev["active_until"] = int(active_until or 0)
     if plan:
         prev["plan"] = plan
+    if provider:
+        prev["provider"] = provider
 
     if stripe_customer_id:
         prev["stripe_customer_id"] = stripe_customer_id
@@ -1099,6 +1102,44 @@ def _set_premium_user(
 
     data[uid] = prev
     save_premium_users(data)
+
+
+@dp.message(F.successful_payment)
+@track_handler
+async def premium_stars_successful_payment_handler(message: Message, state: FSMContext):
+    sp = message.successful_payment
+    if not sp:
+        return
+
+    payload = str(getattr(sp, "invoice_payload", "") or "")
+    if sp.currency != "XTR" or not payload.startswith("premium_stars_month:"):
+        return
+
+    raw_expire = getattr(sp, "subscription_expiration_date", None)
+    try:
+        active_until = int(raw_expire) if raw_expire else int(time.time()) + 2592000
+    except Exception:
+        active_until = int(time.time()) + 2592000
+
+    _set_premium_user(
+        user_id=message.from_user.id,
+        active_until=active_until,
+        plan="stars_month",
+        provider="stars",
+    )
+
+    is_first_recurring = bool(getattr(sp, "is_first_recurring", False))
+    is_recurring = bool(getattr(sp, "is_recurring", False))
+
+    telegram_payment_charge_id = str(getattr(sp, "telegram_payment_charge_id", "") or "")
+    if telegram_payment_charge_id:
+        user_data = load_user_data()
+        uid = str(message.from_user.id)
+        user_row = user_data.setdefault(uid, {})
+        user_row["last_stars_charge_id"] = telegram_payment_charge_id
+        user_row["last_stars_is_first_recurring"] = is_first_recurring
+        user_row["last_stars_is_recurring"] = is_recurring
+        save_user_data(user_data)
 
 
 def _extract_tg_id_from_checkout_session(session_obj: dict) -> Optional[int]:
