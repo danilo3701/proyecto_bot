@@ -3923,6 +3923,43 @@ async def premium_check_settings(query: CallbackQuery, state: FSMContext):
         pass
 
 
+@dp.callback_query(F.data == "premium:stars_month")
+async def premium_stars_month_stub(query: CallbackQuery, state: FSMContext):
+    await query.answer("⭐ Оплата Stars скоро будет доступна. (в разработке)", show_alert=True)
+
+    keyboard_rows = ((query.message.reply_markup.inline_keyboard or []) if query.message and query.message.reply_markup else [])
+    callback_buttons = [
+        btn.callback_data
+        for row in keyboard_rows
+        for btn in row
+        if getattr(btn, "callback_data", None)
+    ]
+
+    # 💬 Сценарий «⚙️ Настройки → 💎 Моя подписка»: переоткрываем экран тем же хендлером.
+    if "settings:back" in callback_buttons:
+        await settings_subscription_cb(query)
+        return
+
+    # 💬 Сценарий paywall в уроках/блокировках: сохраняем текущий callback «Назад».
+    back_cb = "premium:back_topics"
+    if keyboard_rows:
+        last_row = keyboard_rows[-1]
+        if last_row and getattr(last_row[0], "callback_data", None):
+            back_cb = last_row[0].callback_data
+
+    try:
+        await query.message.edit_text(
+            _premium_paywall_text(query.from_user.id),
+            reply_markup=_premium_paywall_kb(back_cb),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e).lower():
+            await query.answer("✅")
+            return
+        raise
+
+
 @dp.callback_query(LessonStates.choosing_subcategory, F.data.startswith("subcat:"))
 @track_handler
 async def subcategory_chosen(callback: CallbackQuery, state: FSMContext):
