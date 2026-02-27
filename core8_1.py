@@ -1011,6 +1011,7 @@ FREE_TOPICS_LIMIT = int(os.getenv("FREE_TOPICS_LIMIT", "10"))
 PREMIUM_PAYLINK_YEAR = os.getenv("PREMIUM_PAYLINK_YEAR", "https://buy.stripe.com/bJefZi3LgaZmcu74EBbbG0c")
 PREMIUM_PAYLINK_MONTH = os.getenv("PREMIUM_PAYLINK_MONTH", "https://buy.stripe.com/bJeeVe1D8ffC0Lpc73bbG0a")
 PREMIUM_PAYLINK_WEEK = os.getenv("PREMIUM_PAYLINK_WEEK", "https://buy.stripe.com/00wfZia9Eeby65JefbbbG0b")
+PREMIUM_STARS_MONTH = int(os.getenv("PREMIUM_STARS_MONTH", "400"))
 
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
@@ -1123,6 +1124,8 @@ def _premium_paywall_text(user_id: int) -> str:
     # 💬 единый Premium текст + Telegram ID для Stripe custom field
     return (
         "🔒 <b>Premium доступ</b>\n\n"
+        "👑 <b>Premium — полный доступ на 1 месяц</b>\n"
+        f"Цена: €6.99 (карта) или ⭐ {PREMIUM_STARS_MONTH} Stars (в Telegram).\n\n"
         "<b>Ты получаешь:</b>\n\n"
         "✅ <b>Подкасты:</b> все эпизоды без ограничений + новые выпуски\n"
         "✅ <b>Лексика:</b> все темы без лимитов + будущие темы\n"
