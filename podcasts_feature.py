@@ -1324,44 +1324,59 @@ async def pod_filter_input(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("pod:locked:"))
 async def pod_episode_locked(cb: CallbackQuery, state: FSMContext) -> None:
     # 💬 показываем paywall отдельным сообщением, чтобы потом удалить без мусора
-    st = await state.get_data()
-    if not st.get("pod_ctx") or st.get("pod_screen") != "episodes":
-        await cb.answer()
-        return
+    answer_kwargs: dict[str, Any] = {}
+    try:
+        st = await state.get_data()
+        if not st.get("pod_ctx") or st.get("pod_screen") != "episodes":
+            return
 
-    if _premium_active(cb.from_user.id):
-        await cb.answer("✅ Premium активен. Нажми эпизод ещё раз.", show_alert=True)
-        return
+        if _premium_active(cb.from_user.id):
+            answer_kwargs = {"text": "✅ Premium активен. Нажми эпизод ещё раз.", "show_alert": True}
+            return
 
-    old_id = st.get("pod_premium_msg_id")
-    if old_id:
-        await _safe_delete_message(cb.bot, cb.message.chat.id, int(old_id))  # 💬 удаляем старое предупреждение
-        await state.update_data(pod_premium_msg_id=None)
+        old_id = st.get("pod_premium_msg_id")
+        if old_id:
+            await _safe_delete_message(cb.bot, cb.message.chat.id, int(old_id))  # 💬 удаляем старое предупреждение
+            await state.update_data(pod_premium_msg_id=None)
 
-    msg = await cb.message.answer(
-        _premium_paywall_text(cb.from_user.id),  # 💬 Telegram ID для Stripe
-        reply_markup=_kb_premium_paywall(),
-        disable_web_page_preview=True
-    )
-
-    await state.update_data(pod_premium_msg_id=msg.message_id)
-    await cb.answer()
+        paywall_text = _premium_paywall_text(cb.from_user.id)
+        try:
+            msg = await cb.message.answer(
+                paywall_text,
+                reply_markup=_kb_premium_paywall(),
+                disable_web_page_preview=True,
+            )
+            await state.update_data(pod_premium_msg_id=msg.message_id)
+        except Exception:
+            # 💬 если отправить paywall не удалось — тихо завершаем
+            pass
+    finally:
+        try:
+            await cb.answer(**answer_kwargs)
+        except Exception:
+            pass
 
 @router.callback_query(F.data == "pod:premium_back")
 async def pod_premium_back(cb: CallbackQuery, state: FSMContext) -> None:
     # 💬 закрываем paywall и удаляем сообщение
-    await state.update_data(pod_premium_msg_id=None)
     try:
-        await cb.message.delete()
-    except Exception:
-        pass
-    await cb.answer()
+        await state.update_data(pod_premium_msg_id=None)
+        try:
+            await cb.message.delete()
+        except TelegramBadRequest:
+            pass
+        except Exception:
+            pass
+    finally:
+        try:
+            await cb.answer()
+        except Exception:
+            pass
 
 @router.callback_query(F.data == "pod:premium_check")
 async def pod_premium_check(cb: CallbackQuery, state: FSMContext) -> None:
     # 💬 проверка Premium, затем обновляем список эпизодов (снимаем замки)
-    st = await state.get_data()
-    ok = _premium_active(cb.from_user.id)
+    answer_kwargs: dict[str, Any] = {}
 
     async def _delete_later(msgs, delay: int = 5):
         await asyncio.sleep(delay)
@@ -1371,57 +1386,84 @@ async def pod_premium_check(cb: CallbackQuery, state: FSMContext) -> None:
             except Exception:
                 pass  # 💬 тихо чистим реакцию
 
-    if not ok:
+    try:
+        st = await state.get_data()
+        ok = _premium_active(cb.from_user.id)
+
+        if not ok:
+            try:
+                msgs = []
+                msgs.append(await cb.message.answer_sticker("CAACAgIAAxkBAAIWH2l21bO_xugzDFap9zCvHnG64If-AAKRMwACkKbJSE_T26pSZdruOAQ"))  # 💬 стикер нет Premium
+                msgs.append(await cb.message.answer("⏳ Premium ещё не активен. Если оплатил, подожди немного и нажми ещё раз.\nЕсли не срабатывает, напиши @Drancherrro"))  # 💬 подсказка
+                asyncio.create_task(_delete_later(msgs, 5))
+            except Exception:
+                pass
+
+            answer_kwargs = {
+                "text": "⏳ Premium ещё не активен. Попробуй ещё раз через немного.\nЕсли не срабатывает, напиши @Drancherrro",
+                "show_alert": True,
+            }
+            return
+
         try:
             msgs = []
-            msgs.append(await cb.message.answer_sticker("CAACAgIAAxkBAAIWH2l21bO_xugzDFap9zCvHnG64If-AAKRMwACkKbJSE_T26pSZdruOAQ"))  # 💬 стикер нет Premium
-            msgs.append(await cb.message.answer("⏳ Premium ещё не активен. Если оплатил, подожди немного и нажми ещё раз.\nЕсли не срабатывает, напиши @Drancherrro"))  # 💬 подсказка
+            msgs.append(await cb.message.answer_sticker("CAACAgIAAxkBAAIWI2l21eTj7Ea12Kr5IFDAPatBQzZoAALYLgACQ7nYSMxMa3UjThHMOAQ"))  # 💬 стикер Premium есть
+            msgs.append(await cb.message.answer("✅ Premium активен. Открываю доступ"))  # 💬 подтверждение
             asyncio.create_task(_delete_later(msgs, 5))
         except Exception:
             pass
 
-        await cb.answer("⏳ Premium ещё не активен. Попробуй ещё раз через немного.\nЕсли не срабатывает, напиши @Drancherrro", show_alert=True)
-        return
-
-    try:
-        msgs = []
-        msgs.append(await cb.message.answer_sticker("CAACAgIAAxkBAAIWI2l21eTj7Ea12Kr5IFDAPatBQzZoAALYLgACQ7nYSMxMa3UjThHMOAQ"))  # 💬 стикер Premium есть
-        msgs.append(await cb.message.answer("✅ Premium активен. Открываю доступ"))  # 💬 подтверждение
-        asyncio.create_task(_delete_later(msgs, 5))
-    except Exception:
-        pass
-
-
-    await state.update_data(pod_premium_msg_id=None)
-    try:
-        await cb.message.delete()  # 💬 удаляем предупреждение
-    except Exception:
-        pass
-
-    author_id = st.get("pod_author_id")
-    nav_msg_id = st.get("pod_nav_msg_id")
-    level_key = st.get("pod_filter_level")
-    topic_key = st.get("pod_filter_topic")
-    page = int(st.get("pod_ep_page") or 0)
-
-    if author_id and nav_msg_id:
-        data = _read_podcasts()
-        author = data.get("authors", {}).get(author_id, {})
-        author_name = author.get("name", "Автор")
-        text = _episodes_menu_html(author_name, level_key, topic_key)
+        await state.update_data(pod_premium_msg_id=None)
         try:
-            await cb.bot.edit_message_text(
-                chat_id=cb.message.chat.id,
-                message_id=int(nav_msg_id),
-                text=text,
-                reply_markup=_kb_episodes(data, cb.from_user.id, author_id, level_key, topic_key, page),
-                parse_mode="HTML",
-            )  # 💬 обновили список без замков
+            await cb.message.delete()  # 💬 удаляем предупреждение
+        except TelegramBadRequest:
+            pass
         except Exception:
             pass
 
-    await cb.answer("✅ Premium активен", show_alert=True)
+        author_id = st.get("pod_author_id")
+        nav_msg_id = st.get("pod_nav_msg_id")
+        level_key = st.get("pod_filter_level")
+        topic_key = st.get("pod_filter_topic")
+        page = int(st.get("pod_ep_page") or 0)
 
+        if author_id and nav_msg_id:
+            data = _read_podcasts()
+            author = data.get("authors", {}).get(author_id, {})
+            author_name = author.get("name", "Автор")
+            text = _episodes_menu_html(author_name, level_key, topic_key)
+            try:
+                await cb.bot.edit_message_text(
+                    chat_id=cb.message.chat.id,
+                    message_id=int(nav_msg_id),
+                    text=text,
+                    reply_markup=_kb_episodes(data, cb.from_user.id, author_id, level_key, topic_key, page),
+                    parse_mode="HTML",
+                )  # 💬 обновили список без замков
+            except TelegramBadRequest as e:
+                # 💬 если edit не удался — отправляем новый экран только когда нет дубля
+                err = str(e).lower()
+                if "message is not modified" not in err:
+                    current_text = (cb.message.html_text or cb.message.text or "").strip()
+                    if current_text != text.strip():
+                        try:
+                            msg = await cb.message.answer(
+                                text,
+                                reply_markup=_kb_episodes(data, cb.from_user.id, author_id, level_key, topic_key, page),
+                                parse_mode="HTML",
+                            )
+                            await state.update_data(pod_nav_msg_id=msg.message_id)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        answer_kwargs = {"text": "✅ Premium активен", "show_alert": True}
+    finally:
+        try:
+            await cb.answer(**answer_kwargs)
+        except Exception:
+            pass
 
 @router.callback_query(F.data.startswith("pod:ep:"))
 async def pod_episode_open(cb: CallbackQuery, state: FSMContext) -> None:
