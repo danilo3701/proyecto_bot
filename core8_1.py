@@ -1039,10 +1039,8 @@ PREMIUM_USERS_BACKUP_PATH = "/data/premium_users.backup.json"
 
 FREE_TOPICS_LIMIT = int(os.getenv("FREE_TOPICS_LIMIT", "10"))
 
-PREMIUM_PAYLINK_YEAR = os.getenv("PREMIUM_PAYLINK_YEAR", "https://buy.stripe.com/bJefZi3LgaZmcu74EBbbG0c")
 PREMIUM_PAYLINK_MONTH = os.getenv("PREMIUM_PAYLINK_MONTH", "https://buy.stripe.com/bJeeVe1D8ffC0Lpc73bbG0a")
 PREMIUM_STARS_MONTH = int(os.getenv("PREMIUM_STARS_MONTH", "400"))
-PREMIUM_PAYLINK_WEEK = os.getenv("PREMIUM_PAYLINK_WEEK", "https://buy.stripe.com/00wfZia9Eeby65JefbbbG0b")
 PREMIUM_STARS_TITLE = os.getenv("PREMIUM_STARS_TITLE", "Premium — 1 месяц")
 PREMIUM_STARS_DESC = os.getenv("PREMIUM_STARS_DESC", "Полный доступ на 30 дней")
 
@@ -1235,7 +1233,7 @@ def _premium_paywall_kb(back_cb: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💳 Купить Premium — €6.99 / месяц", url=PREMIUM_PAYLINK_MONTH)],
-            [InlineKeyboardButton(text="⭐ Premium за Stars", callback_data="premium:stars_month")],
+            [InlineKeyboardButton(text=f"⭐ Купить Premium — {PREMIUM_STARS_MONTH} Stars / месяц", callback_data="premium:stars_month")],
             [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)],
         ]
@@ -3230,6 +3228,8 @@ async def settings_subscription_cb(callback: CallbackQuery):
             "💎 <b>Моя подписка</b>\n\n"
             "🔒 <b>Premium не активен</b>"
             f"{extra_block}\n\n"
+            f"👑 <b>Premium — полный доступ на 1 месяц</b>\n"
+            f"Цена: €6.99 (карта) или ⭐ {PREMIUM_STARS_MONTH} Stars (в Telegram).\n\n"
             "Оформи Premium на 1 месяц, чтобы снять замки во всех разделах"
         )
 
@@ -3250,7 +3250,7 @@ async def settings_subscription_cb(callback: CallbackQuery):
     else:
         kb_rows.extend([
             [InlineKeyboardButton(text="💳 Купить Premium — €6.99 / месяц", url=PREMIUM_PAYLINK_MONTH)],
-            [InlineKeyboardButton(text="⭐ Premium за Stars", callback_data="premium:stars_month")],
+            [InlineKeyboardButton(text=f"⭐ Купить Premium — {PREMIUM_STARS_MONTH} Stars / месяц", callback_data="premium:stars_month")],
             [InlineKeyboardButton(text="🔎 Синхронизировать статус", callback_data="premium:check_settings")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")],
         ])
@@ -4023,7 +4023,7 @@ async def premium_check_settings(query: CallbackQuery, state: FSMContext):
 
     # 💬 возвращаем пользователя в «Моя подписка», без прыжков в лексику
     try:
-        await settings_subscription_cb(query, state)
+        await settings_subscription_cb(query)
     except Exception:
         pass
 
@@ -4061,77 +4061,34 @@ async def successful_payment_stars_logger(message: Message):
 async def premium_stars_month_stub(query: CallbackQuery, state: FSMContext):
     await query.answer("⭐ Оплата Stars скоро будет доступна. (в разработке)", show_alert=True)
 
-    keyboard_rows = ((query.message.reply_markup.inline_keyboard or []) if query.message and query.message.reply_markup else [])
-    callback_buttons = [
-        btn.callback_data
-        for row in keyboard_rows
-        for btn in row
-        if getattr(btn, "callback_data", None)
-    ]
-
-
-def _parse_stars_payload(payload: str | None) -> tuple[bool, str]:
-    if not payload:
-        return False, "Отсутствует payload платежа."
-
-    payload_s = str(payload).strip()
-    if not payload_s.startswith("premium_stars_month:"):
-        return False, "Неверный payload Stars-платежа."
-
-    return True, ""
-
-
-@dp.pre_checkout_query()
-async def premium_stars_pre_checkout(query: PreCheckoutQuery):
-    payload_ok, payload_error = _parse_stars_payload(query.invoice_payload)
-    if not payload_ok:
-        await query.answer(ok=False, error_message=payload_error)
-        return
-
-    if query.currency != "XTR":
-        await query.answer(ok=False, error_message="Неверная валюта для Stars-платежа.")
-        return
-
-    if int(query.total_amount or 0) != int(PREMIUM_STARS_MONTH):
-        await query.answer(ok=False, error_message="Неверная сумма Stars-платежа.")
-        return
-
-    await query.answer(ok=True)
-
-
-@dp.message(F.successful_payment)
-async def premium_stars_successful_payment(message: Message):
-    payment = message.successful_payment
-    payload_ok, _ = _parse_stars_payload(getattr(payment, "invoice_payload", None))
-    if not payload_ok:
-        return
-
-    if getattr(payment, "currency", "") != "XTR":
-        return
-
-    if int(getattr(payment, "total_amount", 0) or 0) != int(PREMIUM_STARS_MONTH):
-        return
-
-    now = int(time.time())
-    active_until = now + 30 * 24 * 60 * 60
-    _set_premium_user(
-        user_id=message.from_user.id,
-        active_until=active_until,
-        plan="stars_month",
-    )
-
-    await message.answer("✅ Premium активирован на 30 дней. Спасибо за оплату ⭐")
-
-@dp.callback_query(F.data == "premium:stars_month")
-async def premium_stars_month(query: CallbackQuery):
-    await query.answer()
     if not query.message:
         return
+
+    back_cb = "settings:back"
     try:
-        await start_stars_checkout(query.from_user.id, query.message.chat.id, query.bot)
+        rows = query.message.reply_markup.inline_keyboard if query.message.reply_markup else []
+        for row in rows:
+            for btn in row:
+                if getattr(btn, "callback_data", None) and getattr(btn, "text", "") == "⬅️ Назад":
+                    back_cb = btn.callback_data
+                    raise StopIteration
+    except StopIteration:
+        pass
     except Exception:
-        logging.exception("Failed to start Stars checkout")
-        await query.answer("⚠️ Не удалось создать счёт. Попробуй ещё раз чуть позже.", show_alert=True)
+        back_cb = "settings:back"
+
+    try:
+        await query.message.edit_text(
+            _premium_paywall_text(query.from_user.id),
+            reply_markup=_premium_paywall_kb(back_cb),
+            parse_mode="HTML",
+        )
+    except Exception:
+        await query.message.answer(
+            _premium_paywall_text(query.from_user.id),
+            reply_markup=_premium_paywall_kb(back_cb),
+            parse_mode="HTML",
+        )
 
 
 @dp.callback_query(LessonStates.choosing_subcategory, F.data.startswith("subcat:"))

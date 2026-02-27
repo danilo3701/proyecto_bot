@@ -118,10 +118,9 @@ def _require_init() -> None:
 FREE_PODCASTS_LIMIT = int(os.getenv("FREE_PODCASTS_LIMIT", "10"))
 
 DEFAULT_PREMIUM_LINKS = {
-    "week": os.getenv("PREMIUM_PAYLINK_WEEK", "https://buy.stripe.com/00wfZia9Eeby65JefbbbG0b"),
     "month": os.getenv("PREMIUM_PAYLINK_MONTH", "https://buy.stripe.com/bJeeVe1D8ffC0Lpc73bbG0a"),
-    "year": os.getenv("PREMIUM_PAYLINK_YEAR", "https://buy.stripe.com/bJefZi3LgaZmcu74EBbbG0c"),
 }
+PREMIUM_STARS_MONTH = int(os.getenv("PREMIUM_STARS_MONTH", "400"))
 
 _is_premium_active: Optional[Callable[[int], bool]] = None
 _premium_links: Dict[str, str] = dict(DEFAULT_PREMIUM_LINKS)
@@ -177,6 +176,8 @@ def _premium_active(user_id: int) -> bool:
 def _premium_paywall_text(user_id: int) -> str:
     # 💬 единый Premium текст (как в лексике) + Telegram ID для Stripe custom field
     return (
+        "👑 <b>Premium — полный доступ на 1 месяц</b>\n"
+        f"Цена: €6.99 (карта) или ⭐ {PREMIUM_STARS_MONTH} Stars (в Telegram).\n\n"
         "🔒 <b>Premium доступ</b>\n\n"
         "<b>Ты получаешь:</b>\n\n"
         "✅ <b>Подкасты:</b> все эпизоды без ограничений + новые выпуски\n"
@@ -197,20 +198,13 @@ def _premium_paywall_text(user_id: int) -> str:
 
 def _kb_premium_paywall() -> InlineKeyboardMarkup:
     # 💬 кнопки оплаты + проверка + назад (назад удаляет это сообщение)
-    week = _premium_links.get("week")
     month = _premium_links.get("month")
-    year = _premium_links.get("year")
 
     rows: List[List[InlineKeyboardButton]] = []
 
-    # 💬 каждая оплата = отдельная строка (как ты просил)
-    if week:
-        rows.append([InlineKeyboardButton(text="Premium 1 неделя", url=week)])
     if month:
-        rows.append([InlineKeyboardButton(text="Premium 1 месяц", url=month)])
-    if year:
-        rows.append([InlineKeyboardButton(text="Premium 1 год", url=year)])
-
+        rows.append([InlineKeyboardButton(text="💳 Купить Premium — €6.99 / месяц", url=month)])
+    rows.append([InlineKeyboardButton(text=f"⭐ Купить Premium — {PREMIUM_STARS_MONTH} Stars / месяц", callback_data="premium:stars_month")])
     rows.append([InlineKeyboardButton(text="✅ Проверить Premium", callback_data="pod:premium_check")])
     rows.append([InlineKeyboardButton(text="👈 Назад", callback_data="pod:premium_back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
