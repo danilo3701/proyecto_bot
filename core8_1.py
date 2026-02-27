@@ -3277,7 +3277,7 @@ async def settings_subscription_cb(callback: CallbackQuery):
         kb_rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")])
     else:
         kb_rows.extend([
-            [InlineKeyboardButton(text="💳 Купить Premium — €6.99 / месяц", url=PREMIUM_PAYLINK_MONTH)],
+            [InlineKeyboardButton(text="💳 Купить Premium (карта)", callback_data="premium:buy_card")],
             [InlineKeyboardButton(text=f"⭐ Купить Premium — {PREMIUM_STARS_MONTH} Stars / месяц", callback_data="premium:stars_month")],
             [InlineKeyboardButton(text="🔎 Синхронизировать статус", callback_data="premium:check_settings")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")],
@@ -4054,6 +4054,31 @@ async def premium_check_settings(query: CallbackQuery, state: FSMContext):
         await settings_subscription_cb(query)
     except Exception:
         pass
+
+
+@dp.callback_query(F.data == "premium:buy_card")
+async def premium_buy_card_cb(query: CallbackQuery):
+    await query.answer()
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Оплатить картой (Stripe)", url=PREMIUM_PAYLINK_MONTH)],
+        [InlineKeyboardButton(text="⭐ Оплатить Stars", callback_data="premium:stars_month")],
+        [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check_settings")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:subscription")],
+    ])
+
+    try:
+        await query.message.edit_text(
+            _premium_paywall_text(query.from_user.id),
+            reply_markup=kb,
+            parse_mode="HTML",
+        )
+    except Exception:
+        await query.message.answer(
+            _premium_paywall_text(query.from_user.id),
+            reply_markup=kb,
+            parse_mode="HTML",
+        )
 
 
 @dp.message(F.successful_payment)
