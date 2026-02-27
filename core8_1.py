@@ -271,6 +271,7 @@ from referral_feature import (
     referrals_try_bind_on_start,
     referrals_apply_invoice_paid,
     referrals_apply_subscription_status,
+    get_user_partner_id,
 )
 
 from podcasts_feature import router as podcasts_router, init_podcasts_feature, podcasts_open  # 💬 модуль "Подкасты"
@@ -1016,6 +1017,21 @@ PREMIUM_STARS_MONTH = int(os.getenv("PREMIUM_STARS_MONTH", "400"))
 
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STARS_PAYMENTS_PATH = os.getenv("STARS_PAYMENTS_PATH", "/data/stars_payments.jsonl")
+
+
+def _append_stars_payment_log(entry: dict) -> None:
+    if not isinstance(entry, dict):
+        return
+    try:
+        os.makedirs(os.path.dirname(STARS_PAYMENTS_PATH) or ".", exist_ok=True)
+        line = json.dumps(entry, ensure_ascii=False) + "\n"
+        with open(STARS_PAYMENTS_PATH, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
+    except Exception:
+        logging.exception("failed to append stars payment log")
 STRIPE_PORTAL_RETURN_URL = os.getenv("STRIPE_PORTAL_RETURN_URL", os.getenv("PUBLIC_BASE_URL", "")).strip()  # 💬 куда возвращаться из Stripe Portal
 # 💬 Railway часто хранит домен без https://, а Stripe требует полный URL
 if STRIPE_PORTAL_RETURN_URL and not STRIPE_PORTAL_RETURN_URL.startswith(("http://", "https://")):
@@ -3923,6 +3939,35 @@ async def premium_check_settings(query: CallbackQuery, state: FSMContext):
         await settings_subscription_cb(query, state)
     except Exception:
         pass
+
+
+@dp.message(F.successful_payment)
+async def successful_payment_stars_logger(message: Message):
+    payment = message.successful_payment
+    if payment is None:
+        return
+
+    sub_exp = getattr(payment, "subscription_expiration_date", None)
+    if sub_exp is not None:
+        try:
+            sub_exp = int(sub_exp)
+        except Exception:
+            sub_exp = None
+
+    user_id = int((message.from_user.id if message.from_user else 0) or 0)
+    partner_id = get_user_partner_id(user_id)
+    entry = {
+        "user_id": user_id,
+        "ts": int(time.time()),
+        "stars": int(getattr(payment, "total_amount", 0) or 0),
+        "telegram_payment_charge_id": str(getattr(payment, "telegram_payment_charge_id", "") or ""),
+        "invoice_payload": str(getattr(payment, "invoice_payload", "") or ""),
+        "is_first_recurring": bool(getattr(payment, "is_first_recurring", False)),
+        "is_recurring": bool(getattr(payment, "is_recurring", False)),
+        "subscription_expiration_date": sub_exp,
+        "partner_id": partner_id,
+    }
+    _append_stars_payment_log(entry)
 
 
 @dp.callback_query(F.data == "premium:stars_month")
