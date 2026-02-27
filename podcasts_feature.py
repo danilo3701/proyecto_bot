@@ -29,8 +29,6 @@ from aiogram.types import (
 )
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError  # 💬 чтобы не падать, если сообщение уже удалено
 from aiogram.dispatcher.event.bases import SkipHandler  # 💬 пропускаем обработку, чтобы не блокировать админку
-from premium_paywall_ui import show_entry as show_premium_entry_ui, show_checkout as show_premium_checkout_ui
-from premium_paywall_ui import build_entry_kb, build_checkout_kb
 
 
 router = Router()
@@ -175,23 +173,52 @@ def _premium_active(user_id: int) -> bool:
     return False
 
 
+def _premium_paywall_text(user_id: int) -> str:
+    # 💬 единый Premium текст (как в лексике) + Telegram ID для Stripe custom field
+    return (
+        "👑 <b>Premium — полный доступ на 1 месяц</b>\n"
+        f"Цена: €6.99 (карта) или ⭐ {PREMIUM_STARS_MONTH} Stars (в Telegram).\n\n"
+        "🔒 <b>Premium доступ</b>\n\n"
+        "<b>Ты получаешь:</b>\n\n"
+        "✅ <b>Подкасты:</b> все эпизоды без ограничений + новые выпуски\n"
+        "✅ <b>Лексика:</b> все темы без лимитов + будущие темы\n"
+        "✅ <b>Мои слова:</b> безлимит на создание категорий\n"
+        "✅ <b>Грамматика:</b> доступ к разделу, когда он выйдет\n"
+        "✅ <b>Обновления:</b> все новые функции включены\n\n"
+        "📋 <b>Скопировать Telegram ID:</b>\n"
+        f"<pre><code>{user_id}</code></pre>\n"
+        "➡️ Укажи свой ID при оплате\n"
+        "➡️ Потом нажми «✅ Проверить Premium»\n"
+        "🔓 Замки снимутся автоматически\n\n"
+        "❌ Отменить подписку можно в разделе: \n<b>⚙️ Настройки</b> ➜ <b>💎 Моя подписка</b>"
+    )
+
+
+
+
 def _kb_premium_entry() -> InlineKeyboardMarkup:
-    return build_entry_kb(
-        back_cb="pod:premium_back",
-        check_cb="pod:premium_check",
-        buy_card_cb="pod:premium_buy",
-        stars_cb="premium:stars_month",
+    # 💬 шаг 1: выбор способа оформления Premium
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Купить Premium", callback_data="pod:premium_buy")],
+            [InlineKeyboardButton(text="⭐ Premium за Stars", callback_data="premium:stars_month")],
+            [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="pod:premium_check")],
+            [InlineKeyboardButton(text="👈 Назад", callback_data="pod:premium_back")],
+        ]
     )
 
 
 def _kb_premium_checkout(user_id: int) -> InlineKeyboardMarkup:
+    # 💬 шаг 2: оплата картой (Stripe) или Stars + проверка + назад
     month = _premium_links.get("month")
-    return build_checkout_kb(
-        stripe_url=month,
-        back_cb="pod:premium_entry",
-        check_cb="pod:premium_check",
-        stars_cb="premium:stars_month",
-    )
+    rows: List[List[InlineKeyboardButton]] = []
+
+    if month:
+        rows.append([InlineKeyboardButton(text="💳 Оплатить картой (Stripe)", url=month)])
+    rows.append([InlineKeyboardButton(text="⭐ Оплатить Stars", callback_data="premium:stars_month")])
+    rows.append([InlineKeyboardButton(text="✅ Проверить Premium", callback_data="pod:premium_check")])
+    rows.append([InlineKeyboardButton(text="👈 Назад", callback_data="pod:premium_entry")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 # -----------------------------
 # 🧠 FSM для админки
@@ -1323,14 +1350,10 @@ async def pod_episode_locked(cb: CallbackQuery, state: FSMContext) -> None:
         await state.update_data(pod_premium_msg_id=None)
 
     try:
-        msg = await cb.message.answer("🔒 Premium-эпизод")
-        msg = await show_premium_entry_ui(
-            msg,
-            cb.from_user.id,
-            back_cb="pod:premium_back",
-            check_cb="pod:premium_check",
-            buy_card_cb="pod:premium_buy",
-            parse_mode="HTML",
+        msg = await cb.message.answer(
+            "🔒 Это Premium эпизод.\nОформи Premium на 1 месяц, чтобы снять замки.",
+            reply_markup=_kb_premium_entry(),
+            disable_web_page_preview=True,
         )
     except TelegramForbiddenError:
         await cb.answer("⚠️ Не могу отправить сообщение. Разблокируй бота и попробуй снова.", show_alert=True)
@@ -1352,28 +1375,28 @@ async def pod_premium_back(cb: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "pod:premium_buy")
 async def pod_premium_buy(cb: CallbackQuery) -> None:
+    try:
+        await cb.message.edit_text(
+            _premium_paywall_text(cb.from_user.id),
+            reply_markup=_kb_premium_checkout(cb.from_user.id),
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        pass
     await cb.answer()
-    await show_premium_checkout_ui(
-        cb.message,
-        cb.from_user.id,
-        back_cb="pod:premium_entry",
-        check_cb="pod:premium_check",
-        stripe_url=_premium_links.get("month", ""),
-        parse_mode="HTML",
-    )
 
 
 @router.callback_query(F.data == "pod:premium_entry")
 async def pod_premium_entry(cb: CallbackQuery) -> None:
+    try:
+        await cb.message.edit_text(
+            "🔒 Это Premium эпизод.\nОформи Premium на 1 месяц, чтобы снять замки.",
+            reply_markup=_kb_premium_entry(),
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        pass
     await cb.answer()
-    await show_premium_entry_ui(
-        cb.message,
-        cb.from_user.id,
-        back_cb="pod:premium_back",
-        check_cb="pod:premium_check",
-        buy_card_cb="pod:premium_buy",
-        parse_mode="HTML",
-    )
 
 @router.callback_query(F.data == "pod:premium_check")
 async def pod_premium_check(cb: CallbackQuery, state: FSMContext) -> None:
