@@ -195,24 +195,31 @@ def _premium_paywall_text(user_id: int) -> str:
 
 
 
-def _kb_premium_paywall() -> InlineKeyboardMarkup:
-    # 💬 кнопки оплаты + проверка + назад (назад удаляет это сообщение)
-    week = _premium_links.get("week")
+def _pod_premium_entry_text() -> str:
+    return "🔒 Это Premium эпизод.\nОформи Premium на 1 месяц, чтобы снять замки."
+
+
+def _kb_premium_entry() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Купить Premium", callback_data="pod:premium_buy")],
+            [InlineKeyboardButton(text="⭐ Premium за Stars", callback_data="premium:stars_month")],
+            [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="pod:premium_check")],
+            [InlineKeyboardButton(text="👈 Назад", callback_data="pod:premium_back")],
+        ]
+    )
+
+
+def _kb_premium_checkout() -> InlineKeyboardMarkup:
     month = _premium_links.get("month")
-    year = _premium_links.get("year")
-
     rows: List[List[InlineKeyboardButton]] = []
-
-    # 💬 каждая оплата = отдельная строка (как ты просил)
-    if week:
-        rows.append([InlineKeyboardButton(text="Premium 1 неделя", url=week)])
     if month:
-        rows.append([InlineKeyboardButton(text="Premium 1 месяц", url=month)])
-    if year:
-        rows.append([InlineKeyboardButton(text="Premium 1 год", url=year)])
-
-    rows.append([InlineKeyboardButton(text="✅ Проверить Premium", callback_data="pod:premium_check")])
-    rows.append([InlineKeyboardButton(text="👈 Назад", callback_data="pod:premium_back")])
+        rows.append([InlineKeyboardButton(text="💳 Оплатить картой (Stripe)", url=month)])
+    rows.extend([
+        [InlineKeyboardButton(text="⭐ Оплатить Stars", callback_data="premium:stars_month")],
+        [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="pod:premium_check")],
+        [InlineKeyboardButton(text="👈 Назад", callback_data="pod:premium_entry")],
+    ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 # -----------------------------
@@ -1345,13 +1352,40 @@ async def pod_episode_locked(cb: CallbackQuery, state: FSMContext) -> None:
         await state.update_data(pod_premium_msg_id=None)
 
     msg = await cb.message.answer(
-        _premium_paywall_text(cb.from_user.id),  # 💬 Telegram ID для Stripe
-        reply_markup=_kb_premium_paywall(),
+        _pod_premium_entry_text(),
+        reply_markup=_kb_premium_entry(),
         disable_web_page_preview=True
     )
 
     await state.update_data(pod_premium_msg_id=msg.message_id)
     await cb.answer()
+
+@router.callback_query(F.data == "pod:premium_buy")
+async def pod_premium_buy(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    try:
+        await cb.message.edit_text(
+            _premium_paywall_text(cb.from_user.id),
+            reply_markup=_kb_premium_checkout(),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data == "pod:premium_entry")
+async def pod_premium_entry(cb: CallbackQuery, state: FSMContext) -> None:
+    await cb.answer()
+    try:
+        await cb.message.edit_text(
+            _pod_premium_entry_text(),
+            reply_markup=_kb_premium_entry(),
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        pass
+
 
 @router.callback_query(F.data == "pod:premium_back")
 async def pod_premium_back(cb: CallbackQuery, state: FSMContext) -> None:
