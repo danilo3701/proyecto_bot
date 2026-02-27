@@ -513,6 +513,33 @@ def track_handler(func):
 
 ADMIN_CHAT_ID = 930240763  # ваш Chat ID
 
+
+def _get_admin_ids() -> set[int]:
+    raw = (os.getenv("ADMIN_IDS") or "").strip()
+    parsed: set[int] = set()
+
+    if raw:
+        for item in raw.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            try:
+                parsed.add(int(item))
+            except Exception:
+                logging.warning("ADMIN_IDS: skip invalid value %r", item)
+
+    if parsed:
+        return parsed
+
+    return {int(ADMIN_CHAT_ID)}
+
+
+ADMIN_IDS = _get_admin_ids()
+
+
+def _is_admin(user_id: int) -> bool:
+    return int(user_id) in ADMIN_IDS
+
 class LoggingMiddleware(BaseMiddleware):
     # 💬 Глобальный перехват голосовых + логирование ошибок для всех апдейтов
     async def __call__(self, handler, event, data):
@@ -4828,6 +4855,71 @@ async def lex_unlock_handler(message: Message, state: FSMContext):
 
     await lesson_menu_handler(message, state)  # 💬 сразу перерисовываем меню темы с учётом lex_admin_unlock
 
+
+def _stars_payments_log_paths() -> list[Path]:
+    paths: list[Path] = []
+    env_path = (os.getenv("STARS_PAYMENTS_LOG") or "").strip()
+    if env_path:
+        paths.append(Path(env_path).expanduser())
+
+    paths.extend([
+        Path("stars_payments.jsonl"),
+        Path("/data/stars_payments.jsonl"),
+    ])
+    return paths
+
+
+def _load_stars_payments(limit: int = 10) -> list[dict]:
+    log_path = None
+    for candidate in _stars_payments_log_paths():
+        if str(candidate).strip() and candidate.exists():
+            log_path = candidate
+            break
+
+    if log_path is None:
+        return []
+
+    rows: list[dict] = []
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(obj, dict):
+                    rows.append(obj)
+    except Exception:
+        logging.exception("Failed to read stars payments log: %s", log_path)
+        return []
+
+    if len(rows) <= limit:
+        return rows
+    return rows[-limit:]
+
+
+def _extract_charge_id(row: dict) -> str:
+    if not isinstance(row, dict):
+        return ""
+    for key in ("telegram_payment_charge_id", "payment_charge_id", "charge_id"):
+        val = str(row.get(key, "") or "").strip()
+        if val:
+            return val
+    return ""
+
+
+def _fmt_ts_unix_or_iso(value) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.datetime.fromtimestamp(int(value)).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return str(value)
+    return str(value)
+
 @dp.message(Command("premium_debug"))
 @track_handler
 async def premium_debug_handler(message: Message, state: FSMContext):
@@ -4938,6 +5030,124 @@ async def premium_debug_handler(message: Message, state: FSMContext):
 
     await message.answer(txt, parse_mode=None)  # 💬 фикс: отключаем HTML/Markdown парсинг, чтобы "<=5):" не ломал сообщение
 
+
+
+@dp.message(Command("stars_stats"))
+@track_handler
+async def stars_stats_handler(message: Message, state: FSMContext):
+    if not _is_admin(message.from_user.id):
+        return
+
+    try:
+        balance = await bot.get_my_star_balance()
+    except Exception as e:
+        await message.answer(f"⚠️ Не удалось получить баланс Stars: {e}")
+        return
+
+    try:
+        txns = await bot.get_star_transactions(limit=100)
+    except Exception as e:
+        await message.answer(f"⚠️ Не удалось получить транзакции Stars: {e}")
+        return
+
+    tx_list = []
+    if isinstance(txns, list):
+        tx_list = txns
+    elif hasattr(txns, "transactions"):
+        tx_list = list(getattr(txns, "transactions") or [])
+
+    incoming = 0
+    incoming_first = 0
+    incoming_recurring = 0
+
+    for tx in tx_list:
+        src = tx if isinstance(tx, dict) else getattr(tx, "__dict__", {})
+        direction = str(src.get("direction", "") or "").lower()
+        is_incoming = bool(src.get("is_incoming", False)) or direction == "incoming"
+        if not is_incoming:
+            continue
+
+        incoming += 1
+        is_first = bool(src.get("is_first", False) or src.get("is_first_payment", False))
+        if is_first:
+            incoming_first += 1
+        else:
+            incoming_recurring += 1
+
+    balance_val = getattr(balance, "amount", balance)
+
+    lines = [
+        "⭐ <b>Stars stats</b>",
+        f"Баланс: <b>{balance_val}</b>",
+        f"Входящих транзакций (последние 100): <b>{incoming}</b>",
+        f"First: <b>{incoming_first}</b> | Recurring: <b>{incoming_recurring}</b>",
+        "",
+        "<b>🧾 Последние оплаты (top-10) из stars_payments.jsonl</b>",
+    ]
+
+    recent = _load_stars_payments(limit=10)
+    if not recent:
+        lines.append("— лог пуст или не найден —")
+    else:
+        for i, row in enumerate(reversed(recent), start=1):
+            uid = row.get("user_id", "?")
+            stars = row.get("stars", row.get("amount", "?"))
+            paid_at = row.get("date", row.get("created_at", row.get("timestamp")))
+            lines.append(f"{i}) user_id={uid}, stars={stars}, date={_fmt_ts_unix_or_iso(paid_at)}")
+
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@dp.message(Command("stars_cancel"))
+@track_handler
+async def stars_cancel_handler(message: Message, state: FSMContext):
+    if not _is_admin(message.from_user.id):
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        await message.answer("Использование: /stars_cancel <user_id>")
+        return
+
+    target_user_id = int(parts[1])
+    rows = _load_stars_payments(limit=5000)
+
+    charge_id = ""
+    for row in reversed(rows):
+        try:
+            row_uid = int(row.get("user_id", 0) or 0)
+        except Exception:
+            row_uid = 0
+        if row_uid != target_user_id:
+            continue
+
+        charge_id = _extract_charge_id(row)
+        if charge_id:
+            break
+
+    if not charge_id:
+        await message.answer(f"⚠️ Не найден telegram_payment_charge_id для user_id={target_user_id}")
+        return
+
+    try:
+        result = await bot.edit_user_star_subscription(
+            user_id=target_user_id,
+            telegram_payment_charge_id=charge_id,
+            is_canceled=True,
+        )
+        await message.answer(
+            "✅ stars_cancel выполнен\n"
+            f"user_id={target_user_id}\n"
+            f"charge_id={charge_id}\n"
+            f"result={result}"
+        )
+    except Exception as e:
+        await message.answer(
+            "❌ stars_cancel ошибка\n"
+            f"user_id={target_user_id}\n"
+            f"charge_id={charge_id}\n"
+            f"error={e}"
+        )
 
 
 @dp.message(Command("stats"))
