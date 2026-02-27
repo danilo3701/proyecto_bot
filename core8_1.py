@@ -1010,6 +1010,7 @@ FREE_TOPICS_LIMIT = int(os.getenv("FREE_TOPICS_LIMIT", "10"))
 
 PREMIUM_PAYLINK_YEAR = os.getenv("PREMIUM_PAYLINK_YEAR", "https://buy.stripe.com/bJefZi3LgaZmcu74EBbbG0c")
 PREMIUM_PAYLINK_MONTH = os.getenv("PREMIUM_PAYLINK_MONTH", "https://buy.stripe.com/bJeeVe1D8ffC0Lpc73bbG0a")
+PREMIUM_STARS_MONTH = int(os.getenv("PREMIUM_STARS_MONTH", "400"))
 PREMIUM_PAYLINK_WEEK = os.getenv("PREMIUM_PAYLINK_WEEK", "https://buy.stripe.com/00wfZia9Eeby65JefbbbG0b")
 
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
@@ -1142,9 +1143,8 @@ def _premium_paywall_text(user_id: int) -> str:
 def _premium_paywall_kb(back_cb: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💎 Premium 2,90€ в неделю", url=PREMIUM_PAYLINK_WEEK)],
-            [InlineKeyboardButton(text="💎 Premium 4,90€ в месяц", url=PREMIUM_PAYLINK_MONTH)],
-            [InlineKeyboardButton(text="💎 Premium 49,00€ в год", url=PREMIUM_PAYLINK_YEAR)],
+            [InlineKeyboardButton(text="💳 Купить Premium — €6.99 / месяц", url=PREMIUM_PAYLINK_MONTH)],
+            [InlineKeyboardButton(text=f"⭐ Купить Premium — {PREMIUM_STARS_MONTH} Stars / месяц", callback_data="premium:stars_month")],
             [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)],
         ]
