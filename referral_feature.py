@@ -108,6 +108,37 @@ def _save_ref_data_sync(d: dict) -> None:
     os.replace(tmp_path, REFERRALS_DATA_PATH)
 
 
+def get_user_partner_id(tg_user_id: int) -> Optional[str]:
+    """
+    Возвращает partner_id (referrer_id) для пользователя, если есть реферальная связка.
+    Приоритет:
+    1) user_to_referrer[uid]
+    2) fallback-поиск в referrers[*].referred[uid] со статусом pending/paid/confirmed
+    """
+    uid = str(_safe_int(tg_user_id, 0))
+    if not uid or uid == "0":
+        return None
+
+    d = _load_ref_data_sync()
+
+    direct = d.get("user_to_referrer", {}).get(uid)
+    if direct:
+        return str(direct)
+
+    allowed_statuses = {"pending", "paid", "confirmed"}
+    referrers = d.get("referrers", {}) or {}
+    for referrer_id, ref_data in referrers.items():
+        referred = (ref_data or {}).get("referred", {}) or {}
+        user_entry = referred.get(uid)
+        if not isinstance(user_entry, dict):
+            continue
+        status = str(user_entry.get("status", "")).strip().lower()
+        if status in allowed_statuses:
+            return str(referrer_id)
+
+    return None
+
+
 def _get_or_create_referrer(d: dict, referrer_id: str) -> dict:
     referrers = d.setdefault("referrers", {})
     r = referrers.setdefault(referrer_id, {})
@@ -750,4 +781,3 @@ async def cmd_payout_input(message: Message):
             bal=_format_money(new_balance_due),
         )
     )
-
