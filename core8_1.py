@@ -1010,6 +1010,7 @@ FREE_TOPICS_LIMIT = int(os.getenv("FREE_TOPICS_LIMIT", "10"))
 
 PREMIUM_PAYLINK_YEAR = os.getenv("PREMIUM_PAYLINK_YEAR", "https://buy.stripe.com/bJefZi3LgaZmcu74EBbbG0c")
 PREMIUM_PAYLINK_MONTH = os.getenv("PREMIUM_PAYLINK_MONTH", "https://buy.stripe.com/bJeeVe1D8ffC0Lpc73bbG0a")
+PREMIUM_STARS_MONTH = int(os.getenv("PREMIUM_STARS_MONTH", "400"))
 PREMIUM_PAYLINK_WEEK = os.getenv("PREMIUM_PAYLINK_WEEK", "https://buy.stripe.com/00wfZia9Eeby65JefbbbG0b")
 PREMIUM_STARS_MONTH = int(os.getenv("PREMIUM_STARS_MONTH", "400"))
 
@@ -1145,9 +1146,8 @@ def _premium_paywall_text(user_id: int) -> str:
 def _premium_paywall_kb(back_cb: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💎 Premium 2,90€ в неделю", url=PREMIUM_PAYLINK_WEEK)],
-            [InlineKeyboardButton(text="💎 Premium 4,90€ в месяц", url=PREMIUM_PAYLINK_MONTH)],
-            [InlineKeyboardButton(text="💎 Premium 49,00€ в год", url=PREMIUM_PAYLINK_YEAR)],
+            [InlineKeyboardButton(text="💳 Купить Premium — €6.99 / месяц", url=PREMIUM_PAYLINK_MONTH)],
+            [InlineKeyboardButton(text=f"⭐ Купить Premium — {PREMIUM_STARS_MONTH} Stars / месяц", callback_data="premium:stars_month")],
             [InlineKeyboardButton(text="✅ Проверить Premium", callback_data="premium:check")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)],
         ]
@@ -3127,7 +3127,7 @@ async def settings_subscription_cb(callback: CallbackQuery):
             "💎 <b>Моя подписка</b>\n\n"
             "🔒 <b>Premium не активен</b>"
             f"{extra_block}\n\n"
-            "Оформи Premium, чтобы снять замки во всех разделах"
+            "Оформи Premium на 1 месяц, чтобы снять замки во всех разделах"
         )
 
     # ===== Кнопки
@@ -3146,9 +3146,8 @@ async def settings_subscription_cb(callback: CallbackQuery):
         kb_rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")])
     else:
         kb_rows.extend([
-            [InlineKeyboardButton(text="💎 Premium 2,90€ в неделю", url=PREMIUM_PAYLINK_WEEK)],
-            [InlineKeyboardButton(text="💎 Premium 4,90€ в месяц", url=PREMIUM_PAYLINK_MONTH)],
-            [InlineKeyboardButton(text="💎 Premium 49,00€ в год", url=PREMIUM_PAYLINK_YEAR)],
+            [InlineKeyboardButton(text="💳 Купить Premium — €6.99 / месяц", url=PREMIUM_PAYLINK_MONTH)],
+            [InlineKeyboardButton(text=f"⭐ Купить Premium — {PREMIUM_STARS_MONTH} Stars / месяц", callback_data="premium:stars_month")],
             [InlineKeyboardButton(text="🔎 Синхронизировать статус", callback_data="premium:check_settings")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")],
         ])
@@ -3924,6 +3923,43 @@ async def premium_check_settings(query: CallbackQuery, state: FSMContext):
         await settings_subscription_cb(query, state)
     except Exception:
         pass
+
+
+@dp.callback_query(F.data == "premium:stars_month")
+async def premium_stars_month_stub(query: CallbackQuery, state: FSMContext):
+    await query.answer("⭐ Оплата Stars скоро будет доступна. (в разработке)", show_alert=True)
+
+    keyboard_rows = ((query.message.reply_markup.inline_keyboard or []) if query.message and query.message.reply_markup else [])
+    callback_buttons = [
+        btn.callback_data
+        for row in keyboard_rows
+        for btn in row
+        if getattr(btn, "callback_data", None)
+    ]
+
+    # 💬 Сценарий «⚙️ Настройки → 💎 Моя подписка»: переоткрываем экран тем же хендлером.
+    if "settings:back" in callback_buttons:
+        await settings_subscription_cb(query)
+        return
+
+    # 💬 Сценарий paywall в уроках/блокировках: сохраняем текущий callback «Назад».
+    back_cb = "premium:back_topics"
+    if keyboard_rows:
+        last_row = keyboard_rows[-1]
+        if last_row and getattr(last_row[0], "callback_data", None):
+            back_cb = last_row[0].callback_data
+
+    try:
+        await query.message.edit_text(
+            _premium_paywall_text(query.from_user.id),
+            reply_markup=_premium_paywall_kb(back_cb),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e).lower():
+            await query.answer("✅")
+            return
+        raise
 
 
 @dp.callback_query(LessonStates.choosing_subcategory, F.data.startswith("subcat:"))
