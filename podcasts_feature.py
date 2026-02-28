@@ -1302,7 +1302,6 @@ async def pod_filter_input(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data.startswith("pod:locked:"))
 async def pod_episode_locked(cb: CallbackQuery, state: FSMContext) -> None:
-    # 💬 показываем paywall отдельным сообщением, чтобы потом удалить без мусора
     st = await state.get_data()
     if not st.get("pod_ctx") or st.get("pod_screen") != "episodes":
         await cb.answer()
@@ -1312,34 +1311,42 @@ async def pod_episode_locked(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.answer("✅ Premium активен. Нажми эпизод ещё раз.", show_alert=True)
         return
 
-    old_id = st.get("pod_premium_msg_id")
-    if old_id:
-        await _safe_delete_message(cb.bot, cb.message.chat.id, int(old_id))  # 💬 удаляем старое предупреждение
-        await state.update_data(pod_premium_msg_id=None)
-
-    try:
-        msg = await cb.message.answer(
-            ENTRY_TEXT,
-            reply_markup=build_entry_kb(back_cb="pod:premium_back", check_cb="pod:premium_check", buy_card_cb="pod:premium_buy"),
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-        )
-    except TelegramForbiddenError:
-        await cb.answer("⚠️ Не могу отправить сообщение. Разблокируй бота и попробуй снова.", show_alert=True)
-        return
-
-    await state.update_data(pod_premium_msg_id=msg.message_id)
     await cb.answer()
+    await show_entry(
+        cb,
+        cb.from_user.id,
+        back_cb="pod:premium_back",
+        check_cb="pod:premium_check",
+        buy_card_cb="pod:premium_buy",
+    )
+    await state.update_data(pod_premium_msg_id=cb.message.message_id)
 
 @router.callback_query(F.data == "pod:premium_back")
 async def pod_premium_back(cb: CallbackQuery, state: FSMContext) -> None:
-    # 💬 закрываем paywall и удаляем сообщение
+    await cb.answer()
     await state.update_data(pod_premium_msg_id=None)
+
+    st = await state.get_data()
+    author_id = st.get("pod_author_id")
+    level_key = st.get("pod_filter_level")
+    topic_key = st.get("pod_filter_topic")
+    page = int(st.get("pod_ep_page") or 0)
+
+    if not author_id:
+        return
+
+    data = _read_podcasts()
+    author = data.get("authors", {}).get(author_id, {})
+    author_name = author.get("name", "Автор")
+    text = _episodes_menu_html(author_name, level_key, topic_key)
     try:
-        await cb.message.delete()
+        await cb.message.edit_text(
+            text,
+            reply_markup=_kb_episodes(data, cb.from_user.id, author_id, level_key, topic_key, page),
+            parse_mode="HTML",
+        )
     except Exception:
         pass
-    await cb.answer()
 
 
 @router.callback_query(F.data == "pod:premium_buy")
@@ -1347,7 +1354,7 @@ async def pod_premium_buy(cb: CallbackQuery) -> None:
     await cb.answer()
     month = _premium_links.get("month") or os.getenv("PREMIUM_PAYLINK_MONTH", "")
     await show_checkout(
-        cb.message,
+        cb,
         cb.from_user.id,
         back_cb="pod:premium_entry",
         check_cb="pod:premium_check",
@@ -1359,7 +1366,7 @@ async def pod_premium_buy(cb: CallbackQuery) -> None:
 async def pod_premium_entry(cb: CallbackQuery) -> None:
     await cb.answer()
     await show_entry(
-        cb.message,
+        cb,
         cb.from_user.id,
         back_cb="pod:premium_back",
         check_cb="pod:premium_check",
@@ -1367,56 +1374,21 @@ async def pod_premium_entry(cb: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "pod:premium_check")
 async def pod_premium_check(cb: CallbackQuery, state: FSMContext) -> None:
-    # 💬 проверка Premium, затем обновляем список эпизодов (снимаем замки)
+    await cb.answer()
     st = await state.get_data()
     ok = _premium_active(cb.from_user.id)
 
-    async def _delete_later(msgs, delay: int = 5):
-        await asyncio.sleep(delay)
-        for m in msgs:
-            try:
-                await m.delete()
-            except Exception:
-                pass  # 💬 тихо чистим реакцию
-
     if not ok:
-        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✍️ Напиши админу", url=CONTACT_URL)]
-        ])
-        try:
-            msgs = []
-            msgs.append(await cb.message.answer_sticker("CAACAgIAAxkBAAIWH2l21bO_xugzDFap9zCvHnG64If-AAKRMwACkKbJSE_T26pSZdruOAQ"))  # 💬 стикер нет Premium
-            msgs.append(await cb.message.answer(
-                "❌ Premium не найден\nЕсли оплатил(а) только что = подожди 1–2 минуты и проверь ещё раз",
-                reply_markup=admin_kb,
-            ))
-            asyncio.create_task(_delete_later(msgs, 5))
-        except Exception:
-            pass
-
-        await cb.answer("❌ Premium не найден. Попробуй ещё раз через 1–2 минуты.", show_alert=True)
         await show_entry(
-            cb.message,
+            cb,
             cb.from_user.id,
             back_cb="pod:premium_back",
             check_cb="pod:premium_check",
+            buy_card_cb="pod:premium_buy",
         )
         return
 
-    try:
-        msgs = []
-        msgs.append(await cb.message.answer_sticker("CAACAgIAAxkBAAIWI2l21eTj7Ea12Kr5IFDAPatBQzZoAALYLgACQ7nYSMxMa3UjThHMOAQ"))  # 💬 стикер Premium есть
-        msgs.append(await cb.message.answer("✅ Premium активен. Открываю доступ"))  # 💬 подтверждение
-        asyncio.create_task(_delete_later(msgs, 5))
-    except Exception:
-        pass
-
-
     await state.update_data(pod_premium_msg_id=None)
-    try:
-        await cb.message.delete()  # 💬 удаляем предупреждение
-    except Exception:
-        pass
 
     author_id = st.get("pod_author_id")
     nav_msg_id = st.get("pod_nav_msg_id")
@@ -1436,11 +1408,12 @@ async def pod_premium_check(cb: CallbackQuery, state: FSMContext) -> None:
                 text=text,
                 reply_markup=_kb_episodes(data, cb.from_user.id, author_id, level_key, topic_key, page),
                 parse_mode="HTML",
-            )  # 💬 обновили список без замков
+            )
+            return
         except Exception:
             pass
 
-    await cb.answer("✅ Premium активен", show_alert=True)
+    await pod_premium_back(cb, state)
 
 
 @router.callback_query(F.data.startswith("pod:ep:"))
