@@ -604,8 +604,15 @@ async def render_ref_cabinet(message_or_event, user_id: int, prefer_edit: bool =
     referrer_id = str(user_id)
     async with _REF_LOCK:
         d = _load_ref_data_sync()
-        r = _get_or_create_referrer(d, referrer_id)
-        _save_ref_data_sync(d)
+        r = _get_referrer_if_exists(d, referrer_id)
+
+    if not r:
+        txt = "Нет партнёрского доступа. Напишите администратору."
+        if isinstance(message_or_event, CallbackQuery):
+            await message_or_event.message.answer(txt)
+        else:
+            await message_or_event.answer(txt)
+        return
 
     event_bot = getattr(message_or_event, "bot", None)
     if event_bot is None and isinstance(message_or_event, CallbackQuery):
@@ -633,6 +640,13 @@ async def referrals_open_cb(callback: CallbackQuery):
     await callback.answer()
     await render_ref_cabinet(callback, callback.from_user.id, prefer_edit=True)
 
+# -----------------------------------------------------------------------------
+# UI handlers
+# -----------------------------------------------------------------------------
+@router.callback_query(F.data == "settings:referrals")
+async def referrals_open_cb(callback: CallbackQuery):
+    await callback.answer()
+    await render_ref_cabinet(callback, callback.from_user.id, prefer_edit=True)
 
 @router.message(Command("ref"))
 async def cmd_ref(message: Message):
