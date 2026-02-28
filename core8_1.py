@@ -29,7 +29,6 @@ import random                       # Рандомизация (CTA-фразы, 
 import html                         # 💬 html.escape для безопасного HTML в Telegram
 import asyncio                      # Асинхронные паузы (smart_reply)
 import logging                      # Логирование для отладки
-import inspect
 import secrets
 import math
 import time
@@ -323,7 +322,7 @@ from scenario.refusal_block import refusal
 # ...другие импорты, если нужны...
 from typing import List, Optional  # 💬 Optional нужен для type hints (Stripe/webhook)
 from typing import Callable
-from aiohttp import web, ClientSession
+from aiohttp import web
 
 
 
@@ -1369,60 +1368,27 @@ async def _safe_send_paywall_message(message: Message, text: str, reply_markup: 
         return None
 
 
-SEND_INVOICE_SUPPORTS_SUBSCRIPTION_PERIOD = "subscription_period" in inspect.signature(Bot.send_invoice).parameters
-
-
-async def _send_stars_invoice_via_http_api(*, bot: Bot, chat_id: int, payload: str) -> None:
-    api_url = f"https://api.telegram.org/bot{bot.token}/sendInvoice"
-    body = {
-        "chat_id": int(chat_id),
-        "title": PREMIUM_STARS_TITLE,
-        "description": PREMIUM_STARS_DESC,
-        "payload": payload,
-        "provider_token": "",
-        "currency": "XTR",
-        "prices": json.dumps([
-            {"label": PREMIUM_STARS_TITLE, "amount": int(PREMIUM_STARS_MONTH)}
-        ], ensure_ascii=False),
-        "subscription_period": 2592000,
-    }
-
-    async with ClientSession() as session:
-        async with session.post(api_url, data=body, timeout=30) as resp:
-            raw = await resp.text()
-            try:
-                parsed = json.loads(raw)
-            except Exception:
-                parsed = {}
-
-            if resp.status >= 400:
-                raise RuntimeError(f"Telegram HTTP {resp.status}: {raw[:500]}")
-
-            if not isinstance(parsed, dict) or not parsed.get("ok"):
-                desc = ""
-                if isinstance(parsed, dict):
-                    desc = str(parsed.get("description", "") or "")
-                raise RuntimeError(f"sendInvoice API failed: {desc or raw[:500]}")
-
-
-async def start_stars_checkout(user_id: int, chat_id: int, bot: Bot):
+async def start_stars_checkout(user_id: int, chat_id: int, bot: Bot) -> str:
     nonce = secrets.token_hex(8)
     payload = f"premium_stars_month:{user_id}:{nonce}"
-    if SEND_INVOICE_SUPPORTS_SUBSCRIPTION_PERIOD:
-        await bot.send_invoice(
-            chat_id=chat_id,
-            title=PREMIUM_STARS_TITLE,
-            description=PREMIUM_STARS_DESC,
-            payload=payload,
-            provider_token="",
-            currency="XTR",
-            prices=[LabeledPrice(label=PREMIUM_STARS_TITLE, amount=PREMIUM_STARS_MONTH)],
-            subscription_period=2592000,
-        )
-        return
-
-    logging.warning("Bot.send_invoice has no subscription_period support; using raw sendInvoice API fallback")
-    await _send_stars_invoice_via_http_api(bot=bot, chat_id=chat_id, payload=payload)
+    now = int(time.time())
+    _upsert_stars_subscription(
+        int(user_id),
+        "pending",
+        created_at=now,
+        payload=payload,
+        amount=int(PREMIUM_STARS_MONTH),
+    )
+    invoice_link = await bot.create_invoice_link(
+        title=PREMIUM_STARS_TITLE,
+        description=PREMIUM_STARS_DESC,
+        payload=payload,
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label=PREMIUM_STARS_TITLE, amount=int(PREMIUM_STARS_MONTH))],
+        subscription_period=2592000,
+    )
+    return invoice_link
 
 
 def _locked_title(title: str) -> str:
@@ -4219,50 +4185,68 @@ async def premium_stars_month_handler(query: CallbackQuery, state: FSMContext):
     if not query.message:
         return
 
+    back_cb = "settings:subscription"
+    check_cb = "premium:check_settings"
+
+    current_state = await state.get_state()
+    if current_state == LessonStates.waiting_premium.state:
+        back_cb = "premium:entry_topics"
+        check_cb = "premium:check"
+
     try:
-        await start_stars_checkout(query.from_user.id, query.message.chat.id, query.bot)
+        invoice_link = await start_stars_checkout(query.from_user.id, query.message.chat.id, query.bot)
     except TelegramBadRequest as e:
         err_desc = str(getattr(e, "message", "") or getattr(e, "description", "") or "")
-        logging.exception("Stars invoice failed: TelegramBadRequest user_id=%s", query.from_user.id)
+        logging.exception("Stars invoice failed: TelegramBadRequest user_id=%s desc=%s", query.from_user.id, err_desc)
         try:
-            await query.bot.send_message(
-                ADMIN_CHAT_ID,
-                f"❌ Stars invoice failed\nuser_id={query.from_user.id}\nerr={e}\ndesc={err_desc}",
-            )
+            if ADMIN_CHAT_ID:
+                await query.bot.send_message(
+                    ADMIN_CHAT_ID,
+                    f"❌ Stars invoice failed\nuser_id={query.from_user.id}\nerr={e}\ndesc={err_desc}",
+                )
         except Exception:
             logging.exception("Stars invoice failed: unable to notify admin")
-        try:
-            await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.", show_alert=True)
-        except Exception:
-            await query.message.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.")
+        await query.message.answer("❌ Не удалось создать счёт Stars. Попробуй позже.")
+        return
     except TelegramForbiddenError as e:
         err_desc = str(getattr(e, "message", "") or getattr(e, "description", "") or "")
         logging.exception("Stars invoice failed: TelegramForbiddenError user_id=%s", query.from_user.id)
         try:
-            await query.bot.send_message(
-                ADMIN_CHAT_ID,
-                f"❌ Stars invoice failed\nuser_id={query.from_user.id}\nerr={e}\ndesc={err_desc}",
-            )
+            if ADMIN_CHAT_ID:
+                await query.bot.send_message(
+                    ADMIN_CHAT_ID,
+                    f"❌ Stars invoice failed\nuser_id={query.from_user.id}\nerr={e}\ndesc={err_desc}",
+                )
         except Exception:
             logging.exception("Stars invoice failed: unable to notify admin")
-        try:
-            await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.", show_alert=True)
-        except Exception:
-            await query.message.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.")
+        await query.message.answer("❌ Не удалось создать счёт Stars. Попробуй позже.")
+        return
     except Exception as e:
         err_desc = str(getattr(e, "message", "") or getattr(e, "description", "") or "")
         logging.exception("Stars invoice failed: unexpected user_id=%s", query.from_user.id)
         try:
-            await query.bot.send_message(
-                ADMIN_CHAT_ID,
-                f"❌ Stars invoice failed\nuser_id={query.from_user.id}\nerr={e}\ndesc={err_desc}",
-            )
+            if ADMIN_CHAT_ID:
+                await query.bot.send_message(
+                    ADMIN_CHAT_ID,
+                    f"❌ Stars invoice failed\nuser_id={query.from_user.id}\nerr={e}\ndesc={err_desc}",
+                )
         except Exception:
             logging.exception("Stars invoice failed: unable to notify admin")
-        try:
-            await query.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.", show_alert=True)
-        except Exception:
-            await query.message.answer("⚠️ Не удалось создать счёт Stars. Попробуй ещё раз позже.")
+        await query.message.answer("❌ Не удалось создать счёт Stars. Попробуй позже.")
+        return
+
+    stars_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⭐ Оплатить Stars", url=invoice_link)],
+            [InlineKeyboardButton(text="✅ Check Premium", callback_data=check_cb)],
+            [InlineKeyboardButton(text="⬅️ Back", callback_data=back_cb)],
+        ]
+    )
+    text = "⭐ Нажми кнопку ниже для оплаты Stars"
+    try:
+        await query.message.edit_text(text, reply_markup=stars_kb)
+    except Exception:
+        await query.message.answer(text, reply_markup=stars_kb)
 
 
 @dp.callback_query(F.data == "mywords:premium_stars_month")
@@ -5319,8 +5303,8 @@ async def stars_test_invoice_handler(message: Message, state: FSMContext):
         return
 
     try:
-        await start_stars_checkout(message.from_user.id, message.chat.id, message.bot)
-        await message.answer("✅ invoice отправлен")
+        invoice_link = await start_stars_checkout(message.from_user.id, message.chat.id, message.bot)
+        await message.answer(f"✅ invoice link создан: {invoice_link}")
     except Exception as e:
         logging.exception("stars_test_invoice failed user_id=%s", message.from_user.id)
         await message.answer(f"❌ ошибка: {e}")
