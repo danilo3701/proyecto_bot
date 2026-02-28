@@ -3210,6 +3210,7 @@ async def start_handler(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "settings:subscription")
 async def settings_subscription_cb(callback: CallbackQuery):
+    await callback.answer()
     uid = callback.from_user.id
 
     data = load_premium_users()
@@ -3400,9 +3401,13 @@ async def settings_subscription_cb(callback: CallbackQuery):
         kb_rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="settings:subscription")])
         kb_rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:back")])
     else:
-        txt = ENTRY_TEXT
-        kb_rows = build_entry_kb(back_cb="settings:back", check_cb="premium:check_settings").inline_keyboard
-
+        await show_entry(
+            callback.message,
+            callback.from_user.id,
+            back_cb="settings:back",
+            check_cb="premium:check_settings",
+        )
+        return
 
     kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
@@ -6820,15 +6825,11 @@ async def mywords_premium_entry_cb(callback: CallbackQuery, state: FSMContext):
     if not callback.message:
         return
 
-    await callback.message.edit_text(
-        text=ENTRY_TEXT,
-        reply_markup=build_entry_kb(
-            back_cb="mywords:premium_back",
-            check_cb="mywords:premium_check",
-            buy_card_cb="mywords:premium_buy_card",
-            stars_cb="mywords:premium_stars_month",
-        ),
-        parse_mode="HTML",
+    await show_entry(
+        callback.message,
+        callback.from_user.id,
+        back_cb="mywords:premium_back",
+        check_cb="mywords:premium_check",
     )
 
 
@@ -7005,16 +7006,11 @@ async def mywords_add_newcat_cb(callback: CallbackQuery, state: FSMContext):
     )
 
     if (not is_premium_active(callback.from_user.id)) and (cats_count >= FREE_MYWORDS_CATEGORIES_LIMIT):
-        await _safe_send_paywall_message(
+        await show_entry(
             callback.message,
-            ENTRY_TEXT,
-            build_entry_kb(
-                back_cb="mywords:premium_back",
-                check_cb="mywords:premium_check",
-                buy_card_cb="mywords:premium_buy_card",
-                stars_cb="mywords:premium_stars_month",
-            ),
-            parse_mode="HTML"
+            callback.from_user.id,
+            back_cb="mywords:premium_back",
+            check_cb="mywords:premium_check",
         )
         return  # 💬 не переводим в state ввода названия
 
@@ -7059,16 +7055,11 @@ async def mywords_add_newcat_name(message: Message, state: FSMContext):
 
     ok = await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
     if not ok:
-        await _safe_send_paywall_message(
+        await show_entry(
             message,
-            ENTRY_TEXT,
-            build_entry_kb(
-                back_cb="mywords:premium_back",
-                check_cb="mywords:premium_check",
-                buy_card_cb="mywords:premium_buy_card",
-                stars_cb="mywords:premium_stars_month",
-            ),
-            parse_mode="HTML"
+            message.from_user.id,
+            back_cb="mywords:premium_back",
+            check_cb="mywords:premium_check",
         )
         return
 
@@ -7176,16 +7167,11 @@ async def mywords_add_save_cb(callback: CallbackQuery, state: FSMContext):
     result = await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
 
     if result == "free_limit":
-        await _safe_send_paywall_message(
+        await show_entry(
             callback.message,
-            ENTRY_TEXT,
-            build_entry_kb(
-                back_cb="mywords:premium_back",
-                check_cb="mywords:premium_check",
-                buy_card_cb="mywords:premium_buy_card",
-                stars_cb="mywords:premium_stars_month",
-            ),
-            parse_mode="HTML"
+            callback.from_user.id,
+            back_cb="mywords:premium_back",
+            check_cb="mywords:premium_check",
         )
         return
 
