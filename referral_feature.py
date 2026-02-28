@@ -249,8 +249,20 @@ def _is_referrer_enabled(d: dict, referrer_id: str) -> bool:
     return bool(r.get("enabled"))
 
 
+def _get_referrer_if_exists(d: dict, referrer_id: str) -> Optional[dict]:
+    referrers = d.get("referrers", {}) or {}
+    r = referrers.get(str(referrer_id))
+    if isinstance(r, dict):
+        return r
+    return None
+
+
 def _referrals_count(referrer: dict) -> int:
-    return len((referrer.get("referred") or {}))
+    explicit = _safe_int(referrer.get("referrals_count"), -1)
+    inferred = len((referrer.get("referred") or {}))
+    if explicit >= 0:
+        return max(explicit, inferred)
+    return inferred
 
 
 def _is_partner_allowed(referrer: dict) -> bool:
@@ -587,34 +599,44 @@ def _build_ref_cabinet_text(referrer: dict, deeplink: str) -> str:
     )
 
 
-async def _open_ref_cabinet_for_user(message_or_callback, user_id: int, bot, prefer_edit: bool = False):
+async def render_ref_cabinet(message_or_event, user_id: int, prefer_edit: bool = False) -> None:
     referrer_id = str(user_id)
     async with _REF_LOCK:
         d = _load_ref_data_sync()
-        r = _get_or_create_referrer(d, referrer_id)
-        _save_ref_data_sync(d)
+        r = _get_referrer_if_exists(d, referrer_id)
+
+    if not r:
+        txt = "Нет партнёрского доступа. Напишите администратору."
+        if isinstance(message_or_event, CallbackQuery):
+            await message_or_event.message.answer(txt)
+        else:
+            await message_or_event.answer(txt)
+        return
 
     if not _is_partner_allowed(r):
         txt = "Доступ появится после первого перехода по вашей реферальной ссылке или после активации администратором."
-        if isinstance(message_or_callback, CallbackQuery):
-            await message_or_callback.message.answer(txt)
+        if isinstance(message_or_event, CallbackQuery):
+            await message_or_event.message.answer(txt)
         else:
-            await message_or_callback.answer(txt)
+            await message_or_event.answer(txt)
         return
 
-    deeplink = await _make_ref_deeplink(bot, referrer_id)
+    event_bot = getattr(message_or_event, "bot", None)
+    if event_bot is None and isinstance(message_or_event, CallbackQuery):
+        event_bot = message_or_event.message.bot
+
+    deeplink = await _make_ref_deeplink(event_bot, referrer_id) if event_bot else ""
     txt = _build_ref_cabinet_text(r, deeplink)
-    if isinstance(message_or_callback, CallbackQuery) and prefer_edit:
+    if isinstance(message_or_event, CallbackQuery) and prefer_edit:
         try:
-            await message_or_callback.message.edit_text(txt, reply_markup=_kb_ref_home(), parse_mode="HTML", disable_web_page_preview=True)
+            await message_or_event.message.edit_text(txt, reply_markup=_kb_ref_home(), parse_mode="HTML", disable_web_page_preview=True)
             return
         except TelegramBadRequest:
             pass
-    if isinstance(message_or_callback, CallbackQuery):
-        await message_or_callback.message.answer(txt, reply_markup=_kb_ref_home(), parse_mode="HTML", disable_web_page_preview=True)
+    if isinstance(message_or_event, CallbackQuery):
+        await message_or_event.message.answer(txt, reply_markup=_kb_ref_home(), parse_mode="HTML", disable_web_page_preview=True)
     else:
-        await message_or_callback.answer(txt, reply_markup=_kb_ref_home(), parse_mode="HTML", disable_web_page_preview=True)
-
+        await message_or_event.answer(txt, reply_markup=_kb_ref_home(), parse_mode="HTML", disable_web_page_preview=True)
 
 # -----------------------------------------------------------------------------
 # UI handlers
@@ -624,6 +646,13 @@ async def referrals_open_cb(callback: CallbackQuery):
     await callback.answer()
     await _open_ref_cabinet_for_user(callback, callback.from_user.id, callback.bot, prefer_edit=True)
 
+# -----------------------------------------------------------------------------
+# UI handlers
+# -----------------------------------------------------------------------------
+@router.callback_query(F.data == "settings:referrals")
+async def referrals_open_cb(callback: CallbackQuery):
+    await callback.answer()
+    await render_ref_cabinet(callback, callback.from_user.id, prefer_edit=True)
 
 @router.message(Command("ref"))
 async def cmd_ref(message: Message):
@@ -981,4 +1010,3 @@ async def ref_payout_history_cb(callback: CallbackQuery):
         await callback.message.edit_text("\n".join(lines), reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
     except TelegramBadRequest:
         await callback.message.answer("\n".join(lines), reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
-
