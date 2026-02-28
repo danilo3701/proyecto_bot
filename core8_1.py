@@ -1185,7 +1185,12 @@ def _apply_stars_successful_payment(
     user_row["last_stars_is_recurring"] = bool(is_recurring)
     save_user_data(user_data)
 
-    return {"ok": True, "active_until": active_until}
+    return {
+        "ok": True,
+        "active_until": active_until,
+        "paid_at": int(time.time()),
+        "invoice_id": str(telegram_payment_charge_id or ""),
+    }
 
 
 def simulate_successful_payment(
@@ -1338,6 +1343,27 @@ async def premium_stars_successful_payment_handler(message: Message, state: FSMC
 
     if not result.get("ok"):
         logging.warning("successful_payment ignored: %s", result.get("reason"))
+        return
+
+    active_until = int(result.get("active_until") or 0)
+    invoice_id = str(result.get("invoice_id") or "")
+    try:
+        await referrals_apply_invoice_paid(
+            tg_user_id=message.from_user.id,
+            invoice_obj={
+                "id": invoice_id,
+                "amount_paid": int(getattr(sp, "total_amount", 0) or 0),
+                "currency": str(getattr(sp, "currency", "") or ""),
+            },
+            active_until=active_until,
+        )
+        await referrals_apply_subscription_status(
+            tg_user_id=message.from_user.id,
+            status="paid",
+            active_until=active_until,
+        )
+    except Exception:
+        pass
 
 
 def _extract_tg_id_from_checkout_session(session_obj: dict) -> Optional[int]:
