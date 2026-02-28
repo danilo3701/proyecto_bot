@@ -6808,16 +6808,11 @@ async def mywords_premium_entry_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     if not callback.message:
         return
-
-    await callback.message.edit_text(
-        text=ENTRY_TEXT,
-        reply_markup=build_entry_kb(
-            back_cb="mywords:premium_back",
-            check_cb="mywords:premium_check",
-            buy_card_cb="mywords:premium_buy_card",
-            stars_cb="mywords:premium_stars_month",
-        ),
-        parse_mode="HTML",
+    await show_entry(
+        callback.message,
+        callback.from_user.id,
+        back_cb="mywords:premium_back",
+        check_cb="mywords:premium_check",
     )
 
 
@@ -6850,14 +6845,44 @@ async def mywords_premium_check_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     premium_active = is_premium_active(callback.from_user.id)
 
+    success_sticker_id = "CAACAgIAAxkBAAIWI2l21eTj7Ea12Kr5IFDAPatBQzZoAALYLgACQ7nYSMxMa3UjThHMOAQ"
+    fail_sticker_id = "CAACAgIAAxkBAAIWH2l21bO_xugzDFap9zCvHnG64If-AAKRMwACkKbJSE_T26pSZdruOAQ"
+
+    sticker_msg = None
+    try:
+        sticker_msg = await callback.message.answer_sticker(success_sticker_id if premium_active else fail_sticker_id)
+    except Exception:
+        sticker_msg = None
+
     if premium_active:
-        await callback.message.answer("✅ Premium активен. Лимиты в MyWords сняты.")
+        text_msg = await callback.message.answer("✅ Premium активен. Лимиты в MyWords сняты.")
     else:
-        await callback.message.answer(
-            "❌ Premium пока не найден. Если только что оплатил(а), подожди 1–2 минуты и проверь снова."
+        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✍️ Напиши админу", url=CONTACT_URL)]
+        ])
+        text_msg = await callback.message.answer(
+            "❌ Premium не найден\nЕсли оплатил(а) только что = подожди 1–2 минуты и проверь ещё раз",
+            reply_markup=admin_kb,
         )
 
-    return await mywords_menu(callback.message, state)
+    await asyncio.sleep(3)
+    for msg in (sticker_msg, text_msg):
+        if not msg:
+            continue
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+
+    if premium_active:
+        return await mywords_menu(callback.message, state)
+
+    await show_entry(
+        callback.message,
+        callback.from_user.id,
+        back_cb="mywords:premium_back",
+        check_cb="mywords:premium_check",
+    )
 
 
 @dp.callback_query(F.data == "mywords:back_main")
