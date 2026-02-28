@@ -4365,10 +4365,6 @@ async def settings_menu(message: Message, state: FSMContext):
             InlineKeyboardButton(text="⏰ Время уведомления", callback_data="settings:notify"),
         ],
         [
-            InlineKeyboardButton(text="🤝 Рефералы", callback_data="settings:referrals"),
-        ],
-
-        [
             toggle_btn,
         ],
         [
