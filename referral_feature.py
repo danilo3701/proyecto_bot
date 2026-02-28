@@ -55,13 +55,22 @@ _BOT_USERNAME_CACHE: str | None = None
 
 # 💬 простой lock, чтобы не было гонок (webhook + UI)
 _REF_LOCK = asyncio.Lock()
+_NOW_OVERRIDE: Optional[int] = None
 
 
 # -----------------------------------------------------------------------------
 # Storage helpers
 # -----------------------------------------------------------------------------
 def _now() -> int:
+    if _NOW_OVERRIDE is not None:
+        return int(_NOW_OVERRIDE)
     return int(time.time())
+
+
+def set_now_override(now_ts: Optional[int]) -> None:
+    """QA helper: фиксируем текущее время для детерминированных тестов."""
+    global _NOW_OVERRIDE
+    _NOW_OVERRIDE = None if now_ts is None else int(now_ts)
 
 
 def _safe_int(x: Any, default: int = 0) -> int:
@@ -496,6 +505,35 @@ async def referrals_apply_subscription_status(
         u["active_until"] = int(active_until or 0)
 
         _save_ref_data_sync(d)
+
+
+async def referrals_recompute_expired(now_ts: Optional[int] = None) -> None:
+    """
+    Сервисный пересчёт: paid + истёкший active_until -> unpaid.
+    Нужен для QA/cron и синка кабинета реферера без внешних вебхуков.
+    """
+    now_ts = int(now_ts) if now_ts is not None else _now()
+
+    async with _REF_LOCK:
+        d = _load_ref_data_sync()
+        changed = False
+
+        referrers = d.get("referrers", {}) or {}
+        for _, ref_data in referrers.items():
+            if not isinstance(ref_data, dict):
+                continue
+            referred = ref_data.get("referred", {}) or {}
+            for _, entry in referred.items():
+                if not isinstance(entry, dict):
+                    continue
+                status = str(entry.get("status") or "").strip().lower()
+                until = _safe_int(entry.get("active_until"), 0)
+                if status == "paid" and until > 0 and until <= now_ts:
+                    entry["status"] = "unpaid"
+                    changed = True
+
+        if changed:
+            _save_ref_data_sync(d)
 
 
 # -----------------------------------------------------------------------------
