@@ -3991,16 +3991,16 @@ async def premium_locked_topic(query: CallbackQuery, state: FSMContext):
     chosen_category = data.get("chosen_category")
     chosen_level = data.get("chosen_level")
 
-    pay_msg = await query.message.answer(
-        ENTRY_TEXT,
-        reply_markup=build_entry_kb(back_cb="premium:back_topics", check_cb="premium:check"),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
+    await show_entry(
+        query,
+        query.from_user.id,
+        back_cb="premium:back_topics",
+        check_cb="premium:check",
     )
 
     await state.set_state(LessonStates.waiting_premium)
     await state.update_data(
-        premium_msg_id=pay_msg.message_id,
+        premium_msg_id=query.message.message_id,
         premium_origin_chat_id=query.message.chat.id,
         premium_origin_msg_id=query.message.message_id,
         premium_origin_category=chosen_category,
@@ -4012,10 +4012,10 @@ async def premium_locked_topic(query: CallbackQuery, state: FSMContext):
 @dp.callback_query(lambda c: c.data == "premium:back_topics", StateFilter(LessonStates.waiting_premium))
 async def premium_back_topics(query: CallbackQuery, state: FSMContext):
     await query.answer()
-    try:
-        await query.message.delete()
-    except Exception:
-        pass
+
+    data = await state.get_data()
+    category = data.get("premium_origin_category") or data.get("chosen_category")
+    level = data.get("premium_origin_level") or data.get("chosen_level")
 
     await state.update_data(
         premium_msg_id=None,
@@ -4025,6 +4025,11 @@ async def premium_back_topics(query: CallbackQuery, state: FSMContext):
         premium_origin_level=None,
         premium_pending_topic=None
     )
+
+    if category and level:
+        await show_topics_for_category_level(query, state, category, level)
+        return
+
     await state.set_state(LessonStates.choosing_topic)
 
 
@@ -4034,7 +4039,7 @@ async def premium_entry_topics(query: CallbackQuery, state: FSMContext):
     if await state.get_state() != LessonStates.waiting_premium.state:
         return
     await show_entry(
-        query.message,
+        query,
         query.from_user.id,
         back_cb="premium:back_topics",
         check_cb="premium:check",
@@ -4047,71 +4052,25 @@ async def premium_check(query: CallbackQuery, state: FSMContext):
 
     premium_active = is_premium_active(query.from_user.id)
 
-    # 💬 Стикеры (оставляем твои id как есть)
-    success_sticker_id = "CAACAgIAAxkBAAEMum9nzoIHdN9yG2tKMw5JWS8F6Yq3xgACNQADr8ZRGsQqBq4Xh0XFNQQ"
-    fail_sticker_id = "CAACAgIAAxkBAAEMunBnzoI7E3L8A1v5b5zYxq9k0h58OgACMgADr8ZRGmL8Kqj3a9vFNQQ"
-
-    sticker_id = success_sticker_id if premium_active else fail_sticker_id
-
-    # 💬 Стикер = опционально (если file_id битый/невалидный, не падаем)
-    sticker_msg = None
-    try:
-        sticker_msg = await query.message.answer_sticker(sticker_id)
-    except TelegramBadRequest:
-        sticker_msg = None  # 💬 просто продолжим без стикера
-
     if premium_active:
-        text_msg = await query.message.answer(
+        await query.message.edit_text(
             "✅ Premium активен\n\n"
             "🔓 Замки сняты автоматически\n"
-            "↩️ Возвращаю в главное меню"
+            "⬅️ Нажми Back, чтобы вернуться к темам.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="premium:back_topics")]]
+            ),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
         )
-    else:
-        text_msg = await query.message.answer(
-            "❌ Premium не найден\n\n"
-            "Если ты только что оплатил(а) — подожди 1–2 минуты и нажми ещё раз"
-        )
-    
-    # 💬 Чистим мусор из paywall-сессии
-    await state.update_data(
-        premium_origin_category=None,
-        premium_origin_level=None,
-        premium_pending_topic=None,
+        return
+
+    await show_entry(
+        query,
+        query.from_user.id,
+        back_cb="premium:back_topics",
+        check_cb="premium:check",
     )
-    
-    # 💬 Если Premium активен — выходим из paywall state и уходим в главное меню
-    if premium_active:
-        await state.set_state(None)
-    
-        # 💬 Убираем paywall-сообщение, если оно ещё есть
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
-
-        # 💬 Удаляем уведомления через пару секунд (чтобы не засорять чат)
-        await asyncio.sleep(3)
-        for msg in (sticker_msg, text_msg):
-            if not msg:
-                continue  # 💬 если стикер не отправился, msg=None
-            try:
-                await msg.delete()
-            except Exception:
-                pass
-
-
-        # 💬 Главное меню (используем уже существующий start_handler)
-        return await start_handler(query.message, state)
-
-    # 💬 Если Premium не активен = остаёмся в текущем экране (paywall), без переходов
-    await asyncio.sleep(3)
-    for msg in (sticker_msg, text_msg):
-        if not msg:
-            continue  # 💬 если стикер не отправился, msg=None
-        try:
-            await msg.delete()
-        except Exception:
-            pass
 
 
 @dp.callback_query(F.data == "premium:check_settings")
@@ -4120,42 +4079,16 @@ async def premium_check_settings(query: CallbackQuery, state: FSMContext):
 
     premium_active = is_premium_active(query.from_user.id)
 
-    # 💬 твои sticker_id, но с защитой от "wrong file identifier"
-    success_sticker_id = "CAACAgIAAxkBAAIWI2l21eTj7Ea12Kr5IFDAPatBQzZoAALYLgACQ7nYSMxMa3UjThHMOAQ"
-    fail_sticker_id = "CAACAgIAAxkBAAIWH2l21bO_xugzDFap9zCvHnG64If-AAKRMwACkKbJSE_T26pSZdruOAQ"
-
-    sticker_msg = None
-    try:
-        sticker_id = success_sticker_id if premium_active else fail_sticker_id
-        sticker_msg = await query.message.answer_sticker(sticker_id)  # 💬 показываем реакцию
-    except Exception:
-        sticker_msg = None  # 💬 если sticker_id битый — просто без стикера
-
     if premium_active:
-        text_msg = await query.message.answer("✅ Premium активен\n🔓 Замки сняты автоматически")
-    else:
-        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✍️ Напиши админу", url="https://t.me/Drancherrro")]
-        ])
-        text_msg = await query.message.answer(
-            "❌ Premium не найден\nЕсли оплатил(а) только что = подожди 1–2 минуты и проверь ещё раз",
-            reply_markup=admin_kb,
-        )
-
-    await asyncio.sleep(3)
-    for msg in (sticker_msg, text_msg):
-        if not msg:
-            continue
-        try:
-            await msg.delete()
-        except Exception:
-            pass
-
-    # 💬 возвращаем пользователя в «Моя подписка», без прыжков в лексику
-    try:
         await settings_subscription_cb(query)
-    except Exception:
-        pass
+        return
+
+    await show_entry(
+        query,
+        query.from_user.id,
+        back_cb="settings:back",
+        check_cb="premium:check_settings",
+    )
 
 
 @dp.callback_query(F.data == "premium:buy_card")
@@ -6809,10 +6742,12 @@ async def mywords_premium_entry_cb(callback: CallbackQuery, state: FSMContext):
     if not callback.message:
         return
     await show_entry(
-        callback.message,
+        callback,
         callback.from_user.id,
         back_cb="mywords:premium_back",
         check_cb="mywords:premium_check",
+        buy_card_cb="mywords:premium_buy_card",
+        stars_cb="mywords:premium_stars_month",
     )
 
 
@@ -6845,43 +6780,22 @@ async def mywords_premium_check_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     premium_active = is_premium_active(callback.from_user.id)
 
-    success_sticker_id = "CAACAgIAAxkBAAIWI2l21eTj7Ea12Kr5IFDAPatBQzZoAALYLgACQ7nYSMxMa3UjThHMOAQ"
-    fail_sticker_id = "CAACAgIAAxkBAAIWH2l21bO_xugzDFap9zCvHnG64If-AAKRMwACkKbJSE_T26pSZdruOAQ"
-
-    sticker_msg = None
-    try:
-        sticker_msg = await callback.message.answer_sticker(success_sticker_id if premium_active else fail_sticker_id)
-    except Exception:
-        sticker_msg = None
-
     if premium_active:
-        text_msg = await callback.message.answer("✅ Premium активен. Лимиты в MyWords сняты.")
-    else:
-        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✍️ Напиши админу", url=CONTACT_URL)]
-        ])
-        text_msg = await callback.message.answer(
-            "❌ Premium не найден\nЕсли оплатил(а) только что = подожди 1–2 минуты и проверь ещё раз",
-            reply_markup=admin_kb,
+        await callback.message.edit_text(
+            "✅ Premium активен. Лимиты в MyWords сняты.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="mywords:premium_back")]]
+            ),
         )
-
-    await asyncio.sleep(3)
-    for msg in (sticker_msg, text_msg):
-        if not msg:
-            continue
-        try:
-            await msg.delete()
-        except Exception:
-            pass
-
-    if premium_active:
-        return await mywords_menu(callback.message, state)
+        return
 
     await show_entry(
-        callback.message,
+        callback,
         callback.from_user.id,
         back_cb="mywords:premium_back",
         check_cb="mywords:premium_check",
+        buy_card_cb="mywords:premium_buy_card",
+        stars_cb="mywords:premium_stars_month",
     )
 
 
@@ -7019,16 +6933,13 @@ async def mywords_add_newcat_cb(callback: CallbackQuery, state: FSMContext):
     )
 
     if (not is_premium_active(callback.from_user.id)) and (cats_count >= FREE_MYWORDS_CATEGORIES_LIMIT):
-        await _safe_send_paywall_message(
-            callback.message,
-            ENTRY_TEXT,
-            build_entry_kb(
-                back_cb="mywords:premium_back",
-                check_cb="mywords:premium_check",
-                buy_card_cb="mywords:premium_buy_card",
-                stars_cb="mywords:premium_stars_month",
-            ),
-            parse_mode="HTML"
+        await show_entry(
+            callback,
+            callback.from_user.id,
+            back_cb="mywords:premium_back",
+            check_cb="mywords:premium_check",
+            buy_card_cb="mywords:premium_buy_card",
+            stars_cb="mywords:premium_stars_month",
         )
         return  # 💬 не переводим в state ввода названия
 
@@ -7190,16 +7101,13 @@ async def mywords_add_save_cb(callback: CallbackQuery, state: FSMContext):
     result = await MYWORDS_REPOSITORY.mutate(_mutator, save=True)
 
     if result == "free_limit":
-        await _safe_send_paywall_message(
-            callback.message,
-            ENTRY_TEXT,
-            build_entry_kb(
-                back_cb="mywords:premium_back",
-                check_cb="mywords:premium_check",
-                buy_card_cb="mywords:premium_buy_card",
-                stars_cb="mywords:premium_stars_month",
-            ),
-            parse_mode="HTML"
+        await show_entry(
+            callback,
+            callback.from_user.id,
+            back_cb="mywords:premium_back",
+            check_cb="mywords:premium_check",
+            buy_card_cb="mywords:premium_buy_card",
+            stars_cb="mywords:premium_stars_month",
         )
         return
 
