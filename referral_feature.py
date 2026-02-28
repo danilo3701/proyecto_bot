@@ -266,7 +266,7 @@ def _referrals_count(referrer: dict) -> int:
 
 
 def _is_partner_allowed(referrer: dict) -> bool:
-    return bool(referrer.get("enabled")) or _referrals_count(referrer) >= 1
+    return True
 
 
 def _extract_referrer_id_from_payload(payload: Optional[str]) -> Optional[str]:
@@ -345,7 +345,7 @@ async def referrals_try_bind_on_start(
     💬 Привязка реферала:
     - только если это первый /start пользователя
     - payload вида refpay_<referrer_id>
-    - referrer должен быть enabled=True
+    - реферер может быть любым валидным user_id
     - anti-duble по user_id
     """
     if not is_first_start:
@@ -523,9 +523,10 @@ async def _make_ref_deeplink(bot, referrer_id: str) -> str:
 def _kb_ref_home() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Мои рефералы", callback_data="ref:my:0")],
+        [InlineKeyboardButton(text="🔗 Моя ссылка", callback_data="ref:link")],
         [InlineKeyboardButton(text="📜 Правила партнёрки", callback_data="ref:rules:0")],
         [InlineKeyboardButton(text="💸 История выплат", callback_data="ref:payout_history:0")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings:open")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="settings:open")],
     ])
 
 
@@ -613,14 +614,6 @@ async def render_ref_cabinet(message_or_event, user_id: int, prefer_edit: bool =
             await message_or_event.answer(txt)
         return
 
-    if not _is_partner_allowed(r):
-        txt = "Доступ появится после первого перехода по вашей реферальной ссылке или после активации администратором."
-        if isinstance(message_or_event, CallbackQuery):
-            await message_or_event.message.answer(txt)
-        else:
-            await message_or_event.answer(txt)
-        return
-
     event_bot = getattr(message_or_event, "bot", None)
     if event_bot is None and isinstance(message_or_event, CallbackQuery):
         event_bot = message_or_event.message.bot
@@ -638,13 +631,14 @@ async def render_ref_cabinet(message_or_event, user_id: int, prefer_edit: bool =
     else:
         await message_or_event.answer(txt, reply_markup=_kb_ref_home(), parse_mode="HTML", disable_web_page_preview=True)
 
+
 # -----------------------------------------------------------------------------
 # UI handlers
 # -----------------------------------------------------------------------------
 @router.callback_query(F.data == "settings:referrals")
 async def referrals_open_cb(callback: CallbackQuery):
     await callback.answer()
-    await _open_ref_cabinet_for_user(callback, callback.from_user.id, callback.bot, prefer_edit=True)
+    await render_ref_cabinet(callback, callback.from_user.id, prefer_edit=True)
 
 # -----------------------------------------------------------------------------
 # UI handlers
@@ -656,7 +650,9 @@ async def referrals_open_cb(callback: CallbackQuery):
 
 @router.message(Command("ref"))
 async def cmd_ref(message: Message):
-    await _open_ref_cabinet_for_user(message, message.from_user.id, message.bot, prefer_edit=False)
+    if getattr(message, "_ref_proxy_handled", False):
+        return
+    await render_ref_cabinet(message, message.from_user.id, prefer_edit=False)
 
 
 @router.callback_query(F.data == "ref:home")
