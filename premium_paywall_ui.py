@@ -54,6 +54,12 @@ def _resolve_message(target):
     return getattr(target, "message", target)
 
 
+def _can_edit_target(target, message) -> bool:
+    if isinstance(target, CallbackQuery):
+        return isinstance(message, Message)
+    return isinstance(message, Message)
+
+
 async def show_entry(
     target,
     user_id: int,
@@ -66,14 +72,15 @@ async def show_entry(
     message = _resolve_message(target)
     text = ENTRY_TEXT
     kb = build_entry_kb(back_cb=back_cb, check_cb=check_cb, buy_card_cb=buy_card_cb, stars_cb=stars_cb)
-    try:
-        return await message.edit_text(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
-    except Exception:
-        if isinstance(target, CallbackQuery):
-            return None
-        if not isinstance(message, Message):
-            return None
-        return await message.answer(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
+    if _can_edit_target(target, message):
+        try:
+            return await message.edit_text(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
+        except Exception:
+            if isinstance(target, CallbackQuery):
+                return None
+    if not isinstance(message, Message):
+        return None
+    return await message.answer(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
 
 
 async def show_checkout(
@@ -87,11 +94,12 @@ async def show_checkout(
     message = _resolve_message(target)
     text = CHECKOUT_TEXT_TEMPLATE(user_id)
     kb = build_checkout_kb(stripe_url=stripe_url, back_cb=back_cb, check_cb=check_cb)
-    try:
-        return await message.edit_text(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
-    except Exception:
-        if isinstance(target, CallbackQuery):
-            return None
-        if not isinstance(message, Message):
-            return None
-        return await message.answer(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
+    if _can_edit_target(target, message):
+        try:
+            return await message.edit_text(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
+        except Exception:
+            if isinstance(target, CallbackQuery):
+                return None
+    if not isinstance(message, Message):
+        return None
+    return await message.answer(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
