@@ -4059,6 +4059,49 @@ async def premium_back_topics(query: CallbackQuery, state: FSMContext):
     await state.set_state(LessonStates.choosing_topic)
 
 
+def _paywall_context_from_message(
+    message: Message,
+    *,
+    default_back_cb: str,
+    default_check_cb: str,
+    default_buy_card_cb: str = "premium:buy_card",
+    default_stars_cb: str = "premium:stars_month",
+) -> tuple[str, str, str, str]:
+    back_cb = default_back_cb
+    check_cb = default_check_cb
+    buy_card_cb = default_buy_card_cb
+    stars_cb = default_stars_cb
+
+    markup = getattr(message, "reply_markup", None)
+    for row in getattr(markup, "inline_keyboard", []) or []:
+        for button in row:
+            text = str(getattr(button, "text", "") or "")
+            cb = getattr(button, "callback_data", None)
+            if not cb:
+                continue
+            if "Back" in text:
+                back_cb = cb
+            elif "Check Premium" in text:
+                check_cb = cb
+            elif "Buy by card" in text:
+                buy_card_cb = cb
+            elif "Buy by Stars" in text:
+                stars_cb = cb
+
+    return back_cb, check_cb, buy_card_cb, stars_cb
+
+
+def _premium_active_until_text(user_id: int) -> str:
+    row = load_premium_users().get(str(user_id), {}) or {}
+    try:
+        until_ts = int(row.get("active_until", 0) or 0)
+    except Exception:
+        until_ts = 0
+    if until_ts <= 0:
+        return "—"
+    return datetime.datetime.fromtimestamp(until_ts).strftime("%Y-%m-%d %H:%M")
+
+
 @dp.callback_query(F.data == "premium:entry_topics")
 async def premium_entry_topics(query: CallbackQuery, state: FSMContext):
     await query.answer()
@@ -4075,16 +4118,23 @@ async def premium_entry_topics(query: CallbackQuery, state: FSMContext):
 @dp.callback_query(StateFilter(LessonStates.waiting_premium), F.data == "premium:check")
 async def premium_check(query: CallbackQuery, state: FSMContext):
     await query.answer()
+    if not query.message:
+        return
 
+    back_cb, check_cb, buy_card_cb, stars_cb = _paywall_context_from_message(
+        query.message,
+        default_back_cb="premium:back_topics",
+        default_check_cb="premium:check",
+    )
     premium_active = is_premium_active(query.from_user.id)
 
     if premium_active:
         await query.message.edit_text(
-            "✅ Premium активен\n\n"
-            "🔓 Замки сняты автоматически\n"
-            "⬅️ Нажми Back, чтобы вернуться к темам.",
+            "✅ Premium активен до: "
+            f"<b>{_premium_active_until_text(query.from_user.id)}</b>\n"
+            "Ограничения сняты",
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="premium:back_topics")]]
+                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data=back_cb)]]
             ),
             parse_mode="HTML",
             disable_web_page_preview=True,
@@ -4094,8 +4144,10 @@ async def premium_check(query: CallbackQuery, state: FSMContext):
     await show_entry(
         query,
         query.from_user.id,
-        back_cb="premium:back_topics",
-        check_cb="premium:check",
+        back_cb=back_cb,
+        check_cb=check_cb,
+        buy_card_cb=buy_card_cb,
+        stars_cb=stars_cb,
     )
 
 
@@ -6804,24 +6856,38 @@ async def mywords_premium_back_cb(callback: CallbackQuery, state: FSMContext):
 @track_handler
 async def mywords_premium_check_cb(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    if not callback.message:
+        return
+
+    back_cb, check_cb, buy_card_cb, stars_cb = _paywall_context_from_message(
+        callback.message,
+        default_back_cb="mywords:premium_back",
+        default_check_cb="mywords:premium_check",
+        default_buy_card_cb="mywords:premium_buy_card",
+        default_stars_cb="mywords:premium_stars_month",
+    )
     premium_active = is_premium_active(callback.from_user.id)
 
     if premium_active:
         await callback.message.edit_text(
-            "✅ Premium активен. Лимиты в MyWords сняты.",
+            "✅ Premium активен до: "
+            f"<b>{_premium_active_until_text(callback.from_user.id)}</b>\n"
+            "Ограничения сняты",
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data="mywords:premium_back")]]
+                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data=back_cb)]]
             ),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
         )
         return
 
     await show_entry(
         callback,
         callback.from_user.id,
-        back_cb="mywords:premium_back",
-        check_cb="mywords:premium_check",
-        buy_card_cb="mywords:premium_buy_card",
-        stars_cb="mywords:premium_stars_month",
+        back_cb=back_cb,
+        check_cb=check_cb,
+        buy_card_cb=buy_card_cb,
+        stars_cb=stars_cb,
     )
 
 
