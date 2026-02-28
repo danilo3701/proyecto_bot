@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 ENTRY_TEXT = (
     "🔒 <b>Premium доступ</b>\n\n"
@@ -54,13 +54,25 @@ def _resolve_message(target):
     return getattr(target, "message", target)
 
 
-async def show_entry(target, user_id: int, back_cb: str, check_cb: str, parse_mode: str = "HTML"):
+async def show_entry(
+    target,
+    user_id: int,
+    back_cb: str,
+    check_cb: str,
+    parse_mode: str = "HTML",
+    buy_card_cb: str = "premium:buy_card",
+    stars_cb: str = "premium:stars_month",
+):
     message = _resolve_message(target)
     text = ENTRY_TEXT
-    kb = build_entry_kb(back_cb=back_cb, check_cb=check_cb)
+    kb = build_entry_kb(back_cb=back_cb, check_cb=check_cb, buy_card_cb=buy_card_cb, stars_cb=stars_cb)
     try:
         return await message.edit_text(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
     except Exception:
+        if isinstance(target, CallbackQuery):
+            return None
+        if not isinstance(message, Message):
+            return None
         return await message.answer(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
 
 
@@ -78,4 +90,8 @@ async def show_checkout(
     try:
         return await message.edit_text(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
     except Exception:
+        if isinstance(target, CallbackQuery):
+            return None
+        if not isinstance(message, Message):
+            return None
         return await message.answer(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
