@@ -277,6 +277,7 @@ from referral_feature import (
     referrals_apply_invoice_paid,
     referrals_apply_subscription_status,
     get_user_partner_id,
+    render_ref_cabinet,
 )
 
 from podcasts_feature import router as podcasts_router, init_podcasts_feature, podcasts_open  # 💬 модуль "Подкасты"
@@ -4365,10 +4366,6 @@ async def settings_menu(message: Message, state: FSMContext):
             InlineKeyboardButton(text="⏰ Время уведомления", callback_data="settings:notify"),
         ],
         [
-            InlineKeyboardButton(text="🤝 Рефералы", callback_data="settings:referrals"),
-        ],
-
-        [
             toggle_btn,
         ],
         [
@@ -5099,6 +5096,14 @@ async def menu_handler(message: Message, state: FSMContext):
 async def cmd_grammar_admin(message: Message, state: FSMContext):
     # 💬 Секретная команда: не показывается в UI, но работает всегда
     return await grammar_admin_entry(message, state)
+
+
+@dp.message(Command("ref"))
+@track_handler
+async def ref_proxy_cmd(message: Message):
+    # 💬 Прокси в core: чтобы /ref точно обрабатывался, не дублируя бизнес-логику.
+    setattr(message, "_ref_proxy_handled", True)
+    await render_ref_cabinet(message, message.from_user.id, prefer_edit=False)
 
 
 @dp.message(Command("lex_unlock"))
