@@ -126,6 +126,7 @@ PREMIUM_STARS_MONTH = int(os.getenv("PREMIUM_STARS_MONTH", "400"))
 
 _is_premium_active: Optional[Callable[[int], bool]] = None
 _premium_links: Dict[str, str] = dict(DEFAULT_PREMIUM_LINKS)
+CONTACT_URL = os.getenv("CONTACT_URL", "https://t.me/Drancherrro")
 
 
 
@@ -1379,15 +1380,27 @@ async def pod_premium_check(cb: CallbackQuery, state: FSMContext) -> None:
                 pass  # 💬 тихо чистим реакцию
 
     if not ok:
+        admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✍️ Напиши админу", url=CONTACT_URL)]
+        ])
         try:
             msgs = []
             msgs.append(await cb.message.answer_sticker("CAACAgIAAxkBAAIWH2l21bO_xugzDFap9zCvHnG64If-AAKRMwACkKbJSE_T26pSZdruOAQ"))  # 💬 стикер нет Premium
-            msgs.append(await cb.message.answer("⏳ Premium ещё не активен. Если оплатил, подожди немного и нажми ещё раз.\nЕсли не срабатывает, напиши @Drancherrro"))  # 💬 подсказка
+            msgs.append(await cb.message.answer(
+                "❌ Premium не найден\nЕсли оплатил(а) только что = подожди 1–2 минуты и проверь ещё раз",
+                reply_markup=admin_kb,
+            ))
             asyncio.create_task(_delete_later(msgs, 5))
         except Exception:
             pass
 
-        await cb.answer("⏳ Premium ещё не активен. Попробуй ещё раз через немного.\nЕсли не срабатывает, напиши @Drancherrro", show_alert=True)
+        await cb.answer("❌ Premium не найден. Попробуй ещё раз через 1–2 минуты.", show_alert=True)
+        await show_entry(
+            cb.message,
+            cb.from_user.id,
+            back_cb="pod:premium_back",
+            check_cb="pod:premium_check",
+        )
         return
 
     try:
