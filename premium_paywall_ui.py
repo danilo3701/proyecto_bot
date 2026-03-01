@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.exceptions import TelegramBadRequest
+import logging
 
 ENTRY_TEXT = (
     "🔒 <b>Premium доступ</b>\n\n"
@@ -75,12 +77,17 @@ async def show_entry(
     if _can_edit_target(target, message):
         try:
             return await message.edit_text(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
+        except TelegramBadRequest as e:
+            err = str(e) or ""
+            if "message is not modified" in err.lower() or "message is not modified" in getattr(e, 'message', ""):
+                return message
+            logging.exception("show_entry: TelegramBadRequest while editing message for user %s: %s", user_id, err)
+            return None
         except Exception:
-            if isinstance(target, CallbackQuery):
-                return None
-    if not isinstance(message, Message):
-        return None
-    return await message.answer(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
+            logging.exception("show_entry: unexpected error while editing message for user %s", user_id)
+            return None
+    # If we can't edit the message, do not send a new message to avoid duplicates.
+    return None
 
 
 async def show_checkout(
@@ -97,9 +104,14 @@ async def show_checkout(
     if _can_edit_target(target, message):
         try:
             return await message.edit_text(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
+        except TelegramBadRequest as e:
+            err = str(e) or ""
+            if "message is not modified" in err.lower() or "message is not modified" in getattr(e, 'message', ""):
+                return message
+            logging.exception("show_checkout: TelegramBadRequest while editing message for user %s: %s", user_id, err)
+            return None
         except Exception:
-            if isinstance(target, CallbackQuery):
-                return None
-    if not isinstance(message, Message):
-        return None
-    return await message.answer(text, reply_markup=kb, parse_mode=parse_mode, disable_web_page_preview=True)
+            logging.exception("show_checkout: unexpected error while editing message for user %s", user_id)
+            return None
+    # If we can't edit the message, do not send a new message to avoid duplicates.
+    return None
