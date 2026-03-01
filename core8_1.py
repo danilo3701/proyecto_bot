@@ -4117,38 +4117,49 @@ async def premium_entry_topics(query: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(StateFilter(LessonStates.waiting_premium), F.data == "premium:check")
 async def premium_check(query: CallbackQuery, state: FSMContext):
-    await query.answer()
-    if not query.message:
-        return
+    try:
+        await query.answer()
+        if not query.message:
+            return
 
-    back_cb, check_cb, buy_card_cb, stars_cb = _paywall_context_from_message(
-        query.message,
-        default_back_cb="premium:back_topics",
-        default_check_cb="premium:check",
-    )
-    premium_active = is_premium_active(query.from_user.id)
-
-    if premium_active:
-        await query.message.edit_text(
-            "✅ Premium активен до: "
-            f"<b>{_premium_active_until_text(query.from_user.id)}</b>\n"
-            "Ограничения сняты",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data=back_cb)]]
-            ),
-            parse_mode="HTML",
-            disable_web_page_preview=True,
+        back_cb, check_cb, buy_card_cb, stars_cb = _paywall_context_from_message(
+            query.message,
+            default_back_cb="premium:back_topics",
+            default_check_cb="premium:check",
         )
-        return
+        premium_active = is_premium_active(query.from_user.id)
 
-    await show_entry(
-        query,
-        query.from_user.id,
-        back_cb=back_cb,
-        check_cb=check_cb,
-        buy_card_cb=buy_card_cb,
-        stars_cb=stars_cb,
-    )
+        if premium_active:
+            try:
+                await query.message.edit_text(
+                    "✅ Premium активен до: "
+                    f"<b>{_premium_active_until_text(query.from_user.id)}</b>\n"
+                    "Ограничения сняты",
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data=back_cb)]]
+                    ),
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                )
+            except Exception:
+                logging.exception("premium_check: failed to edit message for user %s", query.from_user.id)
+            return
+
+        # prefer editing the same message only (show_entry now tries edit_text and won't send duplicates)
+        await show_entry(
+            query.message,
+            query.from_user.id,
+            back_cb=back_cb,
+            check_cb=check_cb,
+            buy_card_cb=buy_card_cb,
+            stars_cb=stars_cb,
+        )
+    except Exception:
+        logging.exception("premium_check: unexpected error for user %s", getattr(query.from_user, "id", None))
+        try:
+            await query.answer("⚠️ Ошибка при проверке Premium", show_alert=False)
+        except Exception:
+            pass
 
 
 @dp.callback_query(F.data == "premium:check_settings")
@@ -6855,40 +6866,51 @@ async def mywords_premium_back_cb(callback: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "mywords:premium_check")
 @track_handler
 async def mywords_premium_check_cb(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
-    if not callback.message:
-        return
+    try:
+        await callback.answer()
+        if not callback.message:
+            return
 
-    back_cb, check_cb, buy_card_cb, stars_cb = _paywall_context_from_message(
-        callback.message,
-        default_back_cb="mywords:premium_back",
-        default_check_cb="mywords:premium_check",
-        default_buy_card_cb="mywords:premium_buy_card",
-        default_stars_cb="mywords:premium_stars_month",
-    )
-    premium_active = is_premium_active(callback.from_user.id)
-
-    if premium_active:
-        await callback.message.edit_text(
-            "✅ Premium активен до: "
-            f"<b>{_premium_active_until_text(callback.from_user.id)}</b>\n"
-            "Ограничения сняты",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data=back_cb)]]
-            ),
-            parse_mode="HTML",
-            disable_web_page_preview=True,
+        back_cb, check_cb, buy_card_cb, stars_cb = _paywall_context_from_message(
+            callback.message,
+            default_back_cb="mywords:premium_back",
+            default_check_cb="mywords:premium_check",
+            default_buy_card_cb="mywords:premium_buy_card",
+            default_stars_cb="mywords:premium_stars_month",
         )
-        return
+        premium_active = is_premium_active(callback.from_user.id)
 
-    await show_entry(
-        callback,
-        callback.from_user.id,
-        back_cb=back_cb,
-        check_cb=check_cb,
-        buy_card_cb=buy_card_cb,
-        stars_cb=stars_cb,
-    )
+        if premium_active:
+            try:
+                await callback.message.edit_text(
+                    "✅ Premium активен до: "
+                    f"<b>{_premium_active_until_text(callback.from_user.id)}</b>\n"
+                    "Ограничения сняты",
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data=back_cb)]]
+                    ),
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                )
+            except Exception:
+                logging.exception("mywords_premium_check: failed to edit message for user %s", callback.from_user.id)
+            return
+
+        # prefer editing the same message only (show_entry now tries edit_text and won't send duplicates)
+        await show_entry(
+            callback.message,
+            callback.from_user.id,
+            back_cb=back_cb,
+            check_cb=check_cb,
+            buy_card_cb=buy_card_cb,
+            stars_cb=stars_cb,
+        )
+    except Exception:
+        logging.exception("mywords_premium_check: unexpected error for user %s", getattr(callback.from_user, "id", None))
+        try:
+            await callback.answer("⚠️ Ошибка при проверке Premium", show_alert=False)
+        except Exception:
+            pass
 
 
 @dp.callback_query(F.data == "mywords:back_main")
