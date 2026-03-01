@@ -1152,6 +1152,7 @@ def _apply_stars_successful_payment(
         active_until=active_until,
         plan="stars_month",
         provider="stars",
+        status="paid",
     )
 
     _upsert_stars_subscription(
@@ -1255,13 +1256,66 @@ def save_premium_users(data: dict) -> None:
 
 
 def is_premium_active(user_id: int) -> bool:
-    data = load_premium_users()
-    row = data.get(str(user_id), {})
+    return get_premium_status(user_id).get("code") == "active"
+
+
+def get_premium_status(user_id: int, now_ts: int | None = None) -> dict:
+    now = int(now_ts or time.time())
+    row = load_premium_users().get(str(user_id), {}) or {}
+    if not isinstance(row, dict):
+        row = {}
+
     try:
-        until = int((row or {}).get("active_until", 0) or 0)
+        active_until_ts = int((row or {}).get("active_until", 0) or 0)
     except Exception:
-        until = 0
-    return until > int(time.time())
+        active_until_ts = 0
+
+    raw_plan = str((row or {}).get("plan", "") or "").strip()
+    raw_status = str((row or {}).get("status", "") or "").strip()
+    provider = str((row or {}).get("provider", "") or "").strip().lower()
+
+    if not raw_status:
+        stars_row = _load_stars_subscriptions().get(str(user_id), {}) or {}
+        if isinstance(stars_row, dict):
+            raw_status = str(stars_row.get("status", "") or "").strip()
+
+    if active_until_ts <= 0:
+        active_until_text = "—"
+    else:
+        try:
+            active_until_text = datetime.datetime.fromtimestamp(active_until_ts).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            active_until_text = str(active_until_ts)
+
+    raw_plan_l = raw_plan.lower()
+    raw_status_l = raw_status.lower()
+    joined = f"{raw_plan_l} {raw_status_l}"
+    has_canceled_flag = bool((row or {}).get("canceled_at_period_end")) or bool((row or {}).get("cancel_at_period_end"))
+
+    if provider == "stars" or "stars" in raw_plan_l:
+        payment_method = "stars"
+    elif provider == "stripe" or bool((row or {}).get("stripe_customer_id")) or bool((row or {}).get("stripe_subscription_id")):
+        payment_method = "stripe"
+    else:
+        payment_method = "unknown"
+
+    if active_until_ts > now:
+        code = "active"
+    elif any(flag in joined for flag in ("unpaid", "past_due", "incomplete", "incomplete_expired")):
+        code = "unpaid"
+    elif has_canceled_flag or any(flag in joined for flag in ("canceled", "cancelled")):
+        code = "canceled"
+    else:
+        code = "inactive"
+
+    return {
+        "code": code,
+        "active_until_ts": int(active_until_ts),
+        "active_until_text": active_until_text,
+        "raw_plan": raw_plan,
+        "raw_status": raw_status,
+        "payment_method": payment_method,
+    }
 
 
 def _set_premium_user(
@@ -1269,6 +1323,7 @@ def _set_premium_user(
     active_until: int,
     plan: str = "",
     provider: str = "",
+    status: str = "",
     stripe_customer_id: str = "",
     stripe_subscription_id: str = "",
 ) -> None:
@@ -1284,6 +1339,8 @@ def _set_premium_user(
         prev["plan"] = plan
     if provider:
         prev["provider"] = provider
+    if status:
+        prev["status"] = status
 
     if stripe_customer_id:
         prev["stripe_customer_id"] = stripe_customer_id
@@ -1552,6 +1609,8 @@ async def _stripe_process_event(event: dict) -> None:
             user_id=tg_id,
             active_until=active_until,
             plan=plan,
+            provider="stripe",
+            status="paid",
             stripe_customer_id=cust_id,
             stripe_subscription_id=sub_id,
         )
@@ -1582,6 +1641,8 @@ async def _stripe_process_event(event: dict) -> None:
             user_id=int(uid),
             active_until=active_until,
             plan=plan,
+            provider="stripe",
+            status="paid",
             stripe_customer_id=cust_id,
             stripe_subscription_id=sub_id,
         )
@@ -1616,6 +1677,8 @@ async def _stripe_process_event(event: dict) -> None:
             user_id=int(uid),
             active_until=int(time.time()) - 5,
             plan="canceled",
+            provider="stripe",
+            status="canceled",
             stripe_customer_id=cust_id,
             stripe_subscription_id=sub_id,
         )
@@ -1652,6 +1715,8 @@ async def _stripe_process_event(event: dict) -> None:
                 user_id=int(uid),
                 active_until=int(time.time()) - 5,
                 plan=status,
+                provider="stripe",
+                status=("canceled" if status == "canceled" else "unpaid"),
                 stripe_customer_id=cust_id,
                 stripe_subscription_id=sub_id,
             )
@@ -1674,6 +1739,8 @@ async def _stripe_process_event(event: dict) -> None:
                 user_id=int(uid),
                 active_until=active_until,
                 plan=status,
+                provider="stripe",
+                status="paid",
                 stripe_customer_id=cust_id,
                 stripe_subscription_id=sub_id,
             )
@@ -3275,6 +3342,8 @@ async def settings_subscription_cb(callback: CallbackQuery):
                     uid,
                     int(new_end),
                     plan=guessed_plan,
+                    provider="stripe",
+                    status="paid",
                     stripe_customer_id=cust_id or None,
                     stripe_subscription_id=sub_id,
                 )
@@ -4092,14 +4161,31 @@ def _paywall_context_from_message(
 
 
 def _premium_active_until_text(user_id: int) -> str:
-    row = load_premium_users().get(str(user_id), {}) or {}
-    try:
-        until_ts = int(row.get("active_until", 0) or 0)
-    except Exception:
-        until_ts = 0
-    if until_ts <= 0:
-        return "—"
-    return datetime.datetime.fromtimestamp(until_ts).strftime("%Y-%m-%d %H:%M")
+    return str(get_premium_status(user_id).get("active_until_text") or "—")
+
+
+def _premium_status_line_for_paywall(status_info: dict) -> str:
+    code = str(status_info.get("code") or "inactive")
+    until_text = str(status_info.get("active_until_text") or "—")
+    if code == "active":
+        return f"Статус: ✅ ACTIVE до {until_text}"
+    if code == "unpaid":
+        return "Статус: ⚠️ UNPAID — оплата не найдена/не прошла"
+    if code == "canceled":
+        return "Статус: 🛑 CANCELED — подписка отменена"
+    return "Статус: ❌ INACTIVE — подписка не активна"
+
+
+def _premium_status_temp_text(status_info: dict) -> str:
+    code = str(status_info.get("code") or "inactive")
+    until_text = str(status_info.get("active_until_text") or "—")
+    if code == "active":
+        return f"✅ Premium активен до: {until_text}"
+    if code == "unpaid":
+        return "⚠️ Оплата не найдена/не прошла. Premium пока недоступен."
+    if code == "canceled":
+        return "🛑 Подписка отменена. Premium недоступен."
+    return "❌ Подписка не активна. Оформи Premium или напиши админу."
 
 
 @dp.callback_query(F.data == "premium:entry_topics")
@@ -4127,23 +4213,9 @@ async def premium_check(query: CallbackQuery, state: FSMContext):
             default_back_cb="premium:back_topics",
             default_check_cb="premium:check",
         )
-        premium_active = is_premium_active(query.from_user.id)
-
-        if premium_active:
-            try:
-                await query.message.edit_text(
-                    "✅ Premium активен до: "
-                    f"<b>{_premium_active_until_text(query.from_user.id)}</b>\n"
-                    "Ограничения сняты",
-                    reply_markup=InlineKeyboardMarkup(
-                        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data=back_cb)]]
-                    ),
-                    parse_mode="HTML",
-                    disable_web_page_preview=True,
-                )
-            except Exception:
-                logging.exception("premium_check: failed to edit message for user %s", query.from_user.id)
-            return
+        status_info = get_premium_status(query.from_user.id)
+        status_line = _premium_status_line_for_paywall(status_info)
+        entry_text = f"{status_line}\n\n{ENTRY_TEXT}"
 
         # prefer editing the same message only (show_entry now tries edit_text and won't send duplicates)
         await show_entry(
@@ -4153,6 +4225,7 @@ async def premium_check(query: CallbackQuery, state: FSMContext):
             check_cb=check_cb,
             buy_card_cb=buy_card_cb,
             stars_cb=stars_cb,
+            entry_text=entry_text,
         )
     except Exception:
         logging.exception("premium_check: unexpected error for user %s", getattr(query.from_user, "id", None))
@@ -4166,18 +4239,41 @@ async def premium_check(query: CallbackQuery, state: FSMContext):
 async def premium_check_settings(query: CallbackQuery, state: FSMContext):
     await query.answer()
 
-    premium_active = is_premium_active(query.from_user.id)
-
-    if premium_active:
-        await settings_subscription_cb(query)
+    if not query.message:
         return
 
-    await show_entry(
-        query,
-        query.from_user.id,
-        back_cb="settings:back",
-        check_cb="premium:check_settings",
-    )
+    status_info = get_premium_status(query.from_user.id)
+    temp_text = _premium_status_temp_text(status_info)
+
+    fallback_sticker = "CAACAgIAAxkBAAE4YOhogox6Armq-TOX3f5IkYPXCeUwuAACRAMAArVx2gYMtzsTtIZDMDYE"
+    try:
+        sticker_id = random.choice(UNAVAILABLE_STICKERS) if UNAVAILABLE_STICKERS else fallback_sticker
+    except Exception:
+        sticker_id = fallback_sticker
+
+    sticker_msg = None
+    text_msg = None
+    try:
+        sticker_msg = await query.message.answer_sticker(sticker_id)
+    except Exception:
+        logging.exception("premium_check_settings: failed to send status sticker for user %s", query.from_user.id)
+
+    try:
+        text_msg = await query.message.answer(temp_text)
+    except Exception:
+        logging.exception("premium_check_settings: failed to send status text for user %s", query.from_user.id)
+
+    await asyncio.sleep(3)
+
+    for msg in (sticker_msg, text_msg):
+        if not msg:
+            continue
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+
+    await settings_subscription_cb(query)
 
 
 @dp.callback_query(F.data == "premium:buy_card")
@@ -6878,23 +6974,9 @@ async def mywords_premium_check_cb(callback: CallbackQuery, state: FSMContext):
             default_buy_card_cb="mywords:premium_buy_card",
             default_stars_cb="mywords:premium_stars_month",
         )
-        premium_active = is_premium_active(callback.from_user.id)
-
-        if premium_active:
-            try:
-                await callback.message.edit_text(
-                    "✅ Premium активен до: "
-                    f"<b>{_premium_active_until_text(callback.from_user.id)}</b>\n"
-                    "Ограничения сняты",
-                    reply_markup=InlineKeyboardMarkup(
-                        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Back", callback_data=back_cb)]]
-                    ),
-                    parse_mode="HTML",
-                    disable_web_page_preview=True,
-                )
-            except Exception:
-                logging.exception("mywords_premium_check: failed to edit message for user %s", callback.from_user.id)
-            return
+        status_info = get_premium_status(callback.from_user.id)
+        status_line = _premium_status_line_for_paywall(status_info)
+        entry_text = f"{status_line}\n\n{ENTRY_TEXT}"
 
         # prefer editing the same message only (show_entry now tries edit_text and won't send duplicates)
         await show_entry(
@@ -6904,6 +6986,7 @@ async def mywords_premium_check_cb(callback: CallbackQuery, state: FSMContext):
             check_cb=check_cb,
             buy_card_cb=buy_card_cb,
             stars_cb=stars_cb,
+            entry_text=entry_text,
         )
     except Exception:
         logging.exception("mywords_premium_check: unexpected error for user %s", getattr(callback.from_user, "id", None))

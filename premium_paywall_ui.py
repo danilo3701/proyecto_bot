@@ -70,9 +70,10 @@ async def show_entry(
     parse_mode: str = "HTML",
     buy_card_cb: str = "premium:buy_card",
     stars_cb: str = "premium:stars_month",
+    entry_text: str | None = None,
 ):
     message = _resolve_message(target)
-    text = ENTRY_TEXT
+    text = entry_text if entry_text is not None else ENTRY_TEXT
     kb = build_entry_kb(back_cb=back_cb, check_cb=check_cb, buy_card_cb=buy_card_cb, stars_cb=stars_cb)
     if _can_edit_target(target, message):
         try:
@@ -82,11 +83,34 @@ async def show_entry(
             if "message is not modified" in err.lower() or "message is not modified" in getattr(e, 'message', ""):
                 return message
             logging.exception("show_entry: TelegramBadRequest while editing message for user %s: %s", user_id, err)
+            lowered = err.lower()
+            cannot_edit = (
+                "can't be edited" in lowered
+                or "cannot be edited" in lowered
+                or "to edit not found" in lowered
+                or "there is no text in the message to edit" in lowered
+            )
+            if cannot_edit and isinstance(target, CallbackQuery):
+                try:
+                    await target.answer("⚠️ Нельзя обновить это сообщение. Открой Premium заново.", show_alert=False)
+                except Exception:
+                    logging.exception("show_entry: failed to answer callback fallback for user %s", user_id)
             return None
         except Exception:
             logging.exception("show_entry: unexpected error while editing message for user %s", user_id)
+            if isinstance(target, CallbackQuery):
+                try:
+                    await target.answer("⚠️ Нельзя обновить это сообщение. Открой Premium заново.", show_alert=False)
+                except Exception:
+                    logging.exception("show_entry: failed to answer callback fallback for user %s", user_id)
             return None
     # If we can't edit the message, do not send a new message to avoid duplicates.
+    logging.warning("show_entry: message is not editable for user %s", user_id)
+    if isinstance(target, CallbackQuery):
+        try:
+            await target.answer("⚠️ Нельзя обновить это сообщение. Открой Premium заново.", show_alert=False)
+        except Exception:
+            logging.exception("show_entry: failed to answer callback fallback for user %s", user_id)
     return None
 
 
@@ -109,9 +133,32 @@ async def show_checkout(
             if "message is not modified" in err.lower() or "message is not modified" in getattr(e, 'message', ""):
                 return message
             logging.exception("show_checkout: TelegramBadRequest while editing message for user %s: %s", user_id, err)
+            lowered = err.lower()
+            cannot_edit = (
+                "can't be edited" in lowered
+                or "cannot be edited" in lowered
+                or "to edit not found" in lowered
+                or "there is no text in the message to edit" in lowered
+            )
+            if cannot_edit and isinstance(target, CallbackQuery):
+                try:
+                    await target.answer("⚠️ Нельзя обновить это сообщение. Открой Premium заново.", show_alert=False)
+                except Exception:
+                    logging.exception("show_checkout: failed to answer callback fallback for user %s", user_id)
             return None
         except Exception:
             logging.exception("show_checkout: unexpected error while editing message for user %s", user_id)
+            if isinstance(target, CallbackQuery):
+                try:
+                    await target.answer("⚠️ Нельзя обновить это сообщение. Открой Premium заново.", show_alert=False)
+                except Exception:
+                    logging.exception("show_checkout: failed to answer callback fallback for user %s", user_id)
             return None
     # If we can't edit the message, do not send a new message to avoid duplicates.
+    logging.warning("show_checkout: message is not editable for user %s", user_id)
+    if isinstance(target, CallbackQuery):
+        try:
+            await target.answer("⚠️ Нельзя обновить это сообщение. Открой Premium заново.", show_alert=False)
+        except Exception:
+            logging.exception("show_checkout: failed to answer callback fallback for user %s", user_id)
     return None
