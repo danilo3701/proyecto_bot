@@ -47,6 +47,7 @@ except Exception:
 _PAYOUT_WAIT: dict[int, bool] = {}  # 💬 owner_id -> ждём ввод "user_id amount"
 _ADMIN_MENU_USERS: set[int] = set()  # 💬 пользователи, открывшие секретное админ-меню
 _ADMIN_MENU_WAIT: dict[int, dict] = {}  # 💬 admin_id -> {"action": "pay|rollback", "referrer_id": str}
+_REF_MENU_USERS: set[int] = set()  # 💬 пользователи, открывшие /ref меню (гейт для /payouts)
 PAYOUTS_DB_PATH = os.getenv("REFERRAL_PAYOUTS_DB_PATH", "/data/referral_payouts.sqlite3")
 MIN_PAYOUT_CENTS = 2000
 
@@ -759,6 +760,7 @@ async def render_ref_cabinet(message_or_event, user_id: int, prefer_edit: bool =
 @router.callback_query(F.data == "settings:referrals")
 async def referrals_open_cb(callback: CallbackQuery):
     await callback.answer()
+    _REF_MENU_USERS.add(callback.from_user.id)
     await render_ref_cabinet(callback, callback.from_user.id, prefer_edit=True)
 
 # -----------------------------------------------------------------------------
@@ -773,35 +775,41 @@ async def referrals_open_cb(callback: CallbackQuery):
 async def cmd_ref(message: Message):
     if getattr(message, "_ref_proxy_handled", False):
         return
+    _REF_MENU_USERS.add(message.from_user.id)
     await render_ref_cabinet(message, message.from_user.id, prefer_edit=False)
 
 async def _render_admin_ref_list(message_or_event, page: int = 0, prefer_edit: bool = False) -> None:
     items = _admin_ref_list_data()
     per_page = 12
     total_items = len(items)
-    total_pages = max(1, (total_items + per_page - 1) // per_page)
-    page = max(0, min(total_pages - 1, page))
-    start = page * per_page
-    slice_items = items[start:start + per_page]
-
     lines = ["📋 <b>Рефералы (админ)</b>\n"]
-    if not slice_items:
-        lines.append("— список пуст —")
+
+    if total_items == 0:
+        lines.append("Рефералов пока нет. Когда появятся — список появится здесь.")
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data="refadm:list:0")],
+            [InlineKeyboardButton(text="⬅️ Закрыть", callback_data="refadm:close")],
+        ])
+        text = "\n".join(lines)
     else:
+        total_pages = max(1, (total_items + per_page - 1) // per_page)
+        page = max(0, min(total_pages - 1, page))
+        start = page * per_page
+        slice_items = items[start:start + per_page]
+
         for i, it in enumerate(slice_items, start=1 + start):
             rid = it["referrer_id"]
             bal = _format_money(it["balance_due"])
             active = it["active_cnt"]
             lines.append(f"{i}) <b>{rid}</b> | к выплате: <b>{bal} €</b> | активных: {active}")
 
-    kb_rows = []
-    for it in slice_items:
-        rid = it["referrer_id"]
-        kb_rows.append([InlineKeyboardButton(text=f"Открыть {rid}", callback_data=f"refadm:open:{rid}")])
-    kb = _kb_admin_ref_list(prefix="refadm:list", page=page, total_pages=total_pages, back_cb="refadm:close")
-    kb.inline_keyboard = kb_rows + kb.inline_keyboard
-
-    text = "\n".join(lines)
+        kb_rows = []
+        for it in slice_items:
+            rid = it["referrer_id"]
+            kb_rows.append([InlineKeyboardButton(text=f"Открыть {rid}", callback_data=f"refadm:open:{rid}")])
+        kb = _kb_admin_ref_list(prefix="refadm:list", page=page, total_pages=total_pages, back_cb="refadm:close")
+        kb.inline_keyboard = kb_rows + kb.inline_keyboard
+        text = "\n".join(lines)
     if isinstance(message_or_event, CallbackQuery) and prefer_edit:
         try:
             await message_or_event.message.edit_text(text, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
@@ -1262,6 +1270,9 @@ async def cmd_payout_input(message: Message):
 async def cmd_payouts(message: Message):
     raw = (message.text or "").strip()
     parts = raw.split()
+    if message.from_user.id not in _REF_MENU_USERS:
+        await message.answer("Сначала откройте /ref и попробуйте снова.")
+        return
 
     # Секретная команда без параметров: открываем админ-меню
     if len(parts) == 1:
