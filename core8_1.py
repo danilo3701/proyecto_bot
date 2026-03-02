@@ -1051,6 +1051,7 @@ STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STARS_PAYMENTS_PATH = os.getenv("STARS_PAYMENTS_PATH", "/data/stars_payments.jsonl")
 STARS_SUBSCRIPTIONS_PATH = os.getenv("STARS_SUBSCRIPTIONS_PATH", "/data/stars_subscriptions.json")
+STRIPE_REFERRAL_PENDING_PATH = os.getenv("STRIPE_REFERRAL_PENDING_PATH", "/data/stripe_referral_pending.json")
 QA_STATE_PATH = os.getenv("QA_STATE_PATH", "/data/qa_state.json")
 QA_PENDING_TTL_SEC = int(os.getenv("QA_PENDING_TTL_SEC", "1800"))
 
@@ -1067,6 +1068,132 @@ def _append_stars_payment_log(entry: dict) -> None:
             os.fsync(f.fileno())
     except Exception:
         logging.exception("failed to append stars payment log")
+
+
+def _load_stripe_referral_pending() -> dict:
+    try:
+        if not os.path.exists(STRIPE_REFERRAL_PENDING_PATH):
+            return {"items": []}
+        with open(STRIPE_REFERRAL_PENDING_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+        if not isinstance(data, dict):
+            return {"items": []}
+        items = data.get("items")
+        if not isinstance(items, list):
+            data["items"] = []
+        return data
+    except Exception:
+        logging.exception("failed to load stripe referral pending queue")
+        return {"items": []}
+
+
+def _save_stripe_referral_pending(data: dict) -> None:
+    if not isinstance(data, dict):
+        return
+    data.setdefault("items", [])
+    _atomic_json_dump(STRIPE_REFERRAL_PENDING_PATH, data, ensure_ascii=False, indent=2)
+
+
+def _resolve_uid_by_stripe_maps(data: dict, cust_id: str, sub_id: str) -> Optional[int]:
+    uid = None
+    if sub_id and sub_id in data.get("__stripe_subscription_to_user", {}):
+        uid = data["__stripe_subscription_to_user"].get(sub_id)
+    if (not uid) and cust_id and cust_id in data.get("__stripe_customer_to_user", {}):
+        uid = data["__stripe_customer_to_user"].get(cust_id)
+    if not uid:
+        return None
+    try:
+        return int(uid)
+    except Exception:
+        return None
+
+
+def _queue_stripe_referral_invoice(
+    *,
+    event_id: str,
+    event_type: str,
+    invoice_obj: dict,
+    cust_id: str,
+    sub_id: str,
+) -> None:
+    invoice_id = str((invoice_obj or {}).get("id") or "").strip()
+    if not invoice_id:
+        return
+
+    data = _load_stripe_referral_pending()
+    items = data.setdefault("items", [])
+    dedupe_key = f"stripe:{invoice_id}"
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("dedupe_key") or "") == dedupe_key:
+            return
+
+    items.append(
+        {
+            "dedupe_key": dedupe_key,
+            "event_id": str(event_id or ""),
+            "event_type": str(event_type or ""),
+            "invoice_id": invoice_id,
+            "customer": str(cust_id or ""),
+            "subscription": str(sub_id or ""),
+            "invoice_obj": invoice_obj if isinstance(invoice_obj, dict) else {},
+            "created_at": int(time.time()),
+            "last_error": "",
+        }
+    )
+    _save_stripe_referral_pending(data)
+
+
+async def _drain_stripe_referral_pending(*, match_user_id: Optional[int] = None) -> int:
+    queue = _load_stripe_referral_pending()
+    items = queue.get("items", [])
+    if not isinstance(items, list) or not items:
+        return 0
+
+    premium_data = load_premium_users()
+    kept: list[dict] = []
+    processed = 0
+
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        invoice_obj = item.get("invoice_obj") if isinstance(item.get("invoice_obj"), dict) else {}
+        cust_id = str(item.get("customer") or "")
+        sub_id = str(item.get("subscription") or "")
+
+        uid = _resolve_uid_by_stripe_maps(premium_data, cust_id, sub_id)
+        if not uid:
+            kept.append(item)
+            continue
+        if match_user_id is not None and int(uid) != int(match_user_id):
+            kept.append(item)
+            continue
+
+        active_until = _stripe_get_subscription_period_end(sub_id) if sub_id else None
+        if not active_until:
+            active_until = int(time.time()) + 86400
+        try:
+            await referrals_apply_invoice_paid(
+                tg_user_id=int(uid),
+                invoice_obj=invoice_obj,
+                active_until=int(active_until),
+                payment_provider="stripe",
+            )
+            processed += 1
+        except Exception:
+            item["last_error"] = "referrals_apply_invoice_paid_failed"
+            logging.exception(
+                "stripe pending referral apply failed: invoice_id=%s uid=%s",
+                str(invoice_obj.get("id") or ""),
+                uid,
+            )
+            kept.append(item)
+
+    queue["items"] = kept
+    _save_stripe_referral_pending(queue)
+    return processed
 
 
 def _load_stars_subscriptions() -> dict:
@@ -1413,6 +1540,7 @@ async def premium_stars_successful_payment_handler(message: Message, state: FSMC
                 "currency": str(getattr(sp, "currency", "") or ""),
             },
             active_until=active_until,
+            payment_provider="stars",
         )
         await referrals_apply_subscription_status(
             tg_user_id=message.from_user.id,
@@ -1420,7 +1548,7 @@ async def premium_stars_successful_payment_handler(message: Message, state: FSMC
             active_until=active_until,
         )
     except Exception:
-        pass
+        logging.exception("stars referral hooks failed for user_id=%s", message.from_user.id)
 
 
 def _extract_tg_id_from_checkout_session(session_obj: dict) -> Optional[int]:
@@ -1584,6 +1712,7 @@ def _stripe_guess_plan_from_subscription(subscription_id: str) -> str:
 
 async def _stripe_process_event(event: dict) -> None:
     etype = (event or {}).get("type") or ""
+    event_id = str((event or {}).get("id") or "")
     obj = (((event or {}).get("data") or {}).get("object") or {})
 
     if etype == "checkout.session.completed":
@@ -1614,6 +1743,10 @@ async def _stripe_process_event(event: dict) -> None:
             stripe_customer_id=cust_id,
             stripe_subscription_id=sub_id,
         )
+        try:
+            await _drain_stripe_referral_pending(match_user_id=int(tg_id))
+        except Exception:
+            logging.exception("stripe pending referral drain failed after checkout.session.completed")
 
         return
 
@@ -1623,13 +1756,23 @@ async def _stripe_process_event(event: dict) -> None:
         sub_id = str(obj.get("subscription") or "")
 
         data = load_premium_users()
-        uid = None
-        if sub_id and sub_id in data.get("__stripe_subscription_to_user", {}):
-            uid = data["__stripe_subscription_to_user"].get(sub_id)
-        if (not uid) and cust_id and cust_id in data.get("__stripe_customer_to_user", {}):
-            uid = data["__stripe_customer_to_user"].get(cust_id)
+        uid = _resolve_uid_by_stripe_maps(data, cust_id, sub_id)
 
         if not uid:
+            _queue_stripe_referral_invoice(
+                event_id=event_id,
+                event_type=str(etype),
+                invoice_obj=obj,
+                cust_id=cust_id,
+                sub_id=sub_id,
+            )
+            logging.warning(
+                "stripe invoice queued for retry: event=%s invoice_id=%s customer=%s subscription=%s",
+                event_id,
+                str(obj.get("id") or ""),
+                cust_id,
+                sub_id,
+            )
             return
 
         active_until = _stripe_get_subscription_period_end(sub_id)
@@ -1651,9 +1794,18 @@ async def _stripe_process_event(event: dict) -> None:
                 tg_user_id=int(uid),
                 invoice_obj=obj,
                 active_until=active_until,
+                payment_provider="stripe",
             )
         except Exception:
-            pass  # 💬 не ломаем оплату из-за рефералки
+            logging.exception(
+                "referrals_apply_invoice_paid failed for stripe invoice_id=%s uid=%s",
+                str(obj.get("id") or ""),
+                uid,
+            )
+        try:
+            await _drain_stripe_referral_pending(match_user_id=int(uid))
+        except Exception:
+            logging.exception("stripe pending referral drain failed after invoice event")
 
 
         return
@@ -1689,7 +1841,7 @@ async def _stripe_process_event(event: dict) -> None:
                 active_until=int(time.time()) - 5,
             )
         except Exception:
-            pass
+            logging.exception("referrals_apply_subscription_status failed for subscription.deleted uid=%s", uid)
 
 
         return
@@ -1729,7 +1881,11 @@ async def _stripe_process_event(event: dict) -> None:
                     active_until=int(time.time()) - 5,
                 )
             except Exception:
-                pass  # 💬 не ломаем подписку из-за рефералки
+                logging.exception(
+                    "referrals_apply_subscription_status failed for subscription.updated uid=%s status=%s",
+                    uid,
+                    status,
+                )
 
             return
 
@@ -3116,7 +3272,7 @@ async def start_handler(message: Message, state: FSMContext):
             full_name=message.from_user.full_name or "",
         )
     except Exception:
-        pass  # 💬 рефералка не должна валить старт
+        logging.exception("referrals_try_bind_on_start failed for user_id=%s", user_id)
 
 
 
@@ -5536,6 +5692,25 @@ async def stars_cancel_handler(message: Message, state: FSMContext):
             telegram_payment_charge_id=charge_id,
             is_canceled=True,
         )
+        now_ts = int(time.time())
+        subs = _load_stars_subscriptions()
+        row = subs.get(str(target_user_id), {})
+        if not isinstance(row, dict):
+            row = {}
+        active_until = int(row.get("active_until", 0) or 0)
+        row["status"] = "canceled_at_period_end"
+        row["canceled_at_period_end"] = True
+        row["updated_at"] = now_ts
+        subs[str(target_user_id)] = row
+        _save_stars_subscriptions(subs)
+        try:
+            await referrals_apply_subscription_status(
+                tg_user_id=target_user_id,
+                status="canceled",
+                active_until=active_until if active_until > now_ts else (now_ts - 5),
+            )
+        except Exception:
+            logging.exception("stars_cancel: failed to sync referral status for user_id=%s", target_user_id)
         await message.answer(
             "✅ stars_cancel выполнен\n"
             f"user_id={target_user_id}\n"

@@ -397,6 +397,7 @@ async def referrals_apply_invoice_paid(
     tg_user_id: int,
     invoice_obj: dict,
     active_until: int,
+    payment_provider: str = "stripe",
 ) -> None:
     """
     💬 Начисление комиссии по invoice.paid / invoice.payment_succeeded.
@@ -404,7 +405,10 @@ async def referrals_apply_invoice_paid(
     - анти-дубль по invoice_id
     """
     invoice_id = str(invoice_obj.get("id") or "").strip()
-    if not invoice_id:
+    provider = str(payment_provider or "stripe").strip().lower()
+    provider = provider or "stripe"
+    dedupe_key = f"{provider}:{invoice_id}" if invoice_id else ""
+    if not dedupe_key:
         return
 
     now_ts = _now()
@@ -436,9 +440,9 @@ async def referrals_apply_invoice_paid(
         u["last_payment_ts"] = now_ts
 
         processed = d.setdefault("__processed_invoices", {})
-        already_processed = invoice_id in processed
+        already_processed = dedupe_key in processed
         if not already_processed:
-            processed[invoice_id] = now_ts  # 💬 помечаем, что начисление сделано
+            processed[dedupe_key] = now_ts  # 💬 помечаем, что начисление сделано
 
         # 💬 если invoice уже обрабатывали = не начисляем повторно
         if already_processed or gross_cents <= 0:
@@ -460,7 +464,9 @@ async def referrals_apply_invoice_paid(
 
         ev = {
             "ts": now_ts,
+            "provider": provider,
             "invoice_id": invoice_id,
+            "dedupe_key": dedupe_key,
             "gross_cents": gross_cents,
             "pct": pct,
             "commission_cents": commission_cents,
