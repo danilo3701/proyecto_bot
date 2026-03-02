@@ -14957,6 +14957,7 @@ if __name__ == '__main__':
         # 💬 Обычному пользователю показываем только эти команды
         await bot.set_my_commands([
             BotCommand(command="start", description="Запустить бота"),
+            BotCommand(command="payouts", description="Admin payouts"),
         ])
 
         migrate_runtime_files_to_volume()  # 💬 выполняется один раз при старте
