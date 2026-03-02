@@ -1,4 +1,4 @@
-# referral_feature.py
+﻿# referral_feature.py
 # =============================================================================
 # 🤝 Реферальная программа (подписка) — отдельная фича
 # - привязка реферала только при первом /start по ссылке
@@ -45,6 +45,8 @@ except Exception:
     OWNER_USER_ID = 0
 
 _PAYOUT_WAIT: dict[int, bool] = {}  # 💬 owner_id -> ждём ввод "user_id amount"
+_ADMIN_MENU_USERS: set[int] = set()  # 💬 пользователи, открывшие секретное админ-меню
+_ADMIN_MENU_WAIT: dict[int, dict] = {}  # 💬 admin_id -> {"action": "pay|rollback", "referrer_id": str}
 PAYOUTS_DB_PATH = os.getenv("REFERRAL_PAYOUTS_DB_PATH", "/data/referral_payouts.sqlite3")
 MIN_PAYOUT_CENTS = 2000
 
@@ -599,6 +601,81 @@ def _kb_ref_pager(prefix: str, page: int, total_pages: int, back_cb: str) -> Inl
     return InlineKeyboardMarkup(inline_keyboard=[row1, row2])
 
 
+def _kb_admin_ref_list(prefix: str, page: int, total_pages: int, back_cb: str) -> InlineKeyboardMarkup:
+    last_page = max(0, int(total_pages) - 1)
+
+    if page <= 0:
+        left_cb = "refadm:edge:first"
+    else:
+        left_cb = f"{prefix}:{page - 1}"
+
+    if page >= last_page:
+        right_cb = "refadm:edge:last"
+    else:
+        right_cb = f"{prefix}:{page + 1}"
+
+    row1 = [
+        InlineKeyboardButton(text="⬅️", callback_data=left_cb),
+        InlineKeyboardButton(text=f"{page+1} из {total_pages}", callback_data="refadm:noop"),
+        InlineKeyboardButton(text="➡️", callback_data=right_cb),
+    ]
+    row2 = [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)]
+    return InlineKeyboardMarkup(inline_keyboard=[row1, row2])
+
+
+def _kb_admin_ref_card(referrer_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="➕ Выплата", callback_data=f"refadm:pay:{referrer_id}"),
+            InlineKeyboardButton(text="➖ Откат", callback_data=f"refadm:rollback:{referrer_id}"),
+        ],
+        [InlineKeyboardButton(text="🧾 История выплат", callback_data=f"refadm:history:{referrer_id}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="refadm:list:0")],
+    ])
+
+
+def _admin_ref_list_data() -> list[dict]:
+    d = _load_ref_data_sync()
+    referrers = d.get("referrers", {}) or {}
+    items: list[dict] = []
+    now_ts = _now()
+
+    for ref_id, ref_data in referrers.items():
+        if not isinstance(ref_data, dict):
+            continue
+        accrued_total = _safe_int(ref_data.get("accrued_total_cents"), _safe_int(ref_data.get("earned_cents"), 0))
+        paid_total = _safe_int(ref_data.get("paid_total_cents"), _safe_int(ref_data.get("paid_out_cents"), 0))
+        balance_due = max(0, accrued_total - paid_total)
+        active_cnt = _active_paying_count(ref_data, now_ts)
+        items.append({
+            "referrer_id": str(ref_id),
+            "accrued_total": accrued_total,
+            "paid_total": paid_total,
+            "balance_due": balance_due,
+            "active_cnt": active_cnt,
+        })
+
+    items.sort(key=lambda x: (-(x.get("balance_due", 0)), -(x.get("active_cnt", 0)), x.get("referrer_id", "")))
+    return items
+
+
+def _admin_ref_card_text(referrer_id: str) -> str:
+    d = _load_ref_data_sync()
+    r = d.get("referrers", {}).get(str(referrer_id), {}) or {}
+    accrued_total = _safe_int(r.get("accrued_total_cents"), _safe_int(r.get("earned_cents"), 0))
+    paid_total = _safe_int(r.get("paid_total_cents"), _safe_int(r.get("paid_out_cents"), 0))
+    balance_due = max(0, accrued_total - paid_total)
+    active_cnt = _active_paying_count(r, _now())
+
+    return (
+        f"👤 <b>Referrer {referrer_id}</b>\n\n"
+        f"Начислено всего: <b>{_format_money(accrued_total)} €</b>\n"
+        f"Выплачено всего: <b>{_format_money(paid_total)} €</b>\n"
+        f"К выплате: <b>{_format_money(balance_due)} €</b>\n"
+        f"Активных платящих: <b>{active_cnt}</b>"
+    )
+
+
 _RULE_PAGES: list[str] = [
     "📜 <b>Правила партнёрской программы</b>\n\n"
     "Процент зависит от числа <b>активных платящих</b> рефералов и может как расти, так и снижаться.",
@@ -697,6 +774,141 @@ async def cmd_ref(message: Message):
     if getattr(message, "_ref_proxy_handled", False):
         return
     await render_ref_cabinet(message, message.from_user.id, prefer_edit=False)
+
+async def _render_admin_ref_list(message_or_event, page: int = 0, prefer_edit: bool = False) -> None:
+    items = _admin_ref_list_data()
+    per_page = 12
+    total_items = len(items)
+    total_pages = max(1, (total_items + per_page - 1) // per_page)
+    page = max(0, min(total_pages - 1, page))
+    start = page * per_page
+    slice_items = items[start:start + per_page]
+
+    lines = ["📋 <b>Рефералы (админ)</b>\n"]
+    if not slice_items:
+        lines.append("— список пуст —")
+    else:
+        for i, it in enumerate(slice_items, start=1 + start):
+            rid = it["referrer_id"]
+            bal = _format_money(it["balance_due"])
+            active = it["active_cnt"]
+            lines.append(f"{i}) <b>{rid}</b> | к выплате: <b>{bal} €</b> | активных: {active}")
+
+    kb_rows = []
+    for it in slice_items:
+        rid = it["referrer_id"]
+        kb_rows.append([InlineKeyboardButton(text=f"Открыть {rid}", callback_data=f"refadm:open:{rid}")])
+    kb = _kb_admin_ref_list(prefix="refadm:list", page=page, total_pages=total_pages, back_cb="refadm:close")
+    kb.inline_keyboard = kb_rows + kb.inline_keyboard
+
+    text = "\n".join(lines)
+    if isinstance(message_or_event, CallbackQuery) and prefer_edit:
+        try:
+            await message_or_event.message.edit_text(text, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
+            return
+        except TelegramBadRequest:
+            pass
+    if isinstance(message_or_event, CallbackQuery):
+        await message_or_event.message.answer(text, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
+    else:
+        await message_or_event.answer(text, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
+
+
+@router.callback_query(F.data.startswith("refadm:list:"))
+async def admin_ref_list_cb(callback: CallbackQuery):
+    if callback.from_user.id not in _ADMIN_MENU_USERS:
+        await callback.answer("Команда недоступна.", show_alert=True)
+        return
+    await callback.answer()
+    try:
+        page = int(callback.data.split(":")[-1])
+    except Exception:
+        page = 0
+    await _render_admin_ref_list(callback, page=page, prefer_edit=True)
+
+
+@router.callback_query(F.data == "refadm:close")
+async def admin_ref_close_cb(callback: CallbackQuery):
+    await callback.answer()
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data == "refadm:noop")
+async def admin_ref_noop_cb(callback: CallbackQuery):
+    await callback.answer()
+
+
+@router.callback_query(F.data == "refadm:edge:first")
+async def admin_ref_edge_first_cb(callback: CallbackQuery):
+    await callback.answer("Это первая страница", show_alert=False)
+
+
+@router.callback_query(F.data == "refadm:edge:last")
+async def admin_ref_edge_last_cb(callback: CallbackQuery):
+    await callback.answer("Это последняя страница", show_alert=False)
+
+
+@router.callback_query(F.data.startswith("refadm:open:"))
+async def admin_ref_open_cb(callback: CallbackQuery):
+    if callback.from_user.id not in _ADMIN_MENU_USERS:
+        await callback.answer("Команда недоступна.", show_alert=True)
+        return
+    await callback.answer()
+    referrer_id = callback.data.split(":")[-1]
+    txt = _admin_ref_card_text(referrer_id)
+    kb = _kb_admin_ref_card(referrer_id)
+    try:
+        await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
+    except TelegramBadRequest:
+        await callback.message.answer(txt, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
+
+
+@router.callback_query(F.data.startswith("refadm:history:"))
+async def admin_ref_history_cb(callback: CallbackQuery):
+    if callback.from_user.id not in _ADMIN_MENU_USERS:
+        await callback.answer("Команда недоступна.", show_alert=True)
+        return
+    await callback.answer()
+    referrer_id = callback.data.split(":")[-1]
+    payouts = get_payouts(referrer_id=referrer_id, limit=10)
+    lines = [f"💸 <b>История выплат: {referrer_id}</b>\n"]
+    if not payouts:
+        lines.append("— выплат пока не было —")
+    else:
+        for p in payouts:
+            dt = time.strftime("%Y-%m-%d", time.gmtime(int(p["created_at"])))
+            note = f" — {p['note']}" if p.get("note") else ""
+            lines.append(f"• {dt}: <b>{_format_money(p['amount_cents'])} €</b>{note}")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data=f"refadm:open:{referrer_id}")]])
+    try:
+        await callback.message.edit_text("\n".join(lines), reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
+    except TelegramBadRequest:
+        await callback.message.answer("\n".join(lines), reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
+
+
+@router.callback_query(F.data.startswith("refadm:pay:"))
+async def admin_ref_pay_cb(callback: CallbackQuery):
+    if callback.from_user.id not in _ADMIN_MENU_USERS:
+        await callback.answer("Команда недоступна.", show_alert=True)
+        return
+    await callback.answer()
+    referrer_id = callback.data.split(":")[-1]
+    _ADMIN_MENU_WAIT[callback.from_user.id] = {"action": "pay", "referrer_id": referrer_id}
+    await callback.message.answer("Введи сумму выплаты: например 12.50 или cents:1234")
+
+
+@router.callback_query(F.data.startswith("refadm:rollback:"))
+async def admin_ref_rollback_cb(callback: CallbackQuery):
+    if callback.from_user.id not in _ADMIN_MENU_USERS:
+        await callback.answer("Команда недоступна.", show_alert=True)
+        return
+    await callback.answer()
+    referrer_id = callback.data.split(":")[-1]
+    _ADMIN_MENU_WAIT[callback.from_user.id] = {"action": "rollback", "referrer_id": referrer_id}
+    await callback.message.answer("Введи сумму отката выплаты: например 12.50 или cents:1234")
 
 
 @router.callback_query(F.data == "ref:home")
@@ -958,8 +1170,57 @@ async def _apply_owner_payout(message: Message, referrer_id: str, amount_cents: 
     )
 
 
+async def _apply_owner_payout_rollback(message: Message, referrer_id: str, amount_cents: int, note: str = "") -> None:
+    async with _REF_LOCK:
+        d = _load_ref_data_sync()
+        r = _get_or_create_referrer(d, referrer_id)
+        accrued_total = _safe_int(r.get("accrued_total_cents"), _safe_int(r.get("earned_cents"), 0))
+        paid_total = _safe_int(r.get("paid_total_cents"), _safe_int(r.get("paid_out_cents"), 0))
+        if amount_cents > paid_total:
+            await message.answer(f"Ошибка. Сумма больше выплачено. Выплачено = {_format_money(paid_total)} €")
+            return
+
+        r["paid_total_cents"] = max(0, paid_total - amount_cents)
+        r["paid_out_cents"] = max(0, _safe_int(r.get("paid_out_cents")) - amount_cents)
+        _save_ref_data_sync(d)
+
+    add_payout(referrer_id=referrer_id, amount_cents=-int(amount_cents), admin_id=message.from_user.id, note=note)
+
+    new_paid_total = max(0, paid_total - amount_cents)
+    new_balance_due = max(0, accrued_total - new_paid_total)
+    await message.answer(
+        "✅ Откат выплаты зафиксирован.\n"
+        f"Начислено: {_format_money(accrued_total)} €\n"
+        f"Выплачено: {_format_money(new_paid_total)} €\n"
+        f"К выплате: {_format_money(new_balance_due)} €"
+    )
+
+
 @router.message(F.text)
 async def cmd_payout_input(message: Message):
+    # 💬 админ-меню ожидание суммы (секретная команда)
+    if _ADMIN_MENU_WAIT.get(message.from_user.id):
+        payload = _ADMIN_MENU_WAIT.pop(message.from_user.id, None) or {}
+        raw = (message.text or "").strip()
+        amount_cents = _parse_amount_to_cents(raw)
+        if amount_cents <= 0:
+            await message.answer("Сумма должна быть > 0. Используйте 12.50 или cents:1234")
+            return
+        action = payload.get("action")
+        referrer_id = str(payload.get("referrer_id") or "")
+        if not referrer_id.isdigit():
+            await message.answer("Ошибка. referrer_id неверный.")
+            return
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        if action == "pay":
+            await _apply_owner_payout(message, referrer_id=referrer_id, amount_cents=amount_cents)
+        elif action == "rollback":
+            await _apply_owner_payout_rollback(message, referrer_id=referrer_id, amount_cents=amount_cents)
+        return
+
     # 💬 Ловим только если владелец в режиме ожидания ввода
     if OWNER_USER_ID <= 0 or message.from_user.id != OWNER_USER_ID:
         return
@@ -999,16 +1260,21 @@ async def cmd_payout_input(message: Message):
 
 @router.message(Command("payouts"))
 async def cmd_payouts(message: Message):
-    if OWNER_USER_ID <= 0 or message.from_user.id != OWNER_USER_ID:
-        await message.answer("Команда недоступна.")
+    raw = (message.text or "").strip()
+    parts = raw.split()
+
+    # Секретная команда без параметров: открываем админ-меню
+    if len(parts) == 1:
+        _ADMIN_MENU_USERS.add(message.from_user.id)
+        await _render_admin_ref_list(message, page=0, prefer_edit=False)
         return
-    parts = (message.text or "").strip().split()
-    if len(parts) < 2 or not parts[1].isdigit():
+
+    referrer_id = parts[1] if len(parts) >= 2 else ""
+    if not str(referrer_id).isdigit():
         await message.answer("Формат: /payouts <referrer_user_id> [limit]")
         return
-    referrer_id = str(int(parts[1]))
     limit = _safe_int(parts[2], 10) if len(parts) >= 3 else 10
-    payouts = get_payouts(referrer_id=referrer_id, limit=limit)
+    payouts = get_payouts(referrer_id=str(int(referrer_id)), limit=limit)
     lines = [f"💸 Выплаты referrer {referrer_id}:"]
     if not payouts:
         lines.append("— нет записей")
