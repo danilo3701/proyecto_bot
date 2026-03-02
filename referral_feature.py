@@ -47,6 +47,7 @@ except Exception:
 _PAYOUT_WAIT: dict[int, bool] = {}  # 💬 owner_id -> ждём ввод "user_id amount"
 _ADMIN_MENU_USERS: set[int] = set()  # 💬 пользователи, открывшие секретное админ-меню
 _ADMIN_MENU_WAIT: dict[int, dict] = {}  # 💬 admin_id -> {"action": "pay|rollback", "referrer_id": str}
+_REF_MENU_USERS: set[int] = set()  # 💬 пользователи, открывшие /ref меню (гейт для /payouts)
 PAYOUTS_DB_PATH = os.getenv("REFERRAL_PAYOUTS_DB_PATH", "/data/referral_payouts.sqlite3")
 MIN_PAYOUT_CENTS = 2000
 
@@ -759,6 +760,7 @@ async def render_ref_cabinet(message_or_event, user_id: int, prefer_edit: bool =
 @router.callback_query(F.data == "settings:referrals")
 async def referrals_open_cb(callback: CallbackQuery):
     await callback.answer()
+    _REF_MENU_USERS.add(callback.from_user.id)
     await render_ref_cabinet(callback, callback.from_user.id, prefer_edit=True)
 
 # -----------------------------------------------------------------------------
@@ -773,6 +775,7 @@ async def referrals_open_cb(callback: CallbackQuery):
 async def cmd_ref(message: Message):
     if getattr(message, "_ref_proxy_handled", False):
         return
+    _REF_MENU_USERS.add(message.from_user.id)
     await render_ref_cabinet(message, message.from_user.id, prefer_edit=False)
 
 async def _render_admin_ref_list(message_or_event, page: int = 0, prefer_edit: bool = False) -> None:
@@ -1267,6 +1270,9 @@ async def cmd_payout_input(message: Message):
 async def cmd_payouts(message: Message):
     raw = (message.text or "").strip()
     parts = raw.split()
+    if message.from_user.id not in _REF_MENU_USERS:
+        await message.answer("Сначала откройте /ref и попробуйте снова.")
+        return
 
     # Секретная команда без параметров: открываем админ-меню
     if len(parts) == 1:
