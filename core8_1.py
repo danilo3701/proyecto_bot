@@ -4324,12 +4324,12 @@ def _premium_status_line_for_paywall(status_info: dict) -> str:
     code = str(status_info.get("code") or "inactive")
     until_text = str(status_info.get("active_until_text") or "—")
     if code == "active":
-        return f"Статус: ✅ ACTIVE до {until_text}"
+        return f"Статус: ✅ Premium активен до: {until_text}"
     if code == "unpaid":
-        return "Статус: ⚠️ UNPAID — оплата не найдена/не прошла"
+        return "Статус: ⚠️ Оплата не найдена/не прошла. Premium пока недоступен."
     if code == "canceled":
-        return "Статус: 🛑 CANCELED — подписка отменена"
-    return "Статус: ❌ INACTIVE — подписка не активна"
+        return "Статус: 🛑 Подписка отменена. Premium недоступен."
+    return "Статус: ❌ Premium не активен. Оформи подписку."
 
 
 def _premium_status_temp_text(status_info: dict) -> str:
@@ -4341,7 +4341,7 @@ def _premium_status_temp_text(status_info: dict) -> str:
         return "⚠️ Оплата не найдена/не прошла. Premium пока недоступен."
     if code == "canceled":
         return "🛑 Подписка отменена. Premium недоступен."
-    return "❌ Подписка не активна. Оформи Premium или напиши админу."
+    return "❌ Premium не активен. Оформи подписку."
 
 
 @dp.callback_query(F.data == "premium:entry_topics")
