@@ -214,6 +214,44 @@ class TestReferralPremiumSimulation(unittest.TestCase):
         self.assertEqual(accrued_before, accrued_after)
         self.assertGreaterEqual(balance_due, 0)
 
+    def test_h10_same_invoice_id_is_deduped_per_provider(self):
+        u10 = 2310
+        self.sim.simulate_start_with_ref(u10, self.A)
+        exp = self.sim.now_ts + 30 * 86400
+
+        self.sim._run(
+            rf.referrals_apply_invoice_paid(
+                tg_user_id=u10,
+                invoice_obj={"id": "same_inv", "amount_paid": 1000, "currency": "EUR"},
+                active_until=exp,
+                payment_provider="stripe",
+            )
+        )
+        first = int(_get_ref_info(self.A).get("accrued_total_cents", 0))
+
+        self.sim._run(
+            rf.referrals_apply_invoice_paid(
+                tg_user_id=u10,
+                invoice_obj={"id": "same_inv", "amount_paid": 1000, "currency": "XTR"},
+                active_until=exp,
+                payment_provider="stars",
+            )
+        )
+        second = int(_get_ref_info(self.A).get("accrued_total_cents", 0))
+
+        self.sim._run(
+            rf.referrals_apply_invoice_paid(
+                tg_user_id=u10,
+                invoice_obj={"id": "same_inv", "amount_paid": 1000, "currency": "EUR"},
+                active_until=exp,
+                payment_provider="stripe",
+            )
+        )
+        third = int(_get_ref_info(self.A).get("accrued_total_cents", 0))
+
+        self.assertGreater(second, first)
+        self.assertEqual(second, third)
+
 
 if __name__ == "__main__":
     unittest.main()
