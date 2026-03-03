@@ -763,14 +763,6 @@ async def referrals_open_cb(callback: CallbackQuery):
     _REF_MENU_USERS.add(callback.from_user.id)
     await render_ref_cabinet(callback, callback.from_user.id, prefer_edit=True)
 
-# -----------------------------------------------------------------------------
-# UI handlers
-# -----------------------------------------------------------------------------
-@router.callback_query(F.data == "settings:referrals")
-async def referrals_open_cb(callback: CallbackQuery):
-    await callback.answer()
-    await render_ref_cabinet(callback, callback.from_user.id, prefer_edit=True)
-
 @router.message(Command("ref"))
 async def cmd_ref(message: Message):
     if getattr(message, "_ref_proxy_handled", False):
