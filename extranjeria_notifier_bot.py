@@ -1852,6 +1852,7 @@ async def admin_stats(message: Message):
     if alerts_skipped:
         parts = [f"<i>• {k}:</i> <b>{v}</b>" for k, v in sorted(alerts_skipped.items())]
         skipped_lines = "\n".join(parts)
+    skipped_block = f"<b>??? Alerts skipped</b>\n{skipped_lines}" if skipped_lines else ""
 
     text = (
         "<b>📊 Stats</b>\n\n"
@@ -1862,7 +1863,7 @@ async def admin_stats(message: Message):
         f"<i>• Активні (унікальні):</i> <b>{active_users}</b>\n"
         f"<i>• Alerts attempted:</i> <b>{alerts_attempted}</b>\n"
         f"<i>• Alerts sent:</i> <b>{alerts_sent}</b>\n"
-        f"{('<b>• Alerts skipped</b>\\n' + skipped_lines) if skipped_lines else ''}\n\n"
+        f"{skipped_block}\n\n"
         "<b>Зараз у базі</b>\n"
         f"<i>• Всього користувачів:</i> <b>{total_users}</b>\n"
         f"<i>• Увімкнули сповіщення:</i> <b>{enabled_total}</b>\n\n"

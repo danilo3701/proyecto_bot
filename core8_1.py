@@ -6933,164 +6933,21 @@ async def _mywords_temp_note(
     except Exception:
         pass
 
-<<<<<<< HEAD
-async def _mywords_cleanup_active_learning_ui(message: Message, state: FSMContext):
-    # 💬 удаляем активные quiz/text-сообщения, чтобы Stop не засорял чат
-    data = await state.get_data()
-    chat_id = message.chat.id
-
-    poll_msg_id = data.get("mywords_current_poll_msg_id")
-    if poll_msg_id:
-        try:
-            await bot.stop_poll(chat_id=chat_id, message_id=int(poll_msg_id))
-        except Exception:
-            pass
-        try:
-            await bot.delete_message(chat_id=chat_id, message_id=int(poll_msg_id))
-        except Exception:
-            pass
-
-    prompt_id = data.get("mywords_last_prompt_id")
-    if prompt_id:
-        try:
-            await bot.delete_message(chat_id=chat_id, message_id=int(prompt_id))
-        except Exception:
-            pass
-
-    await state.update_data(
-        mywords_current_poll_id=None,
-        mywords_current_poll_msg_id=None,
-        mywords_current_correct_id=None,
-        mywords_current_word_id=None,
-        mywords_last_prompt_id=None,
-        mywords_quiz_queue=[],
-        mywords_text_queue=[],
-    )
-
-async def _mywords_reset_anchor_message(message: Message, state: FSMContext):
-    # 💬 после Stop лучше показывать экран внизу чата: удаляем старый "якорь" и создаём новый
-    data = await state.get_data()
-    ui_msg_id = data.get("mywords_ui_msg_id")
-    if ui_msg_id:
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=int(ui_msg_id))
-        except Exception:
-            pass
-    await state.update_data(mywords_ui_msg_id=None)
-
-
 async def _mywords_show_stop_hint_once(message: Message, state: FSMContext):
-    # 💬 отдельное сообщение с кнопкой Stop без автоудаления: клавиша не должна пропадать
-=======
-async def _mywords_show_stop_hint_once(message: Message, state: FSMContext):
-    # 💬 отдельное сообщение с кнопкой Stop (без автоудаления), чтобы кнопка не пропадала в quiz
->>>>>>> 040ba8e (chore: ignore cache and temp files)
+    # ???? ?????????????????? ?????????????????? ?? ?????????????? Stop ?????? ????????????????????????: ???????????? ???? ???????????? ??????????????????
     data = await state.get_data()
     if data.get("mywords_stop_hint_msg_id"):
         return
 
     try:
-        hint = await message.answer("⏹ Нажми «Стоп», чтобы выйти в меню.", reply_markup=build_stop_kb())
-        await state.update_data(mywords_stop_hint_msg_id=hint.message_id)
-    except Exception:
-        pass
-
-<<<<<<< HEAD
-
-async def _mywords_drop_stop_hint(chat_id: int, state: FSMContext):
-    # 💬 удаляем служебный hint с кнопкой Stop
-=======
-async def _mywords_drop_stop_hint(chat_id: int, state: FSMContext):
-    # 💬 удаляем служебное сообщение с кнопкой Stop
->>>>>>> 040ba8e (chore: ignore cache and temp files)
-    data = await state.get_data()
-    hint_id = data.get("mywords_stop_hint_msg_id")
-    if hint_id:
-        try:
-            await bot.delete_message(chat_id=chat_id, message_id=int(hint_id))
-        except Exception:
-            pass
-<<<<<<< HEAD
-
-    await state.update_data(mywords_stop_hint_msg_id=None)
-
-
-async def _mywords_cleanup_active_learning_ui(message: Message, state: FSMContext):
-    # 💬 при Stop очищаем текущие quiz/text сообщения и маркеры сессии
-=======
-    await state.update_data(mywords_stop_hint_msg_id=None)
-
-async def _mywords_cleanup_active_learning_ui(message: Message, state: FSMContext):
-    # 💬 очищаем активный quiz/text и служебные сообщения при выходе
->>>>>>> 040ba8e (chore: ignore cache and temp files)
-    data = await state.get_data()
-    chat_id = message.chat.id
-
-    poll_msg_id = data.get("mywords_current_poll_msg_id")
-    if poll_msg_id:
-        try:
-            await bot.stop_poll(chat_id=chat_id, message_id=int(poll_msg_id))
-        except Exception:
-            pass
-        try:
-            await bot.delete_message(chat_id=chat_id, message_id=int(poll_msg_id))
-        except Exception:
-            pass
-
-    prompt_id = data.get("mywords_last_prompt_id")
-    if prompt_id:
-        try:
-            await bot.delete_message(chat_id=chat_id, message_id=int(prompt_id))
-        except Exception:
-            pass
-
-    await _mywords_drop_stop_hint(chat_id, state)
-
-    await state.update_data(
-        mywords_current_poll_id=None,
-        mywords_current_poll_msg_id=None,
-        mywords_current_correct_id=None,
-        mywords_current_word_id=None,
-        mywords_last_prompt_id=None,
-        mywords_quiz_queue=[],
-        mywords_text_queue=[],
-    )
-
-<<<<<<< HEAD
-
-async def _mywords_reset_anchor_message(message: Message, state: FSMContext):
-    # 💬 после Stop создаём новый anchor ниже в чате, старый удаляем
-=======
-async def _mywords_reset_anchor_message(message: Message, state: FSMContext):
-    # 💬 после Stop показываем свежий экран внизу чата
->>>>>>> 040ba8e (chore: ignore cache and temp files)
-    data = await state.get_data()
-    ui_msg_id = data.get("mywords_ui_msg_id")
-    if ui_msg_id:
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=int(ui_msg_id))
-        except Exception:
-            pass
-<<<<<<< HEAD
-
-    await state.update_data(mywords_ui_msg_id=None)
-
-
-async def _mywords_show_stop_hint_once(message: Message, state: FSMContext):
-    # 💬 отдельное сообщение с кнопкой Stop без автоудаления: клавиша не должна пропадать
-    data = await state.get_data()
-    if data.get("mywords_stop_hint_msg_id"):
-        return
-
-    try:
-        hint = await message.answer("⏹ Нажми «Стоп», чтобы выйти в меню.", reply_markup=build_stop_kb())
+        hint = await message.answer("??? ?????????? ????????????, ?????????? ?????????? ?? ????????.", reply_markup=build_stop_kb())
         await state.update_data(mywords_stop_hint_msg_id=hint.message_id)
     except Exception:
         pass
 
 
 async def _mywords_drop_stop_hint(chat_id: int, state: FSMContext):
-    # 💬 удаляем служебный hint с кнопкой Stop
+    # ???? ?????????????? ?????????????????? hint ?? ?????????????? Stop
     data = await state.get_data()
     hint_id = data.get("mywords_stop_hint_msg_id")
     if hint_id:
@@ -7103,7 +6960,7 @@ async def _mywords_drop_stop_hint(chat_id: int, state: FSMContext):
 
 
 async def _mywords_cleanup_active_learning_ui(message: Message, state: FSMContext):
-    # 💬 при Stop очищаем текущие quiz/text сообщения и маркеры сессии
+    # ???? ?????? Stop ?????????????? ?????????????? quiz/text ?????????????????? ?? ?????????????? ????????????
     data = await state.get_data()
     chat_id = message.chat.id
 
@@ -7139,84 +6996,7 @@ async def _mywords_cleanup_active_learning_ui(message: Message, state: FSMContex
 
 
 async def _mywords_reset_anchor_message(message: Message, state: FSMContext):
-    # 💬 после Stop создаём новый anchor ниже в чате, старый удаляем
-    data = await state.get_data()
-    ui_msg_id = data.get("mywords_ui_msg_id")
-    if ui_msg_id:
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=int(ui_msg_id))
-        except Exception:
-            pass
-
-=======
->>>>>>> 040ba8e (chore: ignore cache and temp files)
-    await state.update_data(mywords_ui_msg_id=None)
-
-
-async def _mywords_show_stop_hint_once(message: Message, state: FSMContext):
-    # 💬 отдельное сообщение с кнопкой Stop без автоудаления: клавиша не должна пропадать
-    data = await state.get_data()
-    if data.get("mywords_stop_hint_msg_id"):
-        return
-
-    try:
-        hint = await message.answer("⏹ Нажми «Стоп», чтобы выйти в меню.", reply_markup=build_stop_kb())
-        await state.update_data(mywords_stop_hint_msg_id=hint.message_id)
-    except Exception:
-        pass
-
-
-async def _mywords_drop_stop_hint(chat_id: int, state: FSMContext):
-    # 💬 удаляем служебный hint с кнопкой Stop
-    data = await state.get_data()
-    hint_id = data.get("mywords_stop_hint_msg_id")
-    if hint_id:
-        try:
-            await bot.delete_message(chat_id=chat_id, message_id=int(hint_id))
-        except Exception:
-            pass
-
-    await state.update_data(mywords_stop_hint_msg_id=None)
-
-
-async def _mywords_cleanup_active_learning_ui(message: Message, state: FSMContext):
-    # 💬 при Stop очищаем текущие quiz/text сообщения и маркеры сессии
-    data = await state.get_data()
-    chat_id = message.chat.id
-
-    poll_msg_id = data.get("mywords_current_poll_msg_id")
-    if poll_msg_id:
-        try:
-            await bot.stop_poll(chat_id=chat_id, message_id=int(poll_msg_id))
-        except Exception:
-            pass
-        try:
-            await bot.delete_message(chat_id=chat_id, message_id=int(poll_msg_id))
-        except Exception:
-            pass
-
-    prompt_id = data.get("mywords_last_prompt_id")
-    if prompt_id:
-        try:
-            await bot.delete_message(chat_id=chat_id, message_id=int(prompt_id))
-        except Exception:
-            pass
-
-    await _mywords_drop_stop_hint(chat_id, state)
-
-    await state.update_data(
-        mywords_current_poll_id=None,
-        mywords_current_poll_msg_id=None,
-        mywords_current_correct_id=None,
-        mywords_current_word_id=None,
-        mywords_last_prompt_id=None,
-        mywords_quiz_queue=[],
-        mywords_text_queue=[],
-    )
-
-
-async def _mywords_reset_anchor_message(message: Message, state: FSMContext):
-    # 💬 после Stop создаём новый anchor ниже в чате, старый удаляем
+    # ???? ?????????? Stop ?????????????? ?????????? anchor ???????? ?? ????????, ???????????? ??????????????
     data = await state.get_data()
     ui_msg_id = data.get("mywords_ui_msg_id")
     if ui_msg_id:
@@ -7226,7 +7006,6 @@ async def _mywords_reset_anchor_message(message: Message, state: FSMContext):
             pass
 
     await state.update_data(mywords_ui_msg_id=None)
-
 
 async def mywords_menu(message: Message, state: FSMContext):
     # 💬 показываем меню «Мои слова» (всегда через редактирование "якоря")
@@ -7972,11 +7751,7 @@ async def mywords_stop_any(message: Message, state: FSMContext):
         "Ок, стоп.",
         delay_sec=1,
         reply_markup=ReplyKeyboardRemove()
-<<<<<<< HEAD
     )  # 💬 короткое подтверждение + скрываем клавиатуру
-=======
-    )  # 💬 короткое подтверждение и скрытие ReplyKeyboard
->>>>>>> 040ba8e (chore: ignore cache and temp files)
     return await mywords_menu(message, state)
 
 
