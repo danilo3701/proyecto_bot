@@ -3363,28 +3363,28 @@ async def start_handler(message: Message, state: FSMContext):
 
     # 💬 Главное меню теперь ИНЛАЙН — без ReplyKeyboard (ничего не «висит» внизу)
     inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
+            [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn", style="success")],
     
             [
-                InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
-                InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
+                InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL, style="primary"),
+                InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords", style="primary"),
             ],
     
-            [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
+            [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts", style="primary")],
     
-            [InlineKeyboardButton(text="🧠 Грамматика", callback_data="menu:grammar")],  # ← НОВАЯ СТРОКА
+            [InlineKeyboardButton(text="🧠 Грамматика", callback_data="menu:grammar", style="primary")],  # ← НОВАЯ СТРОКА
     
             [
-                InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
-                InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
+                InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle", style="primary"),
+                InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses", style="primary"),
             ],
     
             [
-                InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
-                InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats"),
+                InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating", style="primary"),
+                InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats", style="primary"),
             ],
     
-            [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")],
+            [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings", style="danger")],
         ])  # 💬 выровненное главное меню (1,2,1,1,2,2,1)  ← ОБНОВИТЬ КОММЕНТАРИЙ
 
 
@@ -4680,28 +4680,28 @@ async def settings_back_cb(callback: CallbackQuery, state: FSMContext):
     )  # 💬 чистим режим ввода настроек
 
     inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
+            [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn", style="success")],
     
             [
-                InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
-                InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
+                InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL, style="primary"),
+                InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords", style="primary"),
             ],
     
-            [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
+            [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts", style="primary")],
     
-            [InlineKeyboardButton(text="🧠 Грамматика", callback_data="menu:grammar")],  # ← НОВАЯ СТРОКА
+            [InlineKeyboardButton(text="🧠 Грамматика", callback_data="menu:grammar", style="primary")],  # ← НОВАЯ СТРОКА
     
             [
-                InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
-                InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
+                InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle", style="primary"),
+                InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses", style="primary"),
             ],
     
             [
-                InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
-                InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats"),
+                InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating", style="primary"),
+                InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats", style="primary"),
             ],
     
-            [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")],
+            [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings", style="danger")],
         ])  # 💬 выровненное главное меню (1,2,1,1,2,2,1)  ← ОБНОВИТЬ КОММЕНТАРИЙ
 
     menu_text = random.choice(menu_study_phrases) if menu_study_phrases else "Выбирай"  # 💬 рандомная фраза главного меню
@@ -6761,28 +6761,28 @@ def _mywords_rename_category(data: dict, user_id: str, old_name: str, new_name: 
 async def mywords_show_main_menu(message: Message, state: FSMContext):
     # 💬 возвращаемся в главное инлайн-меню без /start
     inline_kb_main = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn")],
+            [InlineKeyboardButton(text="📚 УЧИТЬСЯ", callback_data="menu:learn", style="success")],
     
             [
-                InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL),
-                InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords"),
+                InlineKeyboardButton(text="📎 Материалы", url=MATERIALS_POST_URL, style="primary"),
+                InlineKeyboardButton(text="Мои слова 🧩", callback_data="menu:mywords", style="primary"),
             ],
     
-            [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts")],
+            [InlineKeyboardButton(text="🎧 Подкасты", callback_data="menu:podcasts", style="primary")],
     
-            [InlineKeyboardButton(text="🧠 Грамматика", callback_data="menu:grammar")],  # ← НОВАЯ СТРОКА
+            [InlineKeyboardButton(text="🧠 Грамматика", callback_data="menu:grammar", style="primary")],  # ← НОВАЯ СТРОКА
     
             [
-                InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle"),
-                InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses"),
+                InlineKeyboardButton(text="⚔️ Битва", callback_data="menu:battle", style="primary"),
+                InlineKeyboardButton(text="Бонусы 🎁", callback_data="menu:bonuses", style="primary"),
             ],
     
             [
-                InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating"),
-                InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats"),
+                InlineKeyboardButton(text="🏆 Рейтинг", callback_data="menu:rating", style="primary"),
+                InlineKeyboardButton(text="Статистика 📊", callback_data="menu:stats", style="primary"),
             ],
     
-            [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings")],
+            [InlineKeyboardButton(text="Настройки ⚙️", callback_data="menu:settings", style="danger")],
         ])  # 💬 выровненное главное меню (1,2,1,1,2,2,1)  ← ОБНОВИТЬ КОММЕНТАРИЙ
     
 
