@@ -32,7 +32,11 @@ class TestReferralAdminPayouts(unittest.TestCase):
         rf.REFERRALS_BACKUP_PATH = str(base / "referrals_data.backup.json")
         rf.PAYOUTS_DB_PATH = str(base / "referral_payouts.sqlite3")
         rf.set_now_override(1_700_000_000)
-        self.admin_id = 9001
+        self.user_id = 9001
+        rf._ADMIN_MENU_USERS.clear()
+        rf._ADMIN_MENU_WAIT.clear()
+        rf._PAYOUT_WAIT.clear()
+        rf._REF_MENU_USERS.clear()
 
     def tearDown(self):
         rf.set_now_override(None)
@@ -50,12 +54,24 @@ class TestReferralAdminPayouts(unittest.TestCase):
         data["referrers"] = referrers
         rf._save_ref_data_sync(data)
 
-    def test_admin_menu_empty_list_shows_hint(self):
-        msg = DummyMessage(self.admin_id, text="/payouts")
+    def test_hidden_command_opens_admin_menu_for_any_user(self):
+        msg = DummyMessage(self.user_id, text="/payouts")
         asyncio.run(rf.cmd_payouts(msg))
+
+        self.assertTrue(msg.answers)
+        self.assertIn(self.user_id, rf._ADMIN_MENU_USERS)
+
+        text = msg.answers[-1][0]
+        self.assertIn("\u0420\u0435\u0444\u0435\u0440\u0430\u043b\u043e\u0432 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442", text)
+
+    def test_hidden_command_with_referrer_id_works_without_ref_gate(self):
+        msg = DummyMessage(self.user_id, text="/payouts 123")
+        asyncio.run(rf.cmd_payouts(msg))
+
         self.assertTrue(msg.answers)
         text = msg.answers[-1][0]
-        self.assertIn("Рефералов пока нет", text)
+        self.assertIn("\U0001f4b8 \u0412\u044b\u043f\u043b\u0430\u0442\u044b referrer 123", text)
+        self.assertIn("\u2014 \u043d\u0435\u0442 \u0437\u0430\u043f\u0438\u0441\u0435\u0439", text)
 
     def test_admin_kb_list_pager_buttons(self):
         kb = rf._kb_admin_ref_list(prefix="refadm:list", page=0, total_pages=1, back_cb="refadm:close")
@@ -76,7 +92,7 @@ class TestReferralAdminPayouts(unittest.TestCase):
 
     def test_payout_apply_and_rollback_updates_totals(self):
         self._save_referrer("100", accrued_total=10000, paid_total=2000)
-        msg = DummyMessage(self.admin_id)
+        msg = DummyMessage(self.user_id)
 
         asyncio.run(rf._apply_owner_payout(msg, referrer_id="100", amount_cents=3000))
         data = rf._load_ref_data_sync()
@@ -97,14 +113,14 @@ class TestReferralAdminPayouts(unittest.TestCase):
 
     def test_payout_rejects_over_balance(self):
         self._save_referrer("200", accrued_total=1000, paid_total=0)
-        msg = DummyMessage(self.admin_id)
+        msg = DummyMessage(self.user_id)
 
         asyncio.run(rf._apply_owner_payout(msg, referrer_id="200", amount_cents=2000))
         data = rf._load_ref_data_sync()
         ref = data.get("referrers", {}).get("200", {})
         self.assertEqual(int(ref.get("paid_total_cents", 0)), 0)
         self.assertTrue(msg.answers)
-        self.assertIn("Сумма больше баланса", msg.answers[-1][0])
+        self.assertIn("\u0421\u0443\u043c\u043c\u0430 \u0431\u043e\u043b\u044c\u0448\u0435 \u0431\u0430\u043b\u0430\u043d\u0441\u0430", msg.answers[-1][0])
 
 
 if __name__ == "__main__":
