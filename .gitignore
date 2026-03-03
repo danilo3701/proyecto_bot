@@ -16,3 +16,7 @@ __pycache__/
 .venv/
 venv/
 env/
+
+# Temp folders (fix Permission denied warnings)
+.tmp/
+tmp/
