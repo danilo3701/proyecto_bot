@@ -15,8 +15,12 @@ __pycache__/
 # Virtual env
 .venv/
 venv/
+<<<<<<< HEAD
 env/
 
 # Temp folders (fix Permission denied warnings)
 .tmp/
 tmp/
+=======
+env/
+>>>>>>> e6a277b (chore: ignore python cache and venv)

@@ -6658,7 +6658,12 @@ def build_mywords_menu_kb() -> InlineKeyboardMarkup:
 
 def build_stop_kb() -> ReplyKeyboardMarkup:
     # 💬 кнопка выхода во время обучения
-    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⏹ Стоп")]], resize_keyboard=True)
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="⏹ Стоп")]],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        is_persistent=True,
+    )
 
 def build_offer_continue_kb() -> InlineKeyboardMarkup:
     # 💬 offer_continue как в vocab: продолжить или домой
