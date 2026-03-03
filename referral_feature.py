@@ -729,12 +729,10 @@ async def render_ref_cabinet(message_or_event, user_id: int, prefer_edit: bool =
         r = _get_referrer_if_exists(d, referrer_id)
 
     if not r:
-        txt = "Нет партнёрского доступа. Напишите администратору."
-        if isinstance(message_or_event, CallbackQuery):
-            await message_or_event.message.answer(txt)
-        else:
-            await message_or_event.answer(txt)
-        return
+        async with _REF_LOCK:
+            d = _load_ref_data_sync()
+            r = _get_or_create_referrer(d, referrer_id)
+            _save_ref_data_sync(d)
 
     event_bot = getattr(message_or_event, "bot", None)
     if event_bot is None and isinstance(message_or_event, CallbackQuery):
@@ -1196,7 +1194,7 @@ async def _apply_owner_payout_rollback(message: Message, referrer_id: str, amoun
     )
 
 
-@router.message(F.text)
+@router.message(F.text & ~F.text.startswith("/"))
 async def cmd_payout_input(message: Message):
     # 💬 админ-меню ожидание суммы (секретная команда)
     if _ADMIN_MENU_WAIT.get(message.from_user.id):
