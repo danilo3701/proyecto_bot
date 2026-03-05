@@ -616,6 +616,14 @@ class LoggingMiddleware(BaseMiddleware):
         try:
             return await handler(event, data)
         except Exception as err:
+            if isinstance(err, TelegramForbiddenError):
+                logging.warning(
+                    "Suppressed TelegramForbiddenError (bot blocked by user): event=%s user_id=%s",
+                    event.__class__.__name__,
+                    getattr(getattr(event, "from_user", None), "id", None),
+                )
+                return
+
             # 💬 берём последние два имени из handler_history
             curr = handler_history[-1] if handler_history else "unknown"
             prev = handler_history[-2] if len(handler_history) >= 2 else "none"
@@ -662,7 +670,7 @@ class LoggingMiddleware(BaseMiddleware):
                     admin_text,
                     request_timeout=120
                 )  # 💬 увеличиваем таймаут, чтобы не падать на сетевых лагов Telegram
-            except (TelegramBadRequest, TelegramNetworkError, asyncio.TimeoutError):
+            except (TelegramBadRequest, TelegramNetworkError, TelegramForbiddenError, asyncio.TimeoutError):
                 pass  # 💬 если Telegram тупит/таймаутит = не роняем бота из-за репорта админу
 
 
