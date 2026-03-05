@@ -6675,6 +6675,47 @@ def mywords_build_categories_kb(categories: list, cb_prefix: str, back_cb: str) 
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+async def _parse_mywords_callback_index(
+    callback: CallbackQuery,
+    state: FSMContext,
+    categories: list,
+    *,
+    fallback_to_categories_mode: str | None = None,
+) -> int | None:
+    # 💬 безопасно парсим индекс из callback_data и защищаемся от "устаревших" кнопок
+    raw_data = str(callback.data or "")
+    raw_idx = raw_data.rsplit(":", 1)[-1].strip()
+
+    idx: int | None = None
+    try:
+        idx = int(raw_idx)
+    except Exception:
+        idx = None
+
+    if idx is not None and 0 <= idx < len(categories):
+        return idx
+
+    logging.warning(
+        "mywords stale callback: data=%r categories_count=%s user_id=%s",
+        raw_data,
+        len(categories),
+        getattr(callback.from_user, "id", None),
+    )
+
+    if callback.message:
+        await _mywords_temp_note(
+            callback.message,
+            "Список категорий обновился. Открываю актуальный экран.",
+            delay_sec=3,
+        )
+
+        if fallback_to_categories_mode in {"new", "repeat"}:
+            await mywords_show_categories(callback.message, state, mode=fallback_to_categories_mode)
+        else:
+            await mywords_menu(callback.message, state)
+
+    return None
+
 async def mywords_get_user_block(user_id: str) -> tuple[dict, dict]:
     # 💬 загружаем хранилище и блок пользователя
     store = await load_my_words_data()
