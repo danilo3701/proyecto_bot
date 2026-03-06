@@ -616,6 +616,14 @@ class LoggingMiddleware(BaseMiddleware):
         try:
             return await handler(event, data)
         except Exception as err:
+            if isinstance(err, TelegramForbiddenError):
+                logging.warning(
+                    "Suppressed TelegramForbiddenError (bot blocked by user): event=%s user_id=%s",
+                    event.__class__.__name__,
+                    getattr(getattr(event, "from_user", None), "id", None),
+                )
+                return
+
             # 💬 берём последние два имени из handler_history
             curr = handler_history[-1] if handler_history else "unknown"
             prev = handler_history[-2] if len(handler_history) >= 2 else "none"
@@ -662,7 +670,7 @@ class LoggingMiddleware(BaseMiddleware):
                     admin_text,
                     request_timeout=120
                 )  # 💬 увеличиваем таймаут, чтобы не падать на сетевых лагов Telegram
-            except (TelegramBadRequest, TelegramNetworkError, asyncio.TimeoutError):
+            except (TelegramBadRequest, TelegramNetworkError, TelegramForbiddenError, asyncio.TimeoutError):
                 pass  # 💬 если Telegram тупит/таймаутит = не роняем бота из-за репорта админу
 
 
@@ -6658,7 +6666,12 @@ def build_mywords_menu_kb() -> InlineKeyboardMarkup:
 
 def build_stop_kb() -> ReplyKeyboardMarkup:
     # 💬 кнопка выхода во время обучения
-    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⏹ Стоп")]], resize_keyboard=True)
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="⏹ Стоп")]],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        is_persistent=True,
+    )
 
 def build_offer_continue_kb() -> InlineKeyboardMarkup:
     # 💬 offer_continue как в vocab: продолжить или домой
@@ -6965,6 +6978,81 @@ async def _mywords_reset_anchor_message(message: Message, state: FSMContext):
     await state.update_data(mywords_ui_msg_id=None)
 
 
+async def _mywords_show_stop_hint_once(message: Message, state: FSMContext):
+    # 💬 отдельное сообщение с кнопкой Stop без автоудаления: клавиша не должна пропадать
+    data = await state.get_data()
+    if data.get("mywords_stop_hint_msg_id"):
+        return
+
+    try:
+        hint = await message.answer("⏹ Нажми «Стоп», чтобы выйти в меню.", reply_markup=build_stop_kb())
+        await state.update_data(mywords_stop_hint_msg_id=hint.message_id)
+    except Exception:
+        pass
+
+
+async def _mywords_drop_stop_hint(chat_id: int, state: FSMContext):
+    # 💬 удаляем служебный hint с кнопкой Stop
+    data = await state.get_data()
+    hint_id = data.get("mywords_stop_hint_msg_id")
+    if hint_id:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=int(hint_id))
+        except Exception:
+            pass
+
+    await state.update_data(mywords_stop_hint_msg_id=None)
+
+
+async def _mywords_cleanup_active_learning_ui(message: Message, state: FSMContext):
+    # 💬 при Stop очищаем текущие quiz/text сообщения и маркеры сессии
+    data = await state.get_data()
+    chat_id = message.chat.id
+
+    poll_msg_id = data.get("mywords_current_poll_msg_id")
+    if poll_msg_id:
+        try:
+            await bot.stop_poll(chat_id=chat_id, message_id=int(poll_msg_id))
+        except Exception:
+            pass
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=int(poll_msg_id))
+        except Exception:
+            pass
+
+    prompt_id = data.get("mywords_last_prompt_id")
+    if prompt_id:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=int(prompt_id))
+        except Exception:
+            pass
+
+    await _mywords_drop_stop_hint(chat_id, state)
+
+    await state.update_data(
+        mywords_current_poll_id=None,
+        mywords_current_poll_msg_id=None,
+        mywords_current_correct_id=None,
+        mywords_current_word_id=None,
+        mywords_last_prompt_id=None,
+        mywords_quiz_queue=[],
+        mywords_text_queue=[],
+    )
+
+
+async def _mywords_reset_anchor_message(message: Message, state: FSMContext):
+    # 💬 после Stop создаём новый anchor ниже в чате, старый удаляем
+    data = await state.get_data()
+    ui_msg_id = data.get("mywords_ui_msg_id")
+    if ui_msg_id:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=int(ui_msg_id))
+        except Exception:
+            pass
+
+    await state.update_data(mywords_ui_msg_id=None)
+
+
 async def mywords_menu(message: Message, state: FSMContext):
     # 💬 показываем меню «Мои слова» (всегда через редактирование "якоря")
     user_id = str(message.chat.id)
@@ -7139,6 +7227,7 @@ async def mywords_send_next_text(message: Message, state: FSMContext):
 
     if not queue:
         mode = data.get("mywords_mode", "new")
+        await _mywords_drop_stop_hint(message.chat.id, state)
         await _mywords_temp_note(
             message,
             "🎉 Готово! Возвращаю в список категорий.",
@@ -7634,9 +7723,9 @@ async def mywords_choose_cat_new_cb(callback: CallbackQuery, state: FSMContext):
     await _mywords_temp_note(
         callback.message,
         f"📖 Категория: {category}\n\nСтадия 1 = quiz.",
-        delay_sec=2,
-        reply_markup=build_stop_kb()
-    )  # 💬 сообщение исчезнет, кнопка Стоп останется
+        delay_sec=2
+    )  # 💬 сообщение исчезнет
+    await _mywords_show_stop_hint_once(callback.message, state)  # 💬 кнопка Stop должна жить весь цикл quiz/text
 
     return await mywords_send_next_quiz(callback.message, state)
 
@@ -7686,9 +7775,9 @@ async def mywords_choose_cat_repeat_cb(callback: CallbackQuery, state: FSMContex
     await _mywords_temp_note(
         callback.message,
         f"🔁 Категория: {category}\n\nПовтор = только text.",
-        delay_sec=2,
-        reply_markup=build_stop_kb()
-    )  # 💬 сообщение исчезнет, кнопка Стоп останется
+        delay_sec=2
+    )  # 💬 сообщение исчезнет
+    await _mywords_show_stop_hint_once(callback.message, state)
 
     return await mywords_start_text_stage(callback.message, state)
 
@@ -7711,10 +7800,7 @@ async def mywords_stop_any(message: Message, state: FSMContext):
         "Ок, стоп.",
         delay_sec=1,
         reply_markup=ReplyKeyboardRemove()
-    )  # 💬 короткое подтверждение + скрыть ReplyKeyboard
-
-    if mode in {"new", "repeat"}:
-        return await mywords_show_categories(message, state, mode)
+    )  # 💬 короткое подтверждение + скрываем клавиатуру
     return await mywords_menu(message, state)
 
 
@@ -7861,6 +7947,7 @@ async def mywords_text_answer(message: Message, state: FSMContext):
         if passed >= session_words and queue:
             await state.update_data(mywords_text_queue=queue, mywords_current_word_id=None)
             # 💬 убрать ReplyKeyboard (Стоп), и не оставлять мусор в чате
+            await _mywords_drop_stop_hint(message.chat.id, state)
             await _mywords_temp_note(
                 message,
                 "✅",
