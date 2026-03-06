@@ -43,7 +43,7 @@ WINDOW_END = os.getenv("WINDOW_END", "17:00")      # HH:MM  # 💬 14:00–17:00
 WEEKDAYS_ONLY = True  # Mon-Fri
 
 # 💬 “Тихий день”: иногда вообще 0 уведомлений (правдоподобие)
-QUIET_DAY_PROB = 0.40  # 40% дней тишина
+QUIET_DAY_PROB = float(os.getenv("QUIET_DAY_PROB", "0.10"))  # 10% дней тишина
 
 # 💬 Редкие утренние всплески по будням
 MORNING_BURST_PROB = 0.12  # 12% уведомлений могут попасть утром
@@ -52,6 +52,10 @@ MORNING_END   = "11:20"
 
 # 💬 Чтобы не долбило слишком часто
 COOLDOWN_MINUTES = 18  # минимум 18 минут между уведомлениями
+
+# 💬 Сколько событий в день (будни) — диапазон для новой логики
+EVENTS_PER_DAY_MIN = int(os.getenv("EVENTS_PER_DAY_MIN", "3"))
+EVENTS_PER_DAY_MAX = int(os.getenv("EVENTS_PER_DAY_MAX", "6"))
 
 # 💬 Скільки рандом-сповіщень на день (для кожного увімкненого користувача)
 PINGS_PER_DAY = int(os.getenv("PINGS_PER_DAY", "6"))
@@ -1015,25 +1019,38 @@ def _pick_weekday_event_count_variant_b(
 ) -> int:
     """
     Variant B (только для будней):
-    - 30% -> 0 событий
-    - 70% -> выбираем 1/2/3 как 50% / 40% / 10%
-
-    Итог по будням:
-    - N=0: 30%
-    - N=1: 35%
-    - N=2: 28%
-    - N=3: 7%
+    - QUIET_DAY_PROB -> 0 событий
+    - иначе распределение 3–6:
+      3: 30%
+      4: 35%
+      5: 20%
+      6: 5%
     """
     quiet_roll = random.random() if random_quiet_roll is None else float(random_quiet_roll)
-    if quiet_roll < 0.30:
+    if quiet_roll < float(QUIET_DAY_PROB):
         return 0
 
-    count_roll = random.random() if random_count_roll is None else float(random_count_roll)
-    if count_roll < 0.50:
-        return 1
-    if count_roll < 0.90:
-        return 2
-    return 3
+    min_k = max(1, int(EVENTS_PER_DAY_MIN))
+    max_k = max(min_k, int(EVENTS_PER_DAY_MAX))
+
+    weights = [
+        (3, 0.30),
+        (4, 0.35),
+        (5, 0.20),
+        (6, 0.05),
+    ]
+    choices = [(k, w) for k, w in weights if min_k <= k <= max_k]
+    if not choices:
+        return min_k
+
+    total = sum(w for _, w in choices)
+    roll = (random.random() if random_count_roll is None else float(random_count_roll)) * total
+    acc = 0.0
+    for k, w in choices:
+        acc += w
+        if roll <= acc:
+            return k
+    return choices[-1][0]
 
 
 def _build_events_from_active_groups(
@@ -1097,8 +1114,8 @@ def _event_delivery_decision(
     except Exception:
         last_min = None
 
-    if last_min is not None and (now_epoch_min - last_min) < 25:
-        return False, "cooldown_lt_25m"
+    if last_min is not None and (now_epoch_min - last_min) < int(COOLDOWN_MINUTES):
+        return False, "cooldown_lt_cfg"
 
     return True, "send"
 
@@ -1176,7 +1193,28 @@ def _build_audit_test_users(
     return result
 
 
-async def _send_alert(user_chat_id: int, text: str) -> None:
+def _resolve_office_service_titles(
+    prov: str,
+    office_id: str | None,
+    svc_id: str | None,
+) -> tuple[str, str]:
+    office_title = office_id or "не обрано"
+    svc_title = svc_id or "не обрано"
+
+    if prov in PROVINCES:
+        for o in PROVINCES[prov].get("offices", []):
+            if o.get("id") == office_id:
+                office_title = o.get("title", office_title)
+                break
+        for s in PROVINCES[prov].get("services", []):
+            if s.get("id") == svc_id:
+                svc_title = s.get("title", svc_title)
+                break
+
+    return office_title, svc_title
+
+
+async def _send_alert_result(user_chat_id: int, text: str) -> tuple[bool, str | None]:
     try:
         await bot.send_message(
             chat_id=user_chat_id,
@@ -1188,6 +1226,14 @@ async def _send_alert(user_chat_id: int, text: str) -> None:
             ])
         )
         # 💬 ВАЖНО: ничего не удаляем. Уведомление остаётся в чате.
+        return True, None
+    except Exception as exc:
+        return False, exc.__class__.__name__
+
+
+async def _send_alert(user_chat_id: int, text: str) -> None:
+    try:
+        await _send_alert_result(user_chat_id, text)
     except Exception:
         pass
 
@@ -1284,11 +1330,11 @@ async def notifier_loop() -> None:
     - Добавляем "тишину" (иногда день без сообщений), "частичный пропуск" и cooldown, чтобы не палился паттерн.
     """
 
-    def _window_pool_minutes() -> list[int]:
+    def _window_pool_minutes(start_hhmm: str, end_hhmm: str) -> list[int]:
         # 💬 Берём окно из _generate_minutes_for_today(), но тут нам нужен просто список минут
         try:
-            sh, sm = [int(x) for x in WINDOW_START.split(":", 1)]
-            eh, em = [int(x) for x in WINDOW_END.split(":", 1)]
+            sh, sm = [int(x) for x in start_hhmm.split(":", 1)]
+            eh, em = [int(x) for x in end_hhmm.split(":", 1)]
         except Exception:
             sh, sm, eh, em = 14, 0, 17, 0  # 💬 fallback
 
@@ -1301,6 +1347,48 @@ async def notifier_loop() -> None:
         if not pool:
             pool = [start_min]
         return pool
+
+    def _build_events_biased(
+        *,
+        pool_main: list[int],
+        pool_morning: list[int],
+        active_groups: list[tuple[str, str, str]],
+        n_events: int,
+        morning_prob: float,
+    ) -> list[dict[str, Any]]:
+        if n_events <= 0 or not active_groups:
+            return []
+
+        used: set[int] = set()
+        events: list[dict[str, Any]] = []
+        max_tries = n_events * 8
+        tries = 0
+
+        for _ in range(n_events):
+            cand = None
+            while tries < max_tries:
+                tries += 1
+                use_morning = (random.random() < float(morning_prob)) and bool(pool_morning)
+                pool = pool_morning if use_morning else pool_main
+                if not pool:
+                    pool = pool_morning or pool_main
+                if not pool:
+                    break
+                cand = random.choice(pool)
+                if cand in used:
+                    continue
+                used.add(cand)
+                break
+
+            if cand is None:
+                break
+
+            prov, office_id, service_id = random.choice(active_groups)
+            events.append(
+                {"min": int(cand), "prov": prov, "office_id": office_id, "service_id": service_id}
+            )
+
+        return events
 
     def _pick_daily_events(store: dict, day_key: str) -> dict:
         """
@@ -1335,11 +1423,13 @@ async def notifier_loop() -> None:
             groups.add((str(prov), str(office), str(svc)))
 
 
-        pool = _window_pool_minutes()
+        pool_main = _window_pool_minutes(WINDOW_START, WINDOW_END)
+        pool_morning = _window_pool_minutes(MORNING_START, MORNING_END)
+        total_pool = sorted(set(pool_main + pool_morning))
 
         # 💬 Variant B по будням:
-        #    30% = 0
-        #    70% = 1/2/3 по 50/40/10
+        #    QUIET_DAY_PROB = 0
+        #    иначе 3–6 по весам
         n_events = _pick_weekday_event_count_variant_b()
 
 
@@ -1349,12 +1439,14 @@ async def notifier_loop() -> None:
             return daily_events[day_key]
 
         # 💬 Выбираем минуты и группы
-        n_events = min(n_events, 3)
+        n_events = min(n_events, len(total_pool))
         groups_list = list(groups)
-        events = _build_events_from_active_groups(
-            pool_minutes=pool,
+        events = _build_events_biased(
+            pool_main=pool_main,
+            pool_morning=pool_morning,
             active_groups=groups_list,
             n_events=n_events,
+            morning_prob=float(MORNING_BURST_PROB),
         )
 
         daily_events[day_key] = {"events": events, "fired": []}
@@ -1382,6 +1474,11 @@ async def notifier_loop() -> None:
 
             store = _load_json(DATA_PATH)
             users = store.get("users", {}) or {}
+            stats = store.setdefault("stats", {})
+            day_stats = stats.setdefault(key, {})
+            day_stats.setdefault("alerts_attempted", 0)
+            day_stats.setdefault("alerts_sent", 0)
+            day_stats.setdefault("alerts_skipped", {})
 
             # 💬 Получаем/создаём события дня
             day_plan = _pick_daily_events(store, key)
@@ -1457,10 +1554,15 @@ async def notifier_loop() -> None:
                         now_epoch_min,
                         apply_random_skip=True,
                     )
+                    day_stats["alerts_attempted"] += 1
                     if not should_send:
+                        skipped = day_stats.setdefault("alerts_skipped", {})
+                        skipped[_reason] = int(skipped.get(_reason, 0)) + 1
+                        changed = True
                         continue
 
                     u["last_alert_min"] = now_epoch_min
+                    day_stats["alerts_sent"] += 1
                     changed = True
 
                     # 💬 лёгкий джиттер 0–120 сек, чтобы рассылка выглядела "живой"
@@ -1566,18 +1668,11 @@ async def admin_test_notify(message: Message):
     office_id = u.get("office_id")
     svc_id = u.get("service_id")
 
-    office_title = office_id or "не обрано"
-    svc_title = svc_id or "не обрано"
-
-    if prov in PROVINCES:
-        for o in PROVINCES[prov].get("offices", []):
-            if o.get("id") == office_id:
-                office_title = o.get("title", office_title)
-                break
-        for s in PROVINCES[prov].get("services", []):
-            if s.get("id") == svc_id:
-                svc_title = s.get("title", svc_title)
-                break
+    office_title, svc_title = _resolve_office_service_titles(
+        str(prov),
+        office_id,
+        svc_id,
+    )
 
     alert_text = (
         "🧪 <b>Тест сповіщення</b>\n\n"
@@ -1596,6 +1691,87 @@ async def admin_test_notify(message: Message):
     except Exception:
         pass
 
+
+@router.message(F.text.startswith("/testnotifyall"))
+async def admin_test_notify_all(message: Message):
+    """
+    Массовый тест уведомлений для всех пользователей с enabled=True.
+    Команда доступна только админу.
+    """
+    if not _is_admin_chat(message.chat.id):
+        await message.answer("⛔️ Команда доступна только админу.")
+        return
+
+    store = _load_json(DATA_PATH)
+    users = store.get("users", {}) or {}
+
+    enabled_users: list[tuple[str, dict]] = []
+    for uid, u0 in users.items():
+        u = _ensure_user(store, str(uid))
+        if u.get("enabled"):
+            enabled_users.append((str(uid), u))
+
+    if not enabled_users:
+        await message.answer("ℹ️ Нет пользователей с включенными уведомлениями.")
+        return
+
+    await message.answer(
+        f"🧪 Запуск массового теста: {len(enabled_users)} пользователей.\n"
+        "Отправка началась..."
+    )
+
+    sent_ok = 0
+    sent_failed = 0
+    error_lines: list[str] = []
+    error_limit = 10
+
+    for uid, u in enabled_users:
+        prov = u.get("province") or "не обрано"
+        office_id = u.get("office_id")
+        svc_id = u.get("service_id")
+
+        office_title, svc_title = _resolve_office_service_titles(
+            str(prov),
+            office_id,
+            svc_id,
+        )
+
+        alert_text = (
+            "🧪 <b>Тест сповіщення (масова перевірка)</b>\n\n"
+            f"<i>Провінція:</i> <b>{_h(str(prov))}</b>\n"
+            f"<i>Офіс:</i> <b>{_h(str(office_title))}</b>\n"
+            f"<i>Послуга:</i> <b>{_h(str(svc_title))}</b>\n\n"
+            "Якщо це прийшло = доставка працює.\n"
+            "<b>Це тест, не реальний слот.</b>"
+        )
+
+        ok, err = await _send_alert_result(int(uid), alert_text)
+        if ok:
+            sent_ok += 1
+        else:
+            sent_failed += 1
+            if len(error_lines) < error_limit:
+                err_text = err or "unknown_error"
+                error_lines.append(f"• {uid}: {err_text}")
+
+        await asyncio.sleep(0.08)
+
+    report = (
+        "<b>🧪 Массовий тест завершено</b>\n\n"
+        f"<i>Усього:</i> <b>{len(enabled_users)}</b>\n"
+        f"<i>Успішно:</i> <b>{sent_ok}</b>\n"
+        f"<i>Помилок:</i> <b>{sent_failed}</b>\n\n"
+        "<b>Перші помилки:</b>\n"
+        + ("\n".join(error_lines) if error_lines else "<i>—</i>")
+    )
+
+    await message.answer(report, parse_mode="HTML")
+
+    try:
+        await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+    except Exception:
+        pass
+
 @router.message(F.text.startswith("/stats"))
 async def admin_stats(message: Message):
 
@@ -1609,6 +1785,9 @@ async def admin_stats(message: Message):
     starts = int(day.get("starts", 0) or 0)
     new_users = int(day.get("new_users", 0) or 0)
     active_users = int(day.get("active_users", 0) or 0)
+    alerts_attempted = int(day.get("alerts_attempted", 0) or 0)
+    alerts_sent = int(day.get("alerts_sent", 0) or 0)
+    alerts_skipped = day.get("alerts_skipped", {}) or {}
 
     total_users = len(users)
 
@@ -1645,13 +1824,21 @@ async def admin_stats(message: Message):
     for sid in ["ua_card", "huellas_tie", "recogida_tie"]:
         svc_lines += f"<i>• { _h(svc_names.get(sid, sid)) }:</i> <b>{enabled_by_service.get(sid, 0)}</b>\n"
 
+    skipped_lines = ""
+    if alerts_skipped:
+        parts = [f"<i>• {k}:</i> <b>{v}</b>" for k, v in sorted(alerts_skipped.items())]
+        skipped_lines = "\n".join(parts)
+
     text = (
         "<b>📊 Stats</b>\n\n"
         f"<i>Дата (Madrid):</i> <b>{_h(day_key)}</b>\n\n"
         "<b>За сьогодні</b>\n"
         f"<i>• /start натиснули:</i> <b>{starts}</b>\n"
         f"<i>• Нові користувачі:</i> <b>{new_users}</b>\n"
-        f"<i>• Активні (унікальні):</i> <b>{active_users}</b>\n\n"
+        f"<i>• Активні (унікальні):</i> <b>{active_users}</b>\n"
+        f"<i>• Alerts attempted:</i> <b>{alerts_attempted}</b>\n"
+        f"<i>• Alerts sent:</i> <b>{alerts_sent}</b>\n"
+        f"{('<b>• Alerts skipped</b>\\n' + skipped_lines) if skipped_lines else ''}\n\n"
         "<b>Зараз у базі</b>\n"
         f"<i>• Всього користувачів:</i> <b>{total_users}</b>\n"
         f"<i>• Увімкнули сповіщення:</i> <b>{enabled_total}</b>\n\n"
@@ -1722,7 +1909,7 @@ async def admin_audit_notify(message: Message):
         "province_mismatch": "❌ province_mismatch",
         "service_mismatch": "❌ service_mismatch",
         "office_mismatch": "❌ office_mismatch",
-        "cooldown_lt_25m": "⏱ cooldown<25m",
+        "cooldown_lt_cfg": f"⏱ cooldown<{int(COOLDOWN_MINUTES)}m",
         "random_skip_15pct": "🎲 random_skip_15pct",
     }
 
