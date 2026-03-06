@@ -1141,6 +1141,14 @@ def _parse_amount_to_cents(raw_amount: str) -> int:
     return int((dec * 100).quantize(Decimal("1")))
 
 
+def _is_payouts_near_miss(raw_text: str) -> bool:
+    s = (raw_text or "").strip()
+    if not s or s.startswith("/"):
+        return False
+    # Пример near-miss: "'/payouts" (лишний символ перед командой).
+    return s.lstrip("'\"`").startswith("/payouts")
+
+
 async def _apply_owner_payout(message: Message, referrer_id: str, amount_cents: int, note: str = "") -> None:
     async with _REF_LOCK:
         d = _load_ref_data_sync()
@@ -1196,10 +1204,19 @@ async def _apply_owner_payout_rollback(message: Message, referrer_id: str, amoun
 
 @router.message(F.text & ~F.text.startswith("/"))
 async def cmd_payout_input(message: Message):
+    raw = (message.text or "").strip()
+    payout_like = ("payout" in raw.lower()) or _is_payouts_near_miss(raw)
+
+    if _is_payouts_near_miss(raw):
+        logging.warning(
+            "[ref.payouts.near_miss] user_id=%s raw=%r hint='/payouts'",
+            getattr(getattr(message, "from_user", None), "id", None),
+            raw,
+        )
+
     # 💬 админ-меню ожидание суммы (секретная команда)
     if _ADMIN_MENU_WAIT.get(message.from_user.id):
         payload = _ADMIN_MENU_WAIT.pop(message.from_user.id, None) or {}
-        raw = (message.text or "").strip()
         amount_cents = _parse_amount_to_cents(raw)
         if amount_cents <= 0:
             await message.answer("Сумма должна быть > 0. Используйте 12.50 или cents:1234")
@@ -1221,11 +1238,23 @@ async def cmd_payout_input(message: Message):
 
     # 💬 Ловим только если владелец в режиме ожидания ввода
     if OWNER_USER_ID <= 0 or message.from_user.id != OWNER_USER_ID:
+        if payout_like:
+            logging.info(
+                "[ref.payout.input.skip] reason=not_owner user_id=%s owner_user_id=%s raw=%r",
+                message.from_user.id,
+                OWNER_USER_ID,
+                raw,
+            )
         return
     if not _PAYOUT_WAIT.get(message.from_user.id):
+        if payout_like:
+            logging.info(
+                "[ref.payout.input.skip] reason=not_waiting user_id=%s raw=%r",
+                message.from_user.id,
+                raw,
+            )
         return
 
-    raw = (message.text or "").strip()
     parts = raw.split(maxsplit=2)
     if len(parts) < 2:
         await message.answer("Неверный формат. Нужно: user_id сумма [note]")
@@ -1260,19 +1289,41 @@ async def cmd_payout_input(message: Message):
 async def cmd_payouts(message: Message):
     raw = (message.text or "").strip()
     parts = raw.split()
+    user_id = getattr(getattr(message, "from_user", None), "id", None)
+
+    logging.info(
+        "[ref.payouts.cmd] enter user_id=%s raw=%r parts=%s",
+        user_id,
+        raw,
+        parts,
+    )
 
     # Секретная команда без параметров: открываем админ-меню
     if len(parts) == 1:
+        logging.info("[ref.payouts.cmd] open_admin_menu user_id=%s", user_id)
         _ADMIN_MENU_USERS.add(message.from_user.id)
         await _render_admin_ref_list(message, page=0, prefer_edit=False)
         return
 
     referrer_id = parts[1] if len(parts) >= 2 else ""
     if not str(referrer_id).isdigit():
+        logging.warning(
+            "[ref.payouts.cmd] invalid_format user_id=%s raw=%r parts=%s",
+            user_id,
+            raw,
+            parts,
+        )
         await message.answer("Формат: /payouts <referrer_user_id> [limit]")
         return
     limit = _safe_int(parts[2], 10) if len(parts) >= 3 else 10
     payouts = get_payouts(referrer_id=str(int(referrer_id)), limit=limit)
+    logging.info(
+        "[ref.payouts.cmd] list user_id=%s referrer_id=%s limit=%s records=%s",
+        user_id,
+        str(int(referrer_id)),
+        limit,
+        len(payouts),
+    )
     lines = [f"💸 Выплаты referrer {referrer_id}:"]
     if not payouts:
         lines.append("— нет записей")

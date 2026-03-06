@@ -89,6 +89,7 @@ import hashlib  # 💬 короткие id для callback_data
 from aiogram.filters.command import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+from aiogram.dispatcher.event.bases import SkipHandler
 
 router = Router()
 
@@ -6523,4 +6524,5 @@ async def _topics_router_debug_seen(message: Message, state: FSMContext):
         )
     except Exception as e:
         logging.exception("[topics.router.seen] debug log exception: %s", e)
-    return
+    # 💬 важно: это только debug-хендлер, он не должен останавливать другие роутеры.
+    raise SkipHandler
