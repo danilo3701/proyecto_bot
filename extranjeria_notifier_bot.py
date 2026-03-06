@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import random
+import time
 import datetime as dt
 from zoneinfo import ZoneInfo
 from typing import Any
@@ -45,6 +46,11 @@ WEEKDAYS_ONLY = True  # Mon-Fri
 # 💬 “Тихий день”: иногда вообще 0 уведомлений (правдоподобие)
 QUIET_DAY_PROB = float(os.getenv("QUIET_DAY_PROB", "0.10"))  # 10% дней тишина
 
+# 💬 Тестовые уведомления: конфиг-гейты
+WELCOME_TEST_ENABLED = os.getenv("WELCOME_TEST_ENABLED", "1").strip() not in {"0", "false", "False"}
+TESTNOTIFY_ENABLED = os.getenv("TESTNOTIFY_ENABLED", "1").strip() not in {"0", "false", "False"}
+TESTNOTIFYALL_ENABLED = os.getenv("TESTNOTIFYALL_ENABLED", "0").strip() not in {"0", "false", "False"}
+
 # 💬 Редкие утренние всплески по будням
 MORNING_BURST_PROB = 0.12  # 12% уведомлений могут попасть утром
 MORNING_START = "09:10"
@@ -59,6 +65,11 @@ EVENTS_PER_DAY_MAX = int(os.getenv("EVENTS_PER_DAY_MAX", "6"))
 
 # 💬 Скільки рандом-сповіщень на день (для кожного увімкненого користувача)
 PINGS_PER_DAY = int(os.getenv("PINGS_PER_DAY", "6"))
+
+# 💬 Ограничение параллельных отправок (анти-фриз)
+SEND_CONCURRENCY = max(1, int(os.getenv("SEND_CONCURRENCY", "12")))
+_SEND_SEMAPHORE = asyncio.Semaphore(SEND_CONCURRENCY)
+TESTNOTIFYALL_DELAY_SEC = float(os.getenv("TESTNOTIFYALL_DELAY_SEC", "0.2"))
 
 # 💬 Авто-видалення сповіщення, щоб чат був чистий
 ALERT_DELETE_AFTER_SEC = int(os.getenv("ALERT_DELETE_AFTER_SEC", "180"))
@@ -1216,15 +1227,16 @@ def _resolve_office_service_titles(
 
 async def _send_alert_result(user_chat_id: int, text: str) -> tuple[bool, str | None]:
     try:
-        await bot.send_message(
-            chat_id=user_chat_id,
-            text=text,
-            parse_mode="HTML",  # 💬 можно жирный/курсив в тексте уведомления
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🌐 Відкрити сайт", url=BOOKING_URL)],
-                [InlineKeyboardButton(text="🧷 Меню", callback_data="ui:main")],
-            ])
-        )
+        async with _SEND_SEMAPHORE:
+            await bot.send_message(
+                chat_id=user_chat_id,
+                text=text,
+                parse_mode="HTML",  # 💬 можно жирный/курсив в тексте уведомления
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🌐 Відкрити сайт", url=BOOKING_URL)],
+                    [InlineKeyboardButton(text="🧷 Меню", callback_data="ui:main")],
+                ])
+            )
         # 💬 ВАЖНО: ничего не удаляем. Уведомление остаётся в чате.
         return True, None
     except Exception as exc:
@@ -1390,7 +1402,7 @@ async def notifier_loop() -> None:
 
         return events
 
-    def _pick_daily_events(store: dict, day_key: str) -> dict:
+    def _pick_daily_events(store: dict, day_key: str) -> tuple[dict, bool]:
         """
         daily_events[day_key] = {
           "events": [{"min": 860, "prov": "...", "office_id": "...", "service_id": "..."}],
@@ -1401,7 +1413,7 @@ async def notifier_loop() -> None:
 
         existing = daily_events.get(day_key)
         if isinstance(existing, dict) and isinstance(existing.get("events"), list):
-            return existing
+            return existing, False
 
         users = store.get("users", {}) or {}
 
@@ -1436,7 +1448,7 @@ async def notifier_loop() -> None:
         # 💬 Если нет групп/нет пользователей = тишина
         if not groups or n_events == 0:
             daily_events[day_key] = {"events": [], "fired": []}
-            return daily_events[day_key]
+            return daily_events[day_key], True
 
         # 💬 Выбираем минуты и группы
         n_events = min(n_events, len(total_pool))
@@ -1450,7 +1462,7 @@ async def notifier_loop() -> None:
         )
 
         daily_events[day_key] = {"events": events, "fired": []}
-        return daily_events[day_key]
+        return daily_events[day_key], True
 
     async def _send_after_delay(chat_id: int, text: str, delay_sec: float) -> None:
         try:
@@ -1461,6 +1473,7 @@ async def notifier_loop() -> None:
             pass
 
     while True:
+        loop_started = time.monotonic()
         try:
             now = dt.datetime.now(MADRID_TZ)
             # 💬 По выходным вообще не шлём (и не создаём минуты)
@@ -1481,10 +1494,11 @@ async def notifier_loop() -> None:
             day_stats.setdefault("alerts_skipped", {})
 
             # 💬 Получаем/создаём события дня
-            day_plan = _pick_daily_events(store, key)
+            day_plan, plan_changed = _pick_daily_events(store, key)
             # 💬 ВАЖНО: фиксируем дневной план сразу.
             # 💬 Иначе при рестарте он перегенерится, и “паттерн” поплывёт.
-            _save_json_atomic(DATA_PATH, store)
+            if plan_changed:
+                _save_json_atomic(DATA_PATH, store)
 
             events = day_plan.get("events", []) or []
             fired = set(day_plan.get("fired", []) or [])
@@ -1576,6 +1590,10 @@ async def notifier_loop() -> None:
             # 💬 не падаем из-за одной ошибки — цикл живёт дальше
             pass
 
+        loop_elapsed = time.monotonic() - loop_started
+        if loop_elapsed > 20:
+            print(f"[notifier_loop] tick_slow={loop_elapsed:.1f}s")
+
         await asyncio.sleep(20)
 
 
@@ -1656,6 +1674,9 @@ async def admin_test_notify(message: Message):
     💬 Ручной тест уведомления:
     /testnotify <ключ>
     """
+    if not TESTNOTIFY_ENABLED:
+        await message.answer("ℹ️ /testnotify отключено конфигом.")
+        return
 
 
 
@@ -1700,6 +1721,9 @@ async def admin_test_notify_all(message: Message):
     """
     if not _is_admin_chat(message.chat.id):
         await message.answer("⛔️ Команда доступна только админу.")
+        return
+    if not TESTNOTIFYALL_ENABLED:
+        await message.answer("ℹ️ /testnotifyall отключено конфигом.")
         return
 
     store = _load_json(DATA_PATH)
@@ -1754,7 +1778,7 @@ async def admin_test_notify_all(message: Message):
                 err_text = err or "unknown_error"
                 error_lines.append(f"• {uid}: {err_text}")
 
-        await asyncio.sleep(0.08)
+        await asyncio.sleep(TESTNOTIFYALL_DELAY_SEC)
 
     report = (
         "<b>🧪 Массовий тест завершено</b>\n\n"
@@ -2164,7 +2188,7 @@ async def cb_sub_check(call: CallbackQuery):
     u["enabled"] = True
 
     # 💬 одноразовый автотест через 5 минут после первого включения
-    should_schedule_welcome_test = not bool(u.get("welcome_test_sent"))
+    should_schedule_welcome_test = (not bool(u.get("welcome_test_sent"))) and bool(WELCOME_TEST_ENABLED)
     if should_schedule_welcome_test:
         u["welcome_test_sent"] = True
 
