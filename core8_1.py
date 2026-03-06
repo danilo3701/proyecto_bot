@@ -6933,6 +6933,50 @@ async def _mywords_temp_note(
     except Exception:
         pass
 
+async def _mywords_cleanup_active_learning_ui(message: Message, state: FSMContext):
+    # 💬 удаляем активные quiz/text-сообщения, чтобы Stop не засорял чат
+    data = await state.get_data()
+    chat_id = message.chat.id
+
+    poll_msg_id = data.get("mywords_current_poll_msg_id")
+    if poll_msg_id:
+        try:
+            await bot.stop_poll(chat_id=chat_id, message_id=int(poll_msg_id))
+        except Exception:
+            pass
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=int(poll_msg_id))
+        except Exception:
+            pass
+
+    prompt_id = data.get("mywords_last_prompt_id")
+    if prompt_id:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=int(prompt_id))
+        except Exception:
+            pass
+
+    await state.update_data(
+        mywords_current_poll_id=None,
+        mywords_current_poll_msg_id=None,
+        mywords_current_correct_id=None,
+        mywords_current_word_id=None,
+        mywords_last_prompt_id=None,
+        mywords_quiz_queue=[],
+        mywords_text_queue=[],
+    )
+
+async def _mywords_reset_anchor_message(message: Message, state: FSMContext):
+    # 💬 после Stop лучше показывать экран внизу чата: удаляем старый "якорь" и создаём новый
+    data = await state.get_data()
+    ui_msg_id = data.get("mywords_ui_msg_id")
+    if ui_msg_id:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=int(ui_msg_id))
+        except Exception:
+            pass
+    await state.update_data(mywords_ui_msg_id=None)
+
 
 async def _mywords_show_stop_hint_once(message: Message, state: FSMContext):
     # 💬 отдельное сообщение с кнопкой Stop без автоудаления: клавиша не должна пропадать
@@ -7744,6 +7788,9 @@ async def mywords_choose_cat_repeat_cb(callback: CallbackQuery, state: FSMContex
 @dp.message(StateFilter(LessonStates.mywords_quiz, LessonStates.mywords_text), F.text == "⏹ Стоп")
 @track_handler
 async def mywords_stop_any(message: Message, state: FSMContext):
+    data = await state.get_data()
+    mode = str(data.get("mywords_mode", "") or "").strip().lower()
+
     await _mywords_try_delete_user_message(message)
     await _mywords_cleanup_active_learning_ui(message, state)
     await _mywords_reset_anchor_message(message, state)
