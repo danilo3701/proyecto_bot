@@ -69,6 +69,8 @@ PINGS_PER_DAY = int(os.getenv("PINGS_PER_DAY", "6"))
 # 💬 Ограничение параллельных отправок (анти-фриз)
 SEND_CONCURRENCY = max(1, int(os.getenv("SEND_CONCURRENCY", "12")))
 _SEND_SEMAPHORE = asyncio.Semaphore(SEND_CONCURRENCY)
+# 💬 Таймаут на одну отправку, чтобы не зависать в semaphore
+SEND_TIMEOUT_SEC = float(os.getenv("SEND_TIMEOUT_SEC", "8.0"))
 TESTNOTIFYALL_DELAY_SEC = float(os.getenv("TESTNOTIFYALL_DELAY_SEC", "0.2"))
 
 # 💬 Авто-видалення сповіщення, щоб чат був чистий
@@ -1228,15 +1230,21 @@ def _resolve_office_service_titles(
 async def _send_alert_result(user_chat_id: int, text: str) -> tuple[bool, str | None]:
     try:
         async with _SEND_SEMAPHORE:
-            await bot.send_message(
-                chat_id=user_chat_id,
-                text=text,
-                parse_mode="HTML",  # 💬 можно жирный/курсив в тексте уведомления
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🌐 Відкрити сайт", url=BOOKING_URL)],
-                    [InlineKeyboardButton(text="🧷 Меню", callback_data="ui:main")],
-                ])
-            )
+            try:
+                await asyncio.wait_for(
+                    bot.send_message(
+                        chat_id=user_chat_id,
+                        text=text,
+                        parse_mode="HTML",  # 💬 можно жирный/курсив в тексте уведомления
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="🌐 Відкрити сайт", url=BOOKING_URL)],
+                            [InlineKeyboardButton(text="🧷 Меню", callback_data="ui:main")],
+                        ])
+                    ),
+                    timeout=float(SEND_TIMEOUT_SEC),
+                )
+            except asyncio.TimeoutError:
+                return False, "timeout"
         # 💬 ВАЖНО: ничего не удаляем. Уведомление остаётся в чате.
         return True, None
     except Exception as exc:
@@ -1245,7 +1253,9 @@ async def _send_alert_result(user_chat_id: int, text: str) -> tuple[bool, str | 
 
 async def _send_alert(user_chat_id: int, text: str) -> None:
     try:
-        await _send_alert_result(user_chat_id, text)
+        ok, err = await _send_alert_result(user_chat_id, text)
+        if not ok:
+            print(f"[send_alert] failed chat_id={user_chat_id} err={err}")
     except Exception:
         pass
 
@@ -1529,9 +1539,7 @@ async def notifier_loop() -> None:
                 # 💬 фиксируем, что это событие уже отработали (важно при рестартах)
                 fired.add(stamp)
                 day_plan.setdefault("fired", []).append(stamp)
-                # 💬 ВАЖНО: фиксируем fired СРАЗУ, до рассылки
-                # 💬 Если будет redeploy/краш в середине отправки — событие не повторится
-                _save_json_atomic(DATA_PATH, store)
+                # 💬 ВАЖНО: не сохраняем внутри цикла — сохраняем один раз за тик
                 
                 changed = True
 
